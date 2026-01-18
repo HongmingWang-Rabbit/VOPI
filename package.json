@@ -1,0 +1,25 @@
+{
+  "name": "vopi-smart-frame-extractor",
+  "version": "1.0.0",
+  "description": "Smart frame extraction pipeline for product videos",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "extract": "node src/smartFrameExtractor/index.js",
+    "extract:help": "node src/smartFrameExtractor/index.js --help"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "sharp": "^0.33.0"
+  },
+  "keywords": [
+    "video",
+    "frame-extraction",
+    "product-photography",
+    "gemini",
+    "ai"
+  ],
+  "license": "MIT"
+}
