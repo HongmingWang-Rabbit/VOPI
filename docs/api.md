@@ -239,7 +239,9 @@ Lightweight endpoint for polling job status.
 
 ### DELETE /api/v1/jobs/:id
 
-Cancel a pending or in-progress job.
+Cancel a pending job. Uses atomic update to prevent race conditions.
+
+**Note**: Only jobs with `pending` status can be cancelled. Jobs that have already started processing cannot be cancelled.
 
 **Response** `200 OK`
 ```json
@@ -247,6 +249,14 @@ Cancel a pending or in-progress job.
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "cancelled",
   "message": "Job cancelled successfully"
+}
+```
+
+**Response** `400 Bad Request` (job already processing)
+```json
+{
+  "error": "Job cannot be cancelled - status is not pending",
+  "statusCode": 400
 }
 ```
 

@@ -103,6 +103,21 @@ combined_score = sharpness - (alpha × motion × 255)
 - **Motion**: Average pixel difference from previous frame (lower = still moment)
 - **Alpha**: Weight factor for motion penalty (default: 0.2)
 
+### Named Constants
+
+The service uses documented constants for all magic numbers:
+
+```typescript
+const SCORING_CONSTANTS = {
+  MOTION_COMPARISON_SIZE: 256,    // Image resize for motion comparison
+  MAX_PIXEL_VALUE: 255,           // For normalization
+  LOW_SHARPNESS_THRESHOLD: 5,     // Poor quality threshold
+  HIGH_MOTION_THRESHOLD: 0.2,     // High motion detection
+  LOW_MOTION_THRESHOLD: 0.1,      // Low motion detection
+  MIN_LOW_MOTION_FRAMES: 5,       // Minimum for good quality
+};
+```
+
 ### Configuration
 
 ```typescript
