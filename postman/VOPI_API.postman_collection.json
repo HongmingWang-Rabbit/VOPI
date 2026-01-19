@@ -1,0 +1,505 @@
+{
+  "info": {
+    "_postman_id": "vopi-api-collection",
+    "name": "VOPI API",
+    "description": "Video Object Processing Infrastructure API\n\nA Fastify microservice for video frame extraction and commercial image generation.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "x-api-key",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{API_KEY}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Liveness Check",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Check if the service is running"
+          },
+          "response": []
+        },
+        {
+          "name": "Readiness Check",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ready",
+              "host": ["{{baseUrl}}"],
+              "path": ["ready"]
+            },
+            "description": "Check if the service can handle requests (DB + Redis connectivity)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Health check endpoints (no authentication required)"
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "Create Job",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set('JOB_ID', response.id);",
+                  "    console.log('Job ID saved:', response.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"videoUrl\": \"https://example.com/video.mp4\",\n  \"config\": {\n    \"fps\": 10,\n    \"batchSize\": 30,\n    \"commercialVersions\": [\"transparent\", \"solid\", \"real\", \"creative\"],\n    \"aiCleanup\": true,\n    \"geminiModel\": \"gemini-2.0-flash\"\n  },\n  \"callbackUrl\": \"https://webhook.example.com/callback\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Create a new pipeline job to process a video.\n\n**Config Options:**\n- `fps`: Frames per second to extract (1-30, default: 10)\n- `batchSize`: Batch size for Gemini analysis (1-100, default: 30)\n- `commercialVersions`: Image versions to generate (transparent, solid, real, creative)\n- `aiCleanup`: Enable AI obstruction removal (default: true)\n- `geminiModel`: Gemini model to use (default: gemini-2.0-flash)"
+          },
+          "response": [
+            {
+              "name": "Job Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"videoUrl\": \"https://example.com/video.mp4\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/jobs",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "jobs"]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"pending\",\n  \"videoUrl\": \"https://example.com/video.mp4\",\n  \"config\": {\n    \"fps\": 10,\n    \"batchSize\": 30,\n    \"commercialVersions\": [\"transparent\", \"solid\", \"real\", \"creative\"],\n    \"aiCleanup\": true,\n    \"geminiModel\": \"gemini-2.0-flash\"\n  },\n  \"createdAt\": \"2024-01-19T12:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Job (Minimal)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set('JOB_ID', response.id);",
+                  "    console.log('Job ID saved:', response.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"videoUrl\": \"https://example.com/video.mp4\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Create a job with minimal configuration (uses all defaults)"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Job (S3 URL)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set('JOB_ID', response.id);",
+                  "    console.log('Job ID saved:', response.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"videoUrl\": \"s3://vopi-storage/videos/product-video.mp4\",\n  \"config\": {\n    \"fps\": 10,\n    \"commercialVersions\": [\"transparent\", \"solid\"]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Create a job with an S3 video URL"
+          },
+          "response": []
+        },
+        {
+          "name": "List Jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs?limit=20&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Number of jobs to return (1-100)"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Number of jobs to skip"
+                },
+                {
+                  "key": "status",
+                  "value": "completed",
+                  "description": "Filter by status",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all jobs with optional filtering by status"
+          },
+          "response": [
+            {
+              "name": "Jobs List",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/jobs",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "jobs"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"jobs\": [\n    {\n      \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n      \"status\": \"completed\",\n      \"videoUrl\": \"https://example.com/video.mp4\",\n      \"progress\": {\n        \"step\": \"completed\",\n        \"percentage\": 100\n      },\n      \"createdAt\": \"2024-01-19T12:00:00.000Z\",\n      \"updatedAt\": \"2024-01-19T12:05:00.000Z\"\n    }\n  ],\n  \"total\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Jobs (Filter by Status)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs?status=pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending",
+                  "description": "pending | downloading | extracting | scoring | classifying | generating | completed | failed | cancelled"
+                }
+              ]
+            },
+            "description": "List jobs filtered by status"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Job",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{JOB_ID}}"]
+            },
+            "description": "Get full job details including result"
+          },
+          "response": [
+            {
+              "name": "Completed Job",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "jobs", "{{JOB_ID}}"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"completed\",\n  \"videoUrl\": \"https://example.com/video.mp4\",\n  \"config\": {\n    \"fps\": 10,\n    \"batchSize\": 30,\n    \"commercialVersions\": [\"transparent\", \"solid\", \"real\", \"creative\"],\n    \"aiCleanup\": true\n  },\n  \"progress\": {\n    \"step\": \"completed\",\n    \"percentage\": 100,\n    \"totalSteps\": 6,\n    \"currentStep\": 6\n  },\n  \"result\": {\n    \"variantsDiscovered\": 4,\n    \"framesAnalyzed\": 15,\n    \"finalFrames\": [\n      \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/frames/product_1_variant_1.png\"\n    ],\n    \"commercialImages\": {\n      \"product_1_variant_1\": {\n        \"transparent\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/transparent.png\",\n        \"solid\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/solid.png\",\n        \"real\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/real.png\",\n        \"creative\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/creative.png\"\n      }\n    }\n  },\n  \"createdAt\": \"2024-01-19T12:00:00.000Z\",\n  \"updatedAt\": \"2024-01-19T12:05:00.000Z\",\n  \"startedAt\": \"2024-01-19T12:00:01.000Z\",\n  \"completedAt\": \"2024-01-19T12:05:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Job Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{JOB_ID}}", "status"]
+            },
+            "description": "Get lightweight job status (for polling)"
+          },
+          "response": [
+            {
+              "name": "In Progress",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/status",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "jobs", "{{JOB_ID}}", "status"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"classifying\",\n  \"progress\": {\n    \"step\": \"classifying\",\n    \"percentage\": 65,\n    \"message\": \"Processing batch 2/3\",\n    \"totalSteps\": 6,\n    \"currentStep\": 4\n  },\n  \"createdAt\": \"2024-01-19T12:00:00.000Z\",\n  \"updatedAt\": \"2024-01-19T12:03:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Cancel Job",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{JOB_ID}}"]
+            },
+            "description": "Cancel a pending job (only works for jobs in 'pending' status)"
+          },
+          "response": [
+            {
+              "name": "Job Cancelled",
+              "originalRequest": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "jobs", "{{JOB_ID}}"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"cancelled\",\n  \"message\": \"Job cancelled successfully\"\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Job management endpoints"
+    },
+    {
+      "name": "Results",
+      "item": [
+        {
+          "name": "Get Video Metadata",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/video",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{JOB_ID}}", "video"]
+            },
+            "description": "Get video metadata for a job"
+          },
+          "response": [
+            {
+              "name": "Video Metadata",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/video",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "jobs", "{{JOB_ID}}", "video"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"id\": \"660e8400-e29b-41d4-a716-446655440001\",\n  \"jobId\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"sourceUrl\": \"https://example.com/video.mp4\",\n  \"duration\": 12.5,\n  \"width\": 1920,\n  \"height\": 1080,\n  \"fps\": 30,\n  \"codec\": \"h264\",\n  \"metadata\": {\n    \"filename\": \"video.mp4\",\n    \"duration\": 12.5,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"fps\": 30,\n    \"codec\": \"h264\"\n  },\n  \"createdAt\": \"2024-01-19T12:00:01.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get All Frames",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/frames",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{JOB_ID}}", "frames"]
+            },
+            "description": "Get all extracted frames for a job"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Final Frames",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/frames/final",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{JOB_ID}}", "frames", "final"]
+            },
+            "description": "Get final selected frames (one per variant)"
+          },
+          "response": [
+            {
+              "name": "Final Frames",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/frames/final",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "jobs", "{{JOB_ID}}", "frames", "final"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "[\n  {\n    \"id\": \"770e8400-e29b-41d4-a716-446655440001\",\n    \"jobId\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"frameId\": \"frame_00012\",\n    \"timestamp\": 1.2,\n    \"s3Url\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/frames/product_1_variant_1.png\",\n    \"productId\": \"product_1\",\n    \"variantId\": \"variant_1\",\n    \"angleEstimate\": \"front\",\n    \"variantDescription\": \"Front view showing logo\",\n    \"obstructions\": {\n      \"has_obstruction\": false,\n      \"obstruction_types\": [],\n      \"obstruction_description\": null,\n      \"removable_by_ai\": true\n    },\n    \"backgroundRecommendations\": {\n      \"solid_color\": \"#FFFFFF\",\n      \"solid_color_name\": \"white\",\n      \"real_life_setting\": \"on a clean white marble surface\",\n      \"creative_shot\": \"floating with soft shadows on gradient background\"\n    },\n    \"createdAt\": \"2024-01-19T12:02:00.000Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get All Commercial Images",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/images",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{JOB_ID}}", "images"]
+            },
+            "description": "Get all generated commercial images"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Commercial Images (Grouped)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/images/grouped",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{JOB_ID}}", "images", "grouped"]
+            },
+            "description": "Get commercial images grouped by product variant"
+          },
+          "response": [
+            {
+              "name": "Grouped Images",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/jobs/{{JOB_ID}}/images/grouped",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "jobs", "{{JOB_ID}}", "images", "grouped"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"product_1_variant_1\": {\n    \"transparent\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/p1v1_transparent.png\",\n    \"solid\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/p1v1_solid.png\",\n    \"real\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/p1v1_real.png\",\n    \"creative\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/p1v1_creative.png\"\n  },\n  \"product_1_variant_2\": {\n    \"transparent\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/p1v2_transparent.png\",\n    \"solid\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/p1v2_solid.png\",\n    \"real\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/p1v2_real.png\",\n    \"creative\": \"https://s3.amazonaws.com/vopi-storage/jobs/550e8400/commercial/p1v2_creative.png\"\n  }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Result retrieval endpoints"
+    }
+  ]
+}
