@@ -16,95 +16,120 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 
 /**
+ * Valid shot types for product photography
+ * Covers all standard e-commerce angles
+ */
+const SHOT_TYPES = [
+  'hero',    // Main product image (front/3-4 view)
+  'front',   // Direct front view
+  'back',    // Back view
+  'left',    // Left side view
+  'right',   // Right side view
+  'top',     // Top-down view
+  'bottom',  // Bottom view (if relevant)
+  'detail',  // Close-up of features/texture
+  'context', // In-use or lifestyle shot
+  'scale'    // Size reference (hand, coin, etc.)
+];
+
+/**
  * Output schema that Gemini must follow
- *
- * WHY strict schema:
- * - Enables deterministic parsing
- * - Prevents hallucinated fields
- * - Ensures we get all required information
+ * MULTI-PRODUCT AWARE: Groups shots by product
  */
 const OUTPUT_SCHEMA = `{
   "video": {
-    "filename": "string - original video filename",
-    "duration_sec": "number - video duration in seconds"
+    "filename": "string",
+    "duration_sec": "number"
   },
+  "products_detected": [
+    {
+      "product_id": "string - e.g., product_1, product_2",
+      "description": "string - brief description of the product",
+      "timestamp_range": {
+        "start_sec": "number - when this product first appears",
+        "end_sec": "number - when this product last appears"
+      }
+    }
+  ],
   "frame_evaluation": [
     {
       "frame_id": "string - e.g., frame_00012",
-      "timestamp_sec": "number - timestamp in video",
-      "quality_score_0_100": "number - your quality assessment 0-100",
-      "labels": ["array of: 'hero' | 'side' | 'detail' | 'context'"],
-      "reason": "string - brief explanation of suitability"
+      "timestamp_sec": "number",
+      "product_id": "string - which product this frame shows",
+      "angle": "string - one of: hero|front|back|left|right|top|bottom|detail|context|scale",
+      "quality_score_0_100": "number",
+      "reason": "string - brief explanation"
     }
   ],
   "recommended_shots": [
     {
-      "type": "string - 'hero' | 'side' | 'detail' | 'context'",
-      "frame_id": "string - e.g., frame_00012",
-      "timestamp_sec": "number",
-      "reason": "string - why this frame is recommended for this type"
+      "product_id": "string - e.g., product_1",
+      "angle": "string - one of: hero|front|back|left|right|top|bottom|detail|context|scale",
+      "frame_id": "string or null",
+      "timestamp_sec": "number or null",
+      "reason": "string"
     }
   ],
-  "overall_quality": {
-    "rating": "string - 'excellent' | 'usable' | 'poor'",
-    "issues": ["array of: 'blur' | 'fast_motion' | 'hand_occlusion' | 'low_light' | 'background_clutter'"]
-  }
+  "coverage_by_product": [
+    {
+      "product_id": "string",
+      "angles_found": ["array of angles with frames"],
+      "angles_missing": ["array of angles without frames"]
+    }
+  ]
 }`;
 
 /**
  * System prompt for Gemini
- *
- * WHY detailed prompt:
- * - Gemini needs context about the task
- * - Product photography has specific conventions
- * - We want reasoning, not just labels
+ * MULTI-PRODUCT AWARE: Detects products and extracts all angles for each
  */
-const SYSTEM_PROMPT = `You are an expert product photographer assistant analyzing candidate frames from a product video.
+const SYSTEM_PROMPT = `You are extracting REFERENCE frames for AI image generation from a product video.
 
-Your task is to classify frames and recommend the best shots for an e-commerce product listing.
+## YOUR MISSION: MAXIMIZE ANGLE COVERAGE FOR EACH PRODUCT
 
-## Frame Types
+### STEP 1: DETECT ALL PRODUCTS
+Identify every distinct product in the video:
+- Different items = different products (product_1, product_2, etc.)
+- Same item at different times = same product
+- Note when each product appears (timestamp range)
 
-**HERO**: The main product image. Should show:
-- Full product clearly visible
-- Best angle (usually front or 3/4 view)
-- Sharp focus, no motion blur
-- Clean background or product stands out
-- Would work as the primary listing image
+### STEP 2: EXTRACT ALL ANGLES FOR EACH PRODUCT
+For EACH product, find the best frame for EACH angle:
 
-**SIDE**: Secondary angles. Should show:
-- Different perspective from hero (side, back, top)
-- Product still clearly identifiable
-- Good for showing product dimensions or alternative views
+| Angle   | What to look for |
+|---------|------------------|
+| hero    | Best overall view (front or 3/4 angle) |
+| front   | Direct front-facing view |
+| back    | Rear view |
+| left    | Left side profile (90° from front) |
+| right   | Right side profile |
+| top     | Top-down bird's eye view |
+| bottom  | Underside view |
+| detail  | Close-up of features, texture, labels |
+| context | Product in use, in environment |
+| scale   | Size reference (hand holding, next to object) |
 
-**DETAIL**: Close-up or feature shots. Should show:
-- Specific features, textures, or components
-- Can be partial product view
-- Useful for highlighting quality or unique features
+### EXTRACTION RULES
 
-**CONTEXT**: Usage or lifestyle shots. Should show:
-- Product in use or in environment
-- Scale reference (hand holding product, etc.)
-- Less strict on framing, more about storytelling
+**BE AGGRESSIVE - EXTRACT EVERYTHING USABLE:**
+- Blurry but shows angle? EXTRACT IT
+- Hand in frame? EXTRACT IT (good for scale!)
+- Background messy? EXTRACT IT (AI will fix)
+- Angle not perfect? EXTRACT IT (close enough)
+- Same frame works for multiple angles? USE IT FOR ALL
 
-## Quality Assessment
+**ONLY use null when angle is COMPLETELY ABSENT** for that product
 
-Rate each frame 0-100 based on:
-- Sharpness/focus (40%)
-- Composition/framing (30%)
-- Product visibility (20%)
-- Background cleanliness (10%)
+**ONE FRAME = MULTIPLE USES:**
+- A 3/4 view can be: hero + front
+- Hand holding product can be: context + scale
+- Close-up of label can be: detail + back
 
-A frame can have multiple labels if it serves multiple purposes.
+### OUTPUT
+For EACH product, recommend frames for ALL 10 angles.
+Group results by product in coverage_by_product.
 
-## Output Requirements
-
-1. Evaluate ALL provided frames
-2. Recommend at least one frame per type if suitable candidates exist
-3. If no good candidate exists for a type, explain why
-4. Be honest about quality issues - it helps the user reshoot if needed
-
-IMPORTANT: Return ONLY valid JSON matching the schema. No markdown, no explanation outside JSON.`;
+IMPORTANT: Return ONLY valid JSON. No markdown, no explanation.`;
 
 /**
  * Initialize Gemini client
@@ -201,7 +226,7 @@ export async function classifyFramesWithGemini(
   options = {}
 ) {
   const {
-    model = 'gemini-1.5-flash',  // Fast and capable for this task
+    model = 'gemini-2.0-flash',  // Fast and capable for this task
     maxRetries = 3,
     retryDelay = 2000
   } = options;
@@ -214,7 +239,7 @@ export async function classifyFramesWithGemini(
     generationConfig: {
       temperature: 0.2,      // Low temperature for consistent output
       topP: 0.8,
-      maxOutputTokens: 4096
+      maxOutputTokens: 16384  // Increased for multi-product output
     }
   });
 
@@ -274,14 +299,7 @@ export async function classifyFramesWithGemini(
 
 /**
  * Parse Gemini response and validate schema
- *
- * WHY validation:
- * - LLMs can produce malformed JSON
- * - We need to catch this before downstream processing
- * - Provides clear error messages
- *
- * @param {string} text - Raw response text
- * @returns {Object} Parsed and validated response
+ * Updated for multi-product schema
  */
 function parseGeminiResponse(text) {
   // Clean up common issues
@@ -306,8 +324,8 @@ function parseGeminiResponse(text) {
     throw new Error(`Failed to parse Gemini response as JSON: ${e.message}\nResponse: ${text.slice(0, 500)}`);
   }
 
-  // Validate required fields
-  const requiredFields = ['video', 'frame_evaluation', 'recommended_shots', 'overall_quality'];
+  // Validate required fields (relaxed for multi-product schema)
+  const requiredFields = ['video', 'frame_evaluation', 'recommended_shots'];
   for (const field of requiredFields) {
     if (!(field in parsed)) {
       throw new Error(`Gemini response missing required field: ${field}`);
@@ -319,28 +337,17 @@ function parseGeminiResponse(text) {
     throw new Error('frame_evaluation must be an array');
   }
 
-  for (const frame of parsed.frame_evaluation) {
-    if (!frame.frame_id || typeof frame.quality_score_0_100 !== 'number') {
-      throw new Error(`Invalid frame_evaluation entry: ${JSON.stringify(frame)}`);
-    }
-  }
-
   // Validate recommended_shots structure
   if (!Array.isArray(parsed.recommended_shots)) {
     throw new Error('recommended_shots must be an array');
   }
 
-  const validTypes = ['hero', 'side', 'detail', 'context'];
+  // Validate angle types (now using 'angle' field instead of 'type')
   for (const shot of parsed.recommended_shots) {
-    if (!validTypes.includes(shot.type)) {
-      throw new Error(`Invalid shot type: ${shot.type}`);
+    const angleField = shot.angle || shot.type; // Support both for compatibility
+    if (angleField && !SHOT_TYPES.includes(angleField)) {
+      console.warn(`[gemini] Unknown angle type: ${angleField}, allowing anyway`);
     }
-  }
-
-  // Validate overall_quality
-  const validRatings = ['excellent', 'usable', 'poor'];
-  if (!validRatings.includes(parsed.overall_quality.rating)) {
-    throw new Error(`Invalid quality rating: ${parsed.overall_quality.rating}`);
   }
 
   return parsed;
@@ -348,11 +355,7 @@ function parseGeminiResponse(text) {
 
 /**
  * Extract recommended frames to final output
- *
- * WHY separate extraction:
- * - We may want to re-extract at higher quality
- * - Allows for local search window optimization
- * - Keeps Gemini logic separate from file I/O
+ * Updated for multi-product schema
  *
  * @param {Object} geminiResult - Parsed Gemini response
  * @param {Array} candidates - Original candidate frames
@@ -361,20 +364,42 @@ function parseGeminiResponse(text) {
 export function getRecommendedFrames(geminiResult, candidates) {
   const recommended = [];
   const candidateMap = new Map(candidates.map(c => [c.frameId, c]));
+  const seen = new Set(); // Track unique product+angle+frame combinations
 
   for (const shot of geminiResult.recommended_shots) {
+    // Support both 'angle' (new) and 'type' (old) field names
+    const angle = shot.angle || shot.type;
+    const productId = shot.product_id || 'product_1';
+
+    // Skip if no frame recommended for this angle
+    if (!shot.frame_id) {
+      console.log(`[gemini] ${productId}/${angle}: No suitable frame - ${shot.reason}`);
+      continue;
+    }
+
+    // Create unique key to avoid duplicates
+    const key = `${productId}_${angle}_${shot.frame_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
     const candidate = candidateMap.get(shot.frame_id);
     if (candidate) {
       recommended.push({
         ...candidate,
-        recommendedType: shot.type,
+        productId,
+        angle,
+        recommendedType: `${productId}_${angle}`, // e.g., "product_1_hero"
         geminiReason: shot.reason,
         geminiTimestamp: shot.timestamp_sec
       });
     } else {
-      console.warn(`[gemini] Recommended frame ${shot.frame_id} not found in candidates`);
+      console.warn(`[gemini] Frame ${shot.frame_id} not found in candidates`);
     }
   }
+
+  // Log summary
+  const products = [...new Set(recommended.map(r => r.productId))];
+  console.log(`[gemini] Extracted ${recommended.length} frames for ${products.length} product(s)`);
 
   return recommended;
 }

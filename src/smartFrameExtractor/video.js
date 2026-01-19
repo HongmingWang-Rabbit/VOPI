@@ -8,10 +8,14 @@
  * - Extracts video metadata needed for processing decisions
  */
 
-import { spawn, execSync } from 'child_process';
-import { mkdir, rm, readdir, stat } from 'fs/promises';
-import { existsSync } from 'fs';
+import { spawn } from 'child_process';
+import { mkdir, rm, readdir } from 'fs/promises';
 import path from 'path';
+
+// Use bundled ffmpeg/ffprobe binaries from npm packages
+// WHY: No system dependency required - works out of the box after npm install
+import ffmpegPath from 'ffmpeg-static';
+import ffprobePath from 'ffprobe-static';
 
 /**
  * Get video metadata using ffprobe
@@ -31,7 +35,7 @@ export async function getVideoMetadata(videoPath) {
       videoPath
     ];
 
-    const ffprobe = spawn('ffprobe', args);
+    const ffprobe = spawn(ffprobePath.path, args);
     let stdout = '';
     let stderr = '';
 
@@ -128,7 +132,7 @@ export async function extractFramesDense(videoPath, outputDir, options = {}) {
     ];
 
     console.log(`[video] Extracting frames at ${fps} fps...`);
-    const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     let stderr = '';
     ffmpeg.stderr.on('data', (data) => { stderr += data; });
@@ -218,8 +222,10 @@ export async function extractSingleFrame(videoPath, timestamp, outputPath, optio
   return new Promise((resolve, reject) => {
     // Seek to slightly before timestamp for accuracy
     // WHY: -ss before -i is faster but less accurate, we use after for precision
+    // Use toFixed(3) to avoid floating-point precision issues (e.g., 2.77e-17)
+    const seekTime = Math.max(0, timestamp - 0.1).toFixed(3);
     const args = [
-      '-ss', Math.max(0, timestamp - 0.1).toString(),
+      '-ss', seekTime,
       '-i', videoPath,
       '-vframes', '1',
       '-q:v', quality.toString(),
@@ -227,7 +233,7 @@ export async function extractSingleFrame(videoPath, timestamp, outputPath, optio
       outputPath
     ];
 
-    const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     let stderr = '';
     ffmpeg.stderr.on('data', (data) => { stderr += data; });
@@ -269,10 +275,13 @@ export async function extractBestFrameInWindow(
 
   try {
     // Extract frames in window
+    // Use toFixed to avoid floating-point precision issues
     const timestamps = [];
     for (let i = 0; i < sampleCount; i++) {
       const t = centerTimestamp - windowSize + (2 * windowSize * i / (sampleCount - 1));
-      timestamps.push(Math.max(0, t));
+      // Round to 3 decimal places to avoid floating-point artifacts
+      const roundedT = Math.round(Math.max(0, t) * 1000) / 1000;
+      timestamps.push(roundedT);
     }
 
     // Extract and score each
@@ -308,13 +317,8 @@ export async function extractBestFrameInWindow(
 
 /**
  * Check if ffmpeg is available
+ * WHY: Always returns true since we bundle ffmpeg-static
  */
 export function checkFfmpegInstalled() {
-  try {
-    execSync('ffmpeg -version', { stdio: 'ignore' });
-    execSync('ffprobe -version', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  return !!ffmpegPath && !!ffprobePath.path;
 }

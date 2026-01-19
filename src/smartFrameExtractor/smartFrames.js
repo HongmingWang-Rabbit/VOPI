@@ -19,15 +19,16 @@ import path from 'path';
  * Configuration defaults
  *
  * WHY these values:
- * - alpha=0.5: Balance between sharpness and stillness
- * - minTemporalGap=0.5s: Prevents selecting near-duplicate frames
- * - minSharpnessThreshold=50: Below this, image is too blurry to be useful
+ * - alpha=0.2: Very low motion penalty - coverage is king
+ * - topK=24: Extract many candidates to maximize angle coverage across products
+ * - minTemporalGap=0.3s: Tighter gap to catch more angles
+ * - These frames are AI references, not final photos - extract everything useful
  */
 export const DEFAULT_CONFIG = {
-  alpha: 0.5,                    // Motion penalty weight
-  topK: 12,                      // Number of candidates to select
-  minTemporalGap: 0.5,           // Seconds between selected frames
-  minSharpnessThreshold: 50,     // Absolute minimum sharpness
+  alpha: 0.2,                    // Low motion penalty - we want ALL angles
+  topK: 24,                      // Many candidates for multi-product coverage
+  minTemporalGap: 0.3,           // Tighter gap to catch rapid angle changes
+  minSharpnessThreshold: 0,      // No threshold - extract everything
   motionNormalizationFactor: 255 // For normalizing motion scores
 };
 
@@ -218,18 +219,19 @@ export async function scoreFrames(frames, config = {}) {
  * @returns {Array} Selected candidate frames
  */
 export function selectCandidates(scoredFrames, config = {}) {
-  const { topK, minTemporalGap, minSharpnessThreshold } = { ...DEFAULT_CONFIG, ...config };
+  const { topK, minTemporalGap } = { ...DEFAULT_CONFIG, ...config };
 
-  // First, filter out frames below minimum sharpness
-  // WHY: No point considering completely unusable frames
-  const usableFrames = scoredFrames.filter(f => f.sharpness >= minSharpnessThreshold);
+  // For reference frame extraction, we use ALL frames
+  // WHY: Even blurry frames can be useful references for AI generation
+  // We just sort by score to prioritize better ones
+  const usableFrames = scoredFrames;
 
   if (usableFrames.length === 0) {
-    console.warn('[selection] No frames meet minimum sharpness threshold!');
-    return { candidates: [], unusableReason: 'all_frames_too_blurry' };
+    console.warn('[selection] No frames available!');
+    return { candidates: [], unusableReason: 'no_frames' };
   }
 
-  console.log(`[selection] ${usableFrames.length}/${scoredFrames.length} frames meet minimum sharpness`);
+  console.log(`[selection] ${usableFrames.length} frames available for selection`);
 
   // Sort by combined score (highest first)
   const sorted = [...usableFrames].sort((a, b) => b.score - a.score);
@@ -272,16 +274,16 @@ export function selectCandidates(scoredFrames, config = {}) {
 }
 
 /**
- * Generate quality report for unusable videos
+ * Generate quality report (informational only)
  *
  * WHY quality reports:
- * - User needs actionable feedback
- * - "Video unusable" is not helpful
- * - Specific suggestions enable a successful reshoot
+ * - Provides stats about the video for debugging
+ * - Helps user understand what was extracted
+ * - NOTE: We always extract frames regardless of quality (for AI reference)
  *
  * @param {Array} scoredFrames - All scored frames
  * @param {Object} videoMetadata - Video metadata
- * @returns {Object} Quality report with suggestions
+ * @returns {Object} Quality report with stats
  */
 export function generateQualityReport(scoredFrames, videoMetadata) {
   const sharpnessValues = scoredFrames.map(f => f.sharpness);
@@ -290,43 +292,18 @@ export function generateQualityReport(scoredFrames, videoMetadata) {
   const avgSharpness = sharpnessValues.reduce((a, b) => a + b, 0) / sharpnessValues.length;
   const maxSharpness = Math.max(...sharpnessValues);
   const avgMotion = motionValues.reduce((a, b) => a + b, 0) / motionValues.length;
-
-  const issues = [];
-  const suggestions = [];
-
-  // Analyze sharpness distribution
-  if (maxSharpness < DEFAULT_CONFIG.minSharpnessThreshold) {
-    issues.push('consistently_blurry');
-    suggestions.push('Ensure adequate lighting (natural daylight works best)');
-    suggestions.push('Clean camera lens before recording');
-  }
-
-  if (avgSharpness < DEFAULT_CONFIG.minSharpnessThreshold * 0.7) {
-    issues.push('severe_blur');
-    suggestions.push('Use a tripod or stabilize camera against a surface');
-  }
-
-  // Analyze motion distribution
-  if (avgMotion > 0.3) {
-    issues.push('excessive_motion');
-    suggestions.push('Pause for 1-2 seconds at each angle before rotating');
-    suggestions.push('Rotate product more slowly');
-  }
-
-  // Check for any "pause moments"
   const lowMotionFrames = scoredFrames.filter(f => f.motion < 0.1);
-  if (lowMotionFrames.length < 3) {
-    issues.push('no_pause_moments');
-    suggestions.push('Hold product still for brief moments during recording');
-  }
 
-  // Compute overall rating
-  let rating = 'poor';
-  if (maxSharpness >= DEFAULT_CONFIG.minSharpnessThreshold * 2 && lowMotionFrames.length >= 5) {
-    rating = 'usable';
+  // Tips for better results (informational, not blocking)
+  const tips = [];
+  if (avgSharpness < 5) {
+    tips.push('Better lighting would improve frame quality');
   }
-  if (avgSharpness >= DEFAULT_CONFIG.minSharpnessThreshold * 1.5 && avgMotion < 0.15) {
-    rating = 'excellent';
+  if (avgMotion > 0.2) {
+    tips.push('Slower rotation would give sharper frames');
+  }
+  if (lowMotionFrames.length < 5) {
+    tips.push('Brief pauses at each angle help capture clearer frames');
   }
 
   return {
@@ -339,17 +316,10 @@ export function generateQualityReport(scoredFrames, videoMetadata) {
       average_sharpness: Math.round(avgSharpness * 10) / 10,
       max_sharpness: Math.round(maxSharpness * 10) / 10,
       average_motion: Math.round(avgMotion * 100) / 100,
-      low_motion_frames: lowMotionFrames.length,
-      sharpness_threshold: DEFAULT_CONFIG.minSharpnessThreshold
+      low_motion_frames: lowMotionFrames.length
     },
-    overall_quality: {
-      rating,
-      issues
-    },
-    reshoot_guidance: suggestions,
-    recommendation: rating === 'poor'
-      ? 'Video quality insufficient. Please reshoot following the guidance above.'
-      : 'Video is processable but quality could be improved.'
+    tips_for_better_results: tips.length > 0 ? tips : ['Video quality is good!'],
+    status: 'processed' // Always processed - we extract references regardless of quality
   };
 }
 
@@ -376,9 +346,12 @@ export function prepareCandidateMetadata(candidates) {
 /**
  * Main pipeline: extract, score, select
  *
+ * NOTE: This pipeline always succeeds - we extract reference frames regardless
+ * of quality since they're used for AI image generation, not as final photos.
+ *
  * @param {string} videoPath - Path to video file
  * @param {Object} options - Pipeline options
- * @returns {Promise<Object>} Pipeline result with candidates or quality report
+ * @returns {Promise<Object>} Pipeline result with candidates
  */
 export async function runSmartFramePipeline(videoPath, videoMetadata, extractedFrames, options = {}) {
   const config = { ...DEFAULT_CONFIG, ...options };
@@ -388,26 +361,15 @@ export async function runSmartFramePipeline(videoPath, videoMetadata, extractedF
   // Step 1: Score all frames
   const scoredFrames = await scoreFrames(extractedFrames, config);
 
-  // Step 2: Select candidates
-  const { candidates, unusableReason } = selectCandidates(scoredFrames, config);
+  // Step 2: Select candidates (always returns something)
+  const { candidates } = selectCandidates(scoredFrames, config);
 
-  // Step 3: Handle failure case
-  if (candidates.length === 0) {
-    console.warn('[pipeline] Video marked as unusable');
-    return {
-      success: false,
-      unusable: true,
-      qualityReport: generateQualityReport(scoredFrames, videoMetadata)
-    };
-  }
-
-  // Step 4: Prepare for Gemini
+  // Step 3: Prepare for Gemini
   const candidateMetadata = prepareCandidateMetadata(candidates);
 
   console.log('[pipeline] Smart frame selection complete');
   return {
     success: true,
-    unusable: false,
     candidates,
     candidateMetadata,
     scoredFrames, // Keep for debugging

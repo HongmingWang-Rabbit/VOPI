@@ -15,10 +15,25 @@
  *   node src/smartFrameExtractor/index.js ./product.mp4 --fps 5 --top-k 12
  */
 
+// Load environment variables from .env file
+// WHY: Allows storing API keys in .env instead of exporting in shell
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { parseArgs } from 'node:util';
-import { mkdir, writeFile, rm } from 'fs/promises';
+import { mkdir, writeFile, rm, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+
+/**
+ * Supported video extensions
+ */
+const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'];
+
+/**
+ * Default input folder path
+ */
+const DEFAULT_INPUT_FOLDER = './input';
 
 import {
   getVideoMetadata,
@@ -44,6 +59,12 @@ import {
  * CLI argument definitions
  */
 const CLI_OPTIONS = {
+  'input': {
+    type: 'string',
+    short: 'i',
+    default: './input',
+    description: 'Input folder to scan for videos (default: ./input)'
+  },
   'fps': {
     type: 'string',
     short: 'f',
@@ -53,8 +74,8 @@ const CLI_OPTIONS = {
   'top-k': {
     type: 'string',
     short: 'k',
-    default: '12',
-    description: 'Number of candidate frames to select (default: 12)'
+    default: '24',
+    description: 'Number of candidate frames to select (default: 24)'
   },
   'alpha': {
     type: 'string',
@@ -93,8 +114,8 @@ const CLI_OPTIONS = {
   'gemini-model': {
     type: 'string',
     short: 'm',
-    default: 'gemini-1.5-flash',
-    description: 'Gemini model to use (default: gemini-1.5-flash)'
+    default: 'gemini-2.0-flash',
+    description: 'Gemini model to use (default: gemini-2.0-flash)'
   },
   'help': {
     type: 'boolean',
@@ -111,6 +132,38 @@ const CLI_OPTIONS = {
 };
 
 /**
+ * Find the first video file in a directory
+ *
+ * WHY: Allows users to simply drop a video in ./input and run without arguments
+ * Files are sorted alphabetically, so naming like "001_product.mp4" controls order
+ *
+ * @param {string} folderPath - Directory to scan
+ * @returns {Promise<string|null>} Path to first video or null if none found
+ */
+async function findFirstVideo(folderPath) {
+  if (!existsSync(folderPath)) {
+    return null;
+  }
+
+  try {
+    const files = await readdir(folderPath);
+
+    // Filter to video files and sort alphabetically
+    const videoFiles = files
+      .filter(f => VIDEO_EXTENSIONS.includes(path.extname(f).toLowerCase()))
+      .sort();
+
+    if (videoFiles.length === 0) {
+      return null;
+    }
+
+    return path.join(folderPath, videoFiles[0]);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * Print usage information
  */
 function printHelp() {
@@ -121,7 +174,10 @@ Extracts the best product frames from a video using sharpness/motion
 analysis and AI classification.
 
 Usage:
-  node src/smartFrameExtractor/index.js <video_path> [options]
+  node src/smartFrameExtractor/index.js [video_path] [options]
+
+  If no video path is provided, automatically picks the first video
+  from the input folder (default: ./input).
 
 Options:`);
 
@@ -133,17 +189,23 @@ Options:`);
 
   console.log(`
 Environment Variables:
-  GOOGLE_AI_API_KEY    Required for Gemini classification
+  GOOGLE_AI_API_KEY    Required for Gemini classification (can be set in .env file)
 
 Examples:
-  # Basic usage
+  # Auto-detect: picks first video from ./input folder
+  node src/smartFrameExtractor/index.js
+
+  # Specify video directly
   node src/smartFrameExtractor/index.js ./product.mp4
+
+  # Use custom input folder
+  node src/smartFrameExtractor/index.js --input ./my_videos
 
   # Custom settings
   node src/smartFrameExtractor/index.js ./product.mp4 --fps 8 --top-k 20
 
   # Scoring only (no Gemini)
-  node src/smartFrameExtractor/index.js ./product.mp4 --skip-gemini
+  node src/smartFrameExtractor/index.js --skip-gemini
 `);
 }
 
@@ -158,12 +220,36 @@ async function main() {
   });
 
   // Handle help
-  if (args.help || positionals.length === 0) {
+  if (args.help) {
     printHelp();
-    process.exit(args.help ? 0 : 1);
+    process.exit(0);
   }
 
-  const videoPath = positionals[0];
+  // Determine video path: explicit argument or auto-detect from input folder
+  let videoPath;
+
+  if (positionals.length > 0) {
+    // User provided explicit video path
+    videoPath = positionals[0];
+  } else {
+    // Auto-detect from input folder
+    const inputFolder = args.input || DEFAULT_INPUT_FOLDER;
+    console.log(`Scanning input folder: ${inputFolder}`);
+
+    videoPath = await findFirstVideo(inputFolder);
+
+    if (!videoPath) {
+      console.error(`Error: No video files found in ${inputFolder}`);
+      console.error(`Supported formats: ${VIDEO_EXTENSIONS.join(', ')}`);
+      console.error('\nEither:');
+      console.error('  1. Place a video in the input folder');
+      console.error('  2. Specify a video path directly: node index.js ./video.mp4');
+      console.error('  3. Use --input to specify a different folder');
+      process.exit(1);
+    }
+
+    console.log(`Found video: ${path.basename(videoPath)}`);
+  }
 
   // Validate video exists
   if (!existsSync(videoPath)) {
@@ -232,31 +318,6 @@ async function main() {
     console.log('\n[3/6] Scoring frames...');
     const pipelineResult = await runSmartFramePipeline(videoPath, metadata, frames, config);
 
-    // Handle unusable video
-    if (pipelineResult.unusable) {
-      console.log('\n' + '!'.repeat(60));
-      console.log('VIDEO MARKED AS UNUSABLE');
-      console.log('!'.repeat(60));
-
-      const report = pipelineResult.qualityReport;
-      console.log(`\nRating: ${report.overall_quality.rating}`);
-      console.log(`Issues: ${report.overall_quality.issues.join(', ')}`);
-      console.log('\nReshoot Guidance:');
-      report.reshoot_guidance.forEach((s, i) => console.log(`  ${i + 1}. ${s}`));
-
-      // Save quality report
-      const reportPath = path.join(outputBase, 'quality_report.json');
-      await writeFile(reportPath, JSON.stringify(report, null, 2));
-      console.log(`\nQuality report saved to: ${reportPath}`);
-
-      // Cleanup
-      if (!args['keep-temp']) {
-        await rm(tempDir, { recursive: true, force: true });
-      }
-
-      process.exit(1);
-    }
-
     const { candidates, candidateMetadata } = pipelineResult;
     console.log(`  Selected ${candidates.length} candidate frames`);
 
@@ -298,10 +359,13 @@ async function main() {
       await writeFile(geminiPath, JSON.stringify(geminiResult, null, 2));
     } else {
       console.log('\n[5/6] Skipping Gemini classification (--skip-gemini)');
-      // Use top candidates as "recommended"
-      recommendedFrames = candidates.slice(0, 4).map((c, i) => ({
+      // Use top candidates as "recommended" (assume single product)
+      const defaultAngles = ['hero', 'front', 'back', 'left', 'right', 'top', 'detail', 'context'];
+      recommendedFrames = candidates.slice(0, defaultAngles.length).map((c, i) => ({
         ...c,
-        recommendedType: ['hero', 'side', 'detail', 'context'][i] || 'side',
+        productId: 'product_1',
+        angle: defaultAngles[i],
+        recommendedType: `product_1_${defaultAngles[i]}`,
         geminiReason: 'Top scoring frame (no AI classification)'
       }));
     }
@@ -365,9 +429,23 @@ async function main() {
     console.log(`Quality report: ${reportPath}`);
     if (geminiResult) {
       console.log(`Gemini result: ${path.join(outputBase, 'gemini_result.json')}`);
-      console.log(`Overall quality: ${geminiResult.overall_quality.rating}`);
-      if (geminiResult.overall_quality.issues.length > 0) {
-        console.log(`Issues detected: ${geminiResult.overall_quality.issues.join(', ')}`);
+
+      // Show products detected
+      if (geminiResult.products_detected) {
+        console.log(`Products detected: ${geminiResult.products_detected.length}`);
+        for (const p of geminiResult.products_detected) {
+          console.log(`  - ${p.product_id}: ${p.description}`);
+        }
+      }
+
+      // Show coverage summary
+      if (geminiResult.coverage_by_product) {
+        console.log('Coverage by product:');
+        for (const cov of geminiResult.coverage_by_product) {
+          const found = cov.angles_found?.length || 0;
+          const missing = cov.angles_missing?.length || 0;
+          console.log(`  - ${cov.product_id}: ${found} angles found, ${missing} missing`);
+        }
       }
     }
     console.log('='.repeat(60));

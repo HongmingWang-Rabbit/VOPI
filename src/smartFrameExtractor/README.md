@@ -36,18 +36,43 @@ This pipeline behaves like a **junior product photographer**:
 
 ```bash
 # Install dependencies
-npm install sharp @google/generative-ai
+npm install
 
-# Set API key
+# Set API key (choose one method)
+
+# Option 1: Create .env file (recommended)
+cp .env.example .env
+# Then edit .env and add your API key
+
+# Option 2: Export in shell
 export GOOGLE_AI_API_KEY=your_api_key_here
 ```
 
 ## Usage
 
-### Basic Usage
+### Quickstart (Auto-detect)
+
+Simply drop a video in the `./input` folder and run:
+
+```bash
+# Create input folder and add your video
+mkdir -p input
+cp my_product.mp4 input/
+
+# Run - automatically picks the first video
+npm run extract
+```
+
+### Specify Video Directly
 
 ```bash
 node src/smartFrameExtractor/index.js ./product_video.mp4
+```
+
+### Custom Input Folder
+
+```bash
+node src/smartFrameExtractor/index.js --input ./my_videos
 ```
 
 ### With Options
@@ -62,13 +87,14 @@ node src/smartFrameExtractor/index.js ./product_video.mp4 \
 ### Scoring Only (No AI)
 
 ```bash
-node src/smartFrameExtractor/index.js ./product_video.mp4 --skip-gemini
+npm run extract -- --skip-gemini
 ```
 
 ## CLI Options
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
+| `--input` | `-i` | ./input | Input folder to scan for videos |
 | `--fps` | `-f` | 5 | Frames per second to extract |
 | `--top-k` | `-k` | 12 | Number of candidate frames |
 | `--alpha` | `-a` | 0.5 | Motion penalty weight |
@@ -77,9 +103,11 @@ node src/smartFrameExtractor/index.js ./product_video.mp4 --skip-gemini
 | `--skip-gemini` | | false | Skip AI classification |
 | `--keep-temp` | | false | Keep temp extracted frames |
 | `--search-window` | `-w` | 0.2 | ±seconds for final extraction |
-| `--gemini-model` | `-m` | gemini-1.5-flash | Gemini model |
+| `--gemini-model` | `-m` | gemini-2.0-flash | Gemini model |
 | `--verbose` | `-v` | false | Verbose output |
 | `--help` | `-h` | | Show help |
+
+**Supported video formats:** `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`, `.m4v`
 
 ## Output Structure
 
@@ -165,6 +193,23 @@ If no frame meets the minimum sharpness threshold:
    - "Ensure adequate lighting"
    - "Use tripod or stabilize camera"
 
+## Shot Types
+
+The pipeline classifies frames into these e-commerce standard shot types:
+
+| Type | Description | Priority |
+|------|-------------|----------|
+| `hero` | Main product image (front/3-4 view) | Required |
+| `front` | Direct front-facing view | High |
+| `back` | Rear view (labels, ports) | High |
+| `left` | Left side profile | Medium |
+| `right` | Right side profile | Medium |
+| `top` | Top-down bird's eye view | Medium |
+| `bottom` | Underside view | Low |
+| `detail` | Close-up of features/texture | High |
+| `context` | Product in use (lifestyle) | Medium |
+| `scale` | Size reference (hand, coin) | Medium |
+
 ## Gemini Output Schema
 
 ```json
@@ -178,7 +223,7 @@ If no frame meets the minimum sharpness threshold:
       "frame_id": "frame_00012",
       "timestamp_sec": 2.4,
       "quality_score_0_100": 85,
-      "labels": ["hero"],
+      "labels": ["hero", "front"],
       "reason": "Clear front view, sharp focus, clean background"
     }
   ],
@@ -188,11 +233,22 @@ If no frame meets the minimum sharpness threshold:
       "frame_id": "frame_00012",
       "timestamp_sec": 2.4,
       "reason": "Best overall composition with product centered"
+    },
+    {
+      "type": "back",
+      "frame_id": null,
+      "timestamp_sec": null,
+      "reason": "No frame shows the back of the product"
     }
   ],
   "overall_quality": {
-    "rating": "excellent",
-    "issues": []
+    "rating": "usable",
+    "issues": ["incomplete_coverage"]
+  },
+  "coverage_summary": {
+    "angles_found": ["hero", "front", "left", "detail"],
+    "angles_missing": ["back", "right", "top", "bottom"],
+    "recommendation": "Reshoot to capture back and right side views"
   }
 }
 ```
