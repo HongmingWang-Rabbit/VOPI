@@ -1,10 +1,7 @@
 import { getDatabase, schema } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
-import { createChildLogger } from '../utils/logger.js';
 import { NotFoundError } from '../utils/errors.js';
 import type { Video, Frame, CommercialImage } from '../db/schema.js';
-
-const logger = createChildLogger({ service: 'frames-controller' });
 
 /**
  * FramesController - handles frame and commercial image retrieval

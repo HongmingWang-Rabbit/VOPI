@@ -1,5 +1,4 @@
 import { Queue, type JobsOptions } from 'bullmq';
-import { getRedis } from './redis.js';
 import { createChildLogger } from '../utils/logger.js';
 import { getConfig } from '../config/index.js';
 
@@ -21,13 +20,10 @@ export function initPipelineQueue(): Queue<PipelineJobData> {
     return queue;
   }
 
-  const redis = getRedis();
-  if (!redis) {
-    throw new Error('Redis not initialized');
-  }
+  const config = getConfig();
 
   queue = new Queue<PipelineJobData>(QUEUE_NAME, {
-    connection: redis,
+    connection: { url: config.redis.url },
     defaultJobOptions: {
       attempts: 3,
       backoff: {
@@ -65,7 +61,6 @@ export async function addPipelineJob(
   options: JobsOptions = {}
 ): Promise<void> {
   const q = initPipelineQueue();
-  const config = getConfig();
 
   await q.add(
     'process',
@@ -73,7 +68,6 @@ export async function addPipelineJob(
     {
       jobId, // Use job ID as BullMQ job ID for deduplication
       ...options,
-      timeout: config.worker.jobTimeoutMs,
     }
   );
 

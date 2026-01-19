@@ -5,36 +5,38 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache python3 make g++ vips-dev
+# Install build dependencies and pnpm
+RUN apk add --no-cache python3 make g++ vips-dev && \
+    corepack enable && corepack prepare pnpm@latest --activate
 
 # Copy package files
-COPY package*.json ./
+COPY package.json pnpm-lock.yaml ./
 
 # Install all dependencies (including devDependencies for build)
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 # Copy source
 COPY . .
 
 # Build TypeScript
-RUN npm run build
+RUN pnpm run build
 
 # Production stage
 FROM node:20-alpine AS production
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies and pnpm
 # - ffmpeg for video processing
 # - vips for sharp image processing
-RUN apk add --no-cache ffmpeg vips
+RUN apk add --no-cache ffmpeg vips && \
+    corepack enable && corepack prepare pnpm@latest --activate
 
 # Copy package files
-COPY package*.json ./
+COPY package.json pnpm-lock.yaml ./
 
 # Install production dependencies only
-RUN npm ci --omit=dev
+RUN pnpm install --frozen-lockfile --prod
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist

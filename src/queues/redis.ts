@@ -1,4 +1,4 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 import { getConfig } from '../config/index.js';
 import { getLogger } from '../utils/logger.js';
 
@@ -18,7 +18,7 @@ export function initRedis(): Redis {
   redis = new Redis(config.redis.url, {
     maxRetriesPerRequest: null, // Required for BullMQ
     enableReadyCheck: true,
-    retryStrategy: (times) => {
+    retryStrategy: (times: number) => {
       if (times > 10) {
         logger.error('Redis connection failed after 10 retries');
         return null;
@@ -31,7 +31,7 @@ export function initRedis(): Redis {
     logger.info('Redis connection established');
   });
 
-  redis.on('error', (error) => {
+  redis.on('error', (error: Error) => {
     logger.error({ error }, 'Redis connection error');
   });
 

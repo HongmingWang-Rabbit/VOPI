@@ -39,7 +39,6 @@ docs
 *.md
 .eslintrc*
 .prettierrc*
-tsconfig*.json
 drizzle.config.ts
 
 # Input/Output directories (for CLI tools)

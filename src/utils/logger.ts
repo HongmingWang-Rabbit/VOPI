@@ -1,12 +1,12 @@
-import pino from 'pino';
+import pino, { type Logger } from 'pino';
 import { getConfig } from '../config/index.js';
 
-let logger: pino.Logger | null = null;
+let logger: Logger | null = null;
 
 /**
  * Create or get the application logger
  */
-export function getLogger(): pino.Logger {
+export function getLogger(): Logger {
   if (logger) {
     return logger;
   }
@@ -14,7 +14,7 @@ export function getLogger(): pino.Logger {
   const config = getConfig();
   const isDev = config.server.env === 'development';
 
-  logger = pino({
+  logger = pino.default({
     level: config.logging.level,
     transport: isDev
       ? {
@@ -38,6 +38,6 @@ export function getLogger(): pino.Logger {
 /**
  * Create a child logger with additional context
  */
-export function createChildLogger(context: Record<string, unknown>): pino.Logger {
+export function createChildLogger(context: Record<string, unknown>): Logger {
   return getLogger().child(context);
 }

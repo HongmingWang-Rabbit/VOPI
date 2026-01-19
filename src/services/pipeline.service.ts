@@ -1,11 +1,11 @@
-import { mkdir, rm, copyFile, writeFile } from 'fs/promises';
+import { mkdir, rm, copyFile } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
 import { createChildLogger } from '../utils/logger.js';
 import { getDatabase, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
-import { videoService, type ExtractedFrame } from './video.service.js';
+import { videoService } from './video.service.js';
 import { frameScoringService, type ScoredFrame } from './frame-scoring.service.js';
 import { geminiService, type RecommendedFrame } from './gemini.service.js';
 import { photoroomService } from './photoroom.service.js';
@@ -303,13 +303,19 @@ export class PipelineService {
 
       return result;
     } catch (error) {
-      logger.error({ error, jobId }, 'Pipeline failed');
+      const err = error as Error;
+      logger.error({
+        jobId,
+        errorMessage: err.message,
+        errorStack: err.stack,
+        errorName: err.name,
+      }, 'Pipeline failed');
 
       await db
         .update(schema.jobs)
         .set({
           status: 'failed',
-          error: (error as Error).message,
+          error: err.message,
           updatedAt: new Date(),
         })
         .where(eq(schema.jobs.id, jobId));

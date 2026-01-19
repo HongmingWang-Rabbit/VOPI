@@ -1,8 +1,10 @@
 import { spawn } from 'child_process';
 import { mkdir, rm, readdir, rename, copyFile } from 'fs/promises';
 import path from 'path';
-import ffmpegPath from 'ffmpeg-static';
-import ffprobePath from 'ffprobe-static';
+
+// Use system ffmpeg/ffprobe for local dev, package binaries for Docker
+const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
 
 import { createChildLogger } from '../utils/logger.js';
 import type { VideoMetadata } from '../types/job.types.js';
@@ -41,7 +43,7 @@ export class VideoService {
         videoPath,
       ];
 
-      const ffprobe = spawn(ffprobePath.path, args);
+      const ffprobe = spawn(ffprobePath, args);
       let stdout = '';
       let stderr = '';
 
@@ -132,14 +134,14 @@ export class VideoService {
       ];
 
       logger.info({ fps }, 'Extracting frames');
-      const ffmpeg = spawn(ffmpegPath!, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
       let stderr = '';
       ffmpeg.stderr?.on('data', (data: Buffer) => {
         stderr += data.toString();
       });
 
-      ffmpeg.on('close', async (code) => {
+      ffmpeg.on('close', async (code: number | null) => {
         if (code !== 0) {
           reject(new Error(`ffmpeg extraction failed: ${stderr}`));
           return;
@@ -154,7 +156,7 @@ export class VideoService {
         }
       });
 
-      ffmpeg.on('error', (err) => {
+      ffmpeg.on('error', (err: Error) => {
         reject(new Error(`ffmpeg not found. Is ffmpeg installed? ${err.message}`));
       });
     });
@@ -221,14 +223,14 @@ export class VideoService {
         outputPath,
       ];
 
-      const ffmpeg = spawn(ffmpegPath!, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
       let stderr = '';
       ffmpeg.stderr?.on('data', (data: Buffer) => {
         stderr += data.toString();
       });
 
-      ffmpeg.on('close', (code) => {
+      ffmpeg.on('close', (code: number | null) => {
         if (code !== 0) {
           reject(new Error(`Failed to extract frame at ${timestamp}s: ${stderr}`));
           return;
@@ -296,7 +298,7 @@ export class VideoService {
    * Check if ffmpeg is available
    */
   checkFfmpegInstalled(): boolean {
-    return !!ffmpegPath && !!ffprobePath.path;
+    return !!ffmpegPath && !!ffprobePath;
   }
 }
 

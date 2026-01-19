@@ -7,7 +7,7 @@ import { createChildLogger } from '../utils/logger.js';
 import { ExternalApiError } from '../utils/errors.js';
 import { getConfig } from '../config/index.js';
 import type { RecommendedFrame } from './gemini.service.js';
-import type { FrameObstructions, BackgroundRecommendations } from '../types/job.types.js';
+import type { FrameObstructions } from '../types/job.types.js';
 
 const logger = createChildLogger({ service: 'photoroom' });
 

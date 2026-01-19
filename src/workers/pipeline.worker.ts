@@ -1,5 +1,4 @@
 import { Worker, type Job as BullJob } from 'bullmq';
-import { getRedis } from '../queues/redis.js';
 import { createChildLogger } from '../utils/logger.js';
 import { getConfig } from '../config/index.js';
 import { getDatabase, schema } from '../db/index.js';
@@ -80,15 +79,10 @@ export function startPipelineWorker(): Worker<PipelineJobData> {
     return worker;
   }
 
-  const redis = getRedis();
-  if (!redis) {
-    throw new Error('Redis not initialized');
-  }
-
   const config = getConfig();
 
   worker = new Worker<PipelineJobData>(QUEUE_NAME, processJob, {
-    connection: redis,
+    connection: { url: config.redis.url },
     concurrency: config.worker.concurrency,
     removeOnComplete: { count: 100 },
     removeOnFail: { count: 1000 },
@@ -100,7 +94,13 @@ export function startPipelineWorker(): Worker<PipelineJobData> {
 
   worker.on('failed', (job, error) => {
     logger.error(
-      { error, jobId: job?.data.jobId, bullJobId: job?.id },
+      {
+        jobId: job?.data.jobId,
+        bullJobId: job?.id,
+        errorMessage: error?.message,
+        errorStack: error?.stack,
+        errorName: error?.name,
+      },
       'Job failed'
     );
   });
