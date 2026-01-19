@@ -44,16 +44,50 @@ import {
 } from './video.js';
 
 import {
-  runSmartFramePipeline,
-  computeSharpness,
-  DEFAULT_CONFIG
-} from './smartFrames.js';
-
-import {
   initGemini,
   classifyFramesWithGemini,
   getRecommendedFrames
 } from './gemini.js';
+
+import {
+  scoreFrames
+} from './smartFrames.js';
+
+/**
+ * Select the best frame from each second of video
+ *
+ * WHY: At 10fps, we have 10 frames per second. Selecting the best one
+ * from each second reduces candidates while preserving temporal coverage.
+ *
+ * @param {Array} scoredFrames - Frames with sharpness/motion scores
+ * @param {number} fps - Frames per second used during extraction
+ * @returns {Array} One best frame per second
+ */
+function selectBestFramePerSecond(scoredFrames, fps) {
+  // Group frames by second
+  const framesBySecond = new Map();
+
+  for (const frame of scoredFrames) {
+    const second = Math.floor(frame.timestamp);
+    if (!framesBySecond.has(second)) {
+      framesBySecond.set(second, []);
+    }
+    framesBySecond.get(second).push(frame);
+  }
+
+  // Select best frame from each second (highest score)
+  const selected = [];
+  for (const [second, frames] of framesBySecond) {
+    const best = frames.reduce((a, b) => (a.score > b.score ? a : b));
+    selected.push(best);
+  }
+
+  // Sort by timestamp
+  selected.sort((a, b) => a.timestamp - b.timestamp);
+
+  console.log(`[selection] Selected ${selected.length} frames (1 per second from ${scoredFrames.length} total)`);
+  return selected;
+}
 
 /**
  * CLI argument definitions
@@ -68,26 +102,13 @@ const CLI_OPTIONS = {
   'fps': {
     type: 'string',
     short: 'f',
-    default: '5',
-    description: 'Frames per second to extract (default: 5)'
+    default: '10',
+    description: 'Frames per second to extract (default: 10)'
   },
-  'top-k': {
+  'batch-size': {
     type: 'string',
-    short: 'k',
-    default: '24',
-    description: 'Number of candidate frames to select (default: 24)'
-  },
-  'alpha': {
-    type: 'string',
-    short: 'a',
-    default: '0.5',
-    description: 'Motion penalty weight (default: 0.5)'
-  },
-  'min-gap': {
-    type: 'string',
-    short: 'g',
-    default: '0.5',
-    description: 'Minimum seconds between selected frames (default: 0.5)'
+    default: '30',
+    description: 'Batch size for Gemini analysis (default: 30)'
   },
   'output': {
     type: 'string',
@@ -98,18 +119,12 @@ const CLI_OPTIONS = {
   'skip-gemini': {
     type: 'boolean',
     default: false,
-    description: 'Skip Gemini classification (scoring only)'
+    description: 'Skip Gemini frame selection'
   },
   'keep-temp': {
     type: 'boolean',
     default: false,
     description: 'Keep temporary extracted frames'
-  },
-  'search-window': {
-    type: 'string',
-    short: 'w',
-    default: '0.2',
-    description: 'Search window (±seconds) for final frame extraction (default: 0.2)'
   },
   'gemini-model': {
     type: 'string',
@@ -189,7 +204,18 @@ Options:`);
 
   console.log(`
 Environment Variables:
-  GOOGLE_AI_API_KEY    Required for Gemini classification (can be set in .env file)
+  GOOGLE_AI_API_KEY    Required for Gemini frame selection (can be set in .env file)
+
+Pipeline Steps:
+  1. Analyze video metadata
+  2. Extract frames at specified FPS (default: 10 fps)
+  3. Score frames for sharpness and motion
+  4. Select best frame per second (reduces 10 fps to 1 candidate/second)
+  5. Tournament-style Gemini selection:
+     - Process candidates in batches (default 30)
+     - Gemini picks best per angle from each batch
+     - Track best frame for each product+angle combination
+  6. Save final selections to final_frames/
 
 Examples:
   # Auto-detect: picks first video from ./input folder
@@ -198,14 +224,17 @@ Examples:
   # Specify video directly
   node src/smartFrameExtractor/index.js ./product.mp4
 
-  # Use custom input folder
-  node src/smartFrameExtractor/index.js --input ./my_videos
+  # Higher FPS for more frame options
+  node src/smartFrameExtractor/index.js ./product.mp4 --fps 8
 
-  # Custom settings
-  node src/smartFrameExtractor/index.js ./product.mp4 --fps 8 --top-k 20
+  # Larger batch size (faster but may miss some)
+  node src/smartFrameExtractor/index.js --batch-size 40
 
-  # Scoring only (no Gemini)
+  # Skip Gemini (use evenly spaced frames)
   node src/smartFrameExtractor/index.js --skip-gemini
+
+After extraction, remove backgrounds with:
+  npm run commercial -- ./output/<video_name>
 `);
 }
 
@@ -271,13 +300,10 @@ async function main() {
     process.exit(1);
   }
 
-  // Parse numeric options
+  // Parse options
   const config = {
     fps: parseFloat(args.fps),
-    topK: parseInt(args['top-k'], 10),
-    alpha: parseFloat(args.alpha),
-    minTemporalGap: parseFloat(args['min-gap']),
-    searchWindow: parseFloat(args['search-window']),
+    batchSize: parseInt(args['batch-size'], 10),
     geminiModel: args['gemini-model'],
     verbose: args.verbose
   };
@@ -298,121 +324,218 @@ async function main() {
   console.log('='.repeat(60));
   console.log(`Video: ${videoPath}`);
   console.log(`Output: ${outputBase}`);
-  console.log(`Config: fps=${config.fps}, topK=${config.topK}, alpha=${config.alpha}`);
+  console.log(`Config: fps=${config.fps}, batchSize=${config.batchSize}`);
+  const totalSteps = 5;
   console.log('='.repeat(60));
 
   try {
     // Step 1: Get video metadata
-    console.log('\n[1/6] Analyzing video...');
+    console.log(`\n[1/${totalSteps}] Analyzing video...`);
     const metadata = await getVideoMetadata(videoPath);
     console.log(`  Duration: ${metadata.duration.toFixed(2)}s`);
     console.log(`  Resolution: ${metadata.width}x${metadata.height}`);
     console.log(`  FPS: ${metadata.fps.toFixed(2)}`);
 
     // Step 2: Dense frame extraction
-    console.log('\n[2/6] Extracting frames...');
+    console.log(`\n[2/${totalSteps}] Extracting frames at ${config.fps} fps...`);
     const frames = await extractFramesDense(videoPath, tempDir, { fps: config.fps });
     console.log(`  Extracted ${frames.length} frames`);
 
-    // Step 3: Score and select candidates
-    console.log('\n[3/6] Scoring frames...');
-    const pipelineResult = await runSmartFramePipeline(videoPath, metadata, frames, config);
+    // Step 3: Score frames for sharpness and motion
+    console.log(`\n[3/${totalSteps}] Scoring frames...`);
+    const scoredFrames = await scoreFrames(frames);
+    console.log(`  Scored ${scoredFrames.length} frames`);
 
-    const { candidates, candidateMetadata } = pipelineResult;
-    console.log(`  Selected ${candidates.length} candidate frames`);
+    // Step 4: Select best frame per second and save
+    console.log(`\n[4/${totalSteps}] Selecting best frame per second...`);
+    const candidateFrames = selectBestFramePerSecond(scoredFrames, config.fps);
 
-    // Copy candidates for inspection
-    console.log('\n[4/6] Saving candidate frames...');
+    // Copy candidate frames for inspection
     const { copyFile } = await import('fs/promises');
-    for (const candidate of candidates) {
-      const destPath = path.join(candidatesDir, candidate.filename);
-      await copyFile(candidate.path, destPath);
+    for (const frame of candidateFrames) {
+      const destPath = path.join(candidatesDir, frame.filename);
+      await copyFile(frame.path, destPath);
     }
-    console.log(`  Saved to: ${candidatesDir}`);
+    console.log(`  Saved ${candidateFrames.length} candidate frames to: ${candidatesDir}`);
 
-    // Step 4: Gemini classification (optional)
+    // Gemini classification
     let geminiResult = null;
     let recommendedFrames = [];
 
     if (!args['skip-gemini']) {
-      console.log('\n[5/6] AI classification with Gemini...');
-      const genAI = initGemini(apiKey);
-      geminiResult = await classifyFramesWithGemini(
-        genAI,
-        candidates,
-        candidateMetadata,
-        metadata,
-        { model: config.geminiModel }
-      );
-      recommendedFrames = getRecommendedFrames(geminiResult, candidates);
-      console.log(`  Recommended ${recommendedFrames.length} frames`);
+      console.log(`\n[5/${totalSteps}] AI variant discovery with Gemini...`);
 
-      // Print recommendations
-      console.log('\n  Recommendations:');
-      for (const frame of recommendedFrames) {
-        console.log(`    ${frame.recommendedType.toUpperCase()}: ${frame.frameId} (t=${frame.timestamp.toFixed(2)}s)`);
-        console.log(`      Reason: ${frame.geminiReason}`);
+      const genAI = initGemini(apiKey);
+      const BATCH_SIZE = config.batchSize;
+
+      // Track best frame per product+variant combination
+      // Key: "product_1_variant_1", Value: { frame, score, description }
+      const bestByVariant = new Map();
+
+      // Process candidate frames in batches
+      const batches = [];
+      for (let i = 0; i < candidateFrames.length; i += BATCH_SIZE) {
+        batches.push(candidateFrames.slice(i, i + BATCH_SIZE));
       }
 
-      // Save Gemini result
+      console.log(`  Processing ${candidateFrames.length} candidate frames in ${batches.length} batches...`);
+
+      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        const batch = batches[batchIdx];
+        console.log(`\n  Batch ${batchIdx + 1}/${batches.length}: frames ${batchIdx * BATCH_SIZE + 1}-${batchIdx * BATCH_SIZE + batch.length}`);
+
+        const batchMetadata = batch.map((f, idx) => ({
+          frame_id: f.frameId,
+          timestamp_sec: Math.round(f.timestamp * 100) / 100,
+          sequence_position: idx + 1,
+          total_candidates: batch.length
+        }));
+
+        try {
+          const batchResult = await classifyFramesWithGemini(
+            genAI,
+            batch,
+            batchMetadata,
+            metadata,
+            { model: config.geminiModel }
+          );
+
+          const batchWinners = getRecommendedFrames(batchResult, batch);
+          console.log(`    Gemini discovered ${batchWinners.length} variants`);
+
+          // Update best frame for each variant
+          for (const winner of batchWinners) {
+            const key = `${winner.productId}_${winner.variantId}`;
+            const score = winner.geminiScore || 50;
+
+            const existing = bestByVariant.get(key);
+            if (!existing || score > existing.score) {
+              bestByVariant.set(key, {
+                frame: winner,
+                score: score,
+                description: winner.variantDescription || winner.angleEstimate
+              });
+              if (existing) {
+                console.log(`    Updated ${key}: ${winner.frameId} (score ${score} > ${existing.score})`);
+              } else {
+                console.log(`    Found ${key} (${winner.angleEstimate}): ${winner.frameId}`);
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`    Batch ${batchIdx + 1} failed: ${error.message}`);
+        }
+
+        // Small delay between batches
+        if (batchIdx < batches.length - 1) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+
+      // Collect best frames from all variants
+      recommendedFrames = [];
+      console.log(`\n  Best frame per variant:`);
+
+      for (const [key, data] of bestByVariant) {
+        console.log(`    ${key} (${data.description}): ${data.frame.frameId} (t=${data.frame.timestamp.toFixed(2)}s)`);
+        recommendedFrames.push(data.frame);
+      }
+
+      console.log(`\n  Total: ${recommendedFrames.length} unique variants discovered`);
+
+      // Save results with variant and obstruction metadata
+      geminiResult = {
+        products_detected: [...new Set(recommendedFrames.map(f => f.productId))].map(id => ({
+          product_id: id,
+          description: 'Detected product'
+        })),
+        variants_discovered: [...bestByVariant.entries()].map(([key, data]) => ({
+          key,
+          variant_id: data.frame.variantId,
+          product_id: data.frame.productId,
+          angle_estimate: data.frame.angleEstimate,
+          description: data.description,
+          frame_id: data.frame.frameId,
+          timestamp: data.frame.timestamp,
+          score: data.score,
+          obstructions: data.frame.obstructions || null,
+          background_recommendations: data.frame.backgroundRecommendations || null
+        })),
+        total_frames_analyzed: candidateFrames.length,
+        batches_processed: batches.length
+      };
+
       const geminiPath = path.join(outputBase, 'gemini_result.json');
       await writeFile(geminiPath, JSON.stringify(geminiResult, null, 2));
-    } else {
-      console.log('\n[5/6] Skipping Gemini classification (--skip-gemini)');
-      // Use top candidates as "recommended" (assume single product)
-      const defaultAngles = ['hero', 'front', 'back', 'left', 'right', 'top', 'detail', 'context'];
-      recommendedFrames = candidates.slice(0, defaultAngles.length).map((c, i) => ({
-        ...c,
-        productId: 'product_1',
-        angle: defaultAngles[i],
-        recommendedType: `product_1_${defaultAngles[i]}`,
-        geminiReason: 'Top scoring frame (no AI classification)'
+
+      // Save separate frames metadata for commercial step
+      const framesMetadata = recommendedFrames.map(f => ({
+        frame_id: f.frameId,
+        filename: `${f.recommendedType}_${f.frameId}_t${f.timestamp.toFixed(2)}.png`,
+        product_id: f.productId,
+        variant_id: f.variantId,
+        angle_estimate: f.angleEstimate,
+        description: f.variantDescription,
+        timestamp: f.timestamp,
+        score: f.geminiScore,
+        obstructions: f.obstructions || {
+          has_obstruction: false,
+          obstruction_types: [],
+          obstruction_description: null,
+          removable_by_ai: true
+        },
+        backgroundRecommendations: f.backgroundRecommendations || {
+          solid_color: '#FFFFFF',
+          solid_color_name: 'white',
+          real_life_setting: 'on a clean white surface with soft natural lighting',
+          creative_shot: 'floating with soft shadow on a light gradient background'
+        }
       }));
+
+      const framesMetadataPath = path.join(outputBase, 'frames_metadata.json');
+      await writeFile(framesMetadataPath, JSON.stringify(framesMetadata, null, 2));
+      console.log(`  Saved frames metadata to: ${framesMetadataPath}`);
+    } else {
+      console.log(`\n[5/${totalSteps}] Skipping Gemini (--skip-gemini)`);
+      // Use evenly spaced candidate frames as variants
+      const numVariants = Math.min(8, candidateFrames.length);
+      const step = Math.floor(candidateFrames.length / numVariants);
+      recommendedFrames = [];
+      for (let i = 0; i < numVariants; i++) {
+        const frameIdx = Math.min(i * step, candidateFrames.length - 1);
+        const f = candidateFrames[frameIdx];
+        recommendedFrames.push({
+          ...f,
+          productId: 'product_1',
+          variantId: `variant_${i + 1}`,
+          angleEstimate: 'unknown',
+          recommendedType: `product_1_variant_${i + 1}`,
+          variantDescription: 'Evenly spaced frame (no AI classification)'
+        });
+      }
     }
 
-    // Step 5: Extract final frames
-    console.log('\n[6/6] Extracting final high-quality frames...');
-
-    // Sharpness function for window search
-    const sharpnessScore = async (imgPath) => computeSharpness(imgPath);
+    // Copy final recommended frames to final_frames directory
+    // Deduplicate by frameId (same frame may be recommended for multiple angles)
+    const seenFrameIds = new Set();
+    const uniqueFrames = [];
 
     for (const frame of recommendedFrames) {
+      if (!seenFrameIds.has(frame.frameId)) {
+        seenFrameIds.add(frame.frameId);
+        uniqueFrames.push(frame);
+      }
+    }
+
+    console.log(`\n  Saving ${uniqueFrames.length} unique frames (deduplicated from ${recommendedFrames.length})...`);
+
+    for (const frame of uniqueFrames) {
       const outputFilename = `${frame.recommendedType}_${frame.frameId}_t${frame.timestamp.toFixed(2)}.png`;
       const outputPath = path.join(finalDir, outputFilename);
 
-      if (config.searchWindow > 0) {
-        // Use window search for optimal frame
-        const result = await extractBestFrameInWindow(
-          videoPath,
-          frame.timestamp,
-          outputPath,
-          sharpnessScore,
-          { windowSize: config.searchWindow, sampleCount: 5 }
-        );
-        console.log(`  ${frame.recommendedType}: ${outputFilename} (optimized t=${result.timestamp.toFixed(2)}s)`);
-      } else {
-        // Direct extraction
-        await extractSingleFrame(videoPath, frame.timestamp, outputPath);
-        console.log(`  ${frame.recommendedType}: ${outputFilename}`);
-      }
-    }
-
-    // Save quality report
-    const reportPath = path.join(outputBase, 'quality_report.json');
-    await writeFile(reportPath, JSON.stringify(pipelineResult.qualityReport, null, 2));
-
-    // Save frame scores for debugging
-    if (config.verbose) {
-      const scoresPath = path.join(outputBase, 'frame_scores.json');
-      const scores = pipelineResult.scoredFrames.map(f => ({
-        frameId: f.frameId,
-        timestamp: f.timestamp,
-        sharpness: Math.round(f.sharpness * 100) / 100,
-        motion: Math.round(f.motion * 1000) / 1000,
-        score: Math.round(f.score * 100) / 100
-      }));
-      await writeFile(scoresPath, JSON.stringify(scores, null, 2));
-      console.log(`  Frame scores saved to: ${scoresPath}`);
+      // Copy from temp directory
+      await copyFile(frame.path, outputPath);
+      console.log(`    ${outputFilename}`);
     }
 
     // Cleanup temp files
@@ -425,8 +548,7 @@ async function main() {
     console.log('PIPELINE COMPLETE');
     console.log('='.repeat(60));
     console.log(`Final frames: ${finalDir}`);
-    console.log(`Candidates: ${candidatesDir}`);
-    console.log(`Quality report: ${reportPath}`);
+    console.log(`All extracted: ${candidatesDir}`);
     if (geminiResult) {
       console.log(`Gemini result: ${path.join(outputBase, 'gemini_result.json')}`);
 
@@ -438,16 +560,16 @@ async function main() {
         }
       }
 
-      // Show coverage summary
-      if (geminiResult.coverage_by_product) {
-        console.log('Coverage by product:');
-        for (const cov of geminiResult.coverage_by_product) {
-          const found = cov.angles_found?.length || 0;
-          const missing = cov.angles_missing?.length || 0;
-          console.log(`  - ${cov.product_id}: ${found} angles found, ${missing} missing`);
+      // Show variants discovered
+      if (geminiResult.variants_discovered) {
+        console.log(`Variants discovered: ${geminiResult.variants_discovered.length}`);
+        for (const v of geminiResult.variants_discovered) {
+          const obsInfo = v.obstructions?.has_obstruction ? ` [${v.obstructions.obstruction_types.join(', ')}]` : '';
+          console.log(`  - ${v.variant_id} (${v.angle_estimate}): ${v.description}${obsInfo}`);
         }
       }
     }
+    console.log('\nNext step: npm run commercial -- ' + outputBase);
     console.log('='.repeat(60));
 
   } catch (error) {

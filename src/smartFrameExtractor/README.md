@@ -24,6 +24,13 @@ This pipeline behaves like a **junior product photographer**:
 │  Extraction     │◀────│  Hero/Side/     │◀────│  Only Best      │
 │  (High Quality) │     │  Detail/Context │     │  Candidates     │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
+        │
+        ▼ (optional)
+┌─────────────────┐
+│  Commercial     │
+│  Image Gen      │
+│  (AI-powered)   │
+└─────────────────┘
 ```
 
 ## Requirements
@@ -90,13 +97,37 @@ node src/smartFrameExtractor/index.js ./product_video.mp4 \
 npm run extract -- --skip-gemini
 ```
 
+### Generate Commercial Images
+
+Transform reference frames into professional commercial product photos:
+
+```bash
+# Basic commercial image generation
+node src/smartFrameExtractor/index.js --generate-commercial
+
+# With custom background style
+node src/smartFrameExtractor/index.js --generate-commercial --bg-style gradient
+
+# Full pipeline with commercial generation
+node src/smartFrameExtractor/index.js ./product.mp4 \
+  --top-k 20 \
+  --generate-commercial \
+  --bg-style studio
+```
+
+**Background styles:**
+- `studio` - Pure white seamless background (default)
+- `gradient` - Soft gradient with subtle shadow
+- `lifestyle` - Natural environment with bokeh
+- `minimal` - Clean surface with reflection
+
 ## CLI Options
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--input` | `-i` | ./input | Input folder to scan for videos |
 | `--fps` | `-f` | 5 | Frames per second to extract |
-| `--top-k` | `-k` | 12 | Number of candidate frames |
+| `--top-k` | `-k` | 24 | Number of candidate frames |
 | `--alpha` | `-a` | 0.5 | Motion penalty weight |
 | `--min-gap` | `-g` | 0.5 | Min seconds between selections |
 | `--output` | `-o` | ./output | Output directory |
@@ -105,6 +136,9 @@ npm run extract -- --skip-gemini
 | `--search-window` | `-w` | 0.2 | ±seconds for final extraction |
 | `--gemini-model` | `-m` | gemini-2.0-flash | Gemini model |
 | `--verbose` | `-v` | false | Verbose output |
+| `--generate-commercial` | `-c` | false | Generate commercial product images |
+| `--bg-style` | `-b` | studio | Background style (studio/gradient/lifestyle/minimal) |
+| `--commercial-model` | | gemini-2.0-flash-exp | Model for image generation |
 | `--help` | `-h` | | Show help |
 
 **Supported video formats:** `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`, `.m4v`
@@ -114,16 +148,20 @@ npm run extract -- --skip-gemini
 ```
 output/
 └── video_name/
-    ├── temp_frames/        # (deleted unless --keep-temp)
-    ├── candidates/         # Selected candidate frames
+    ├── temp_frames/           # (deleted unless --keep-temp)
+    ├── candidates/            # Selected candidate frames
     │   ├── frame_00012_t2.40.png
     │   └── ...
-    ├── final_frames/       # AI-recommended frames
-    │   ├── hero_frame_00012_t2.40.png
-    │   ├── side_frame_00045_t9.00.png
+    ├── final_frames/          # AI-recommended reference frames
+    │   ├── product_1_hero_frame_00012_t2.40.png
+    │   ├── product_1_front_frame_00045_t9.00.png
     │   └── ...
-    ├── quality_report.json # Video quality analysis
-    └── gemini_result.json  # Full AI classification
+    ├── commercial_images/     # (with --generate-commercial)
+    │   ├── commercial_product_1_hero_frame_00012.png
+    │   ├── commercial_product_1_hero_frame_00012_prompt.json
+    │   └── ...
+    ├── quality_report.json    # Video quality analysis
+    └── gemini_result.json     # Full AI classification
 ```
 
 ## How It Works
@@ -179,6 +217,20 @@ For each recommended frame:
 - Re-extract at highest quality from original video
 - Optionally search ±0.2s window for even sharper frame
 - Save with descriptive filename
+
+### 6. Commercial Image Generation (Optional)
+
+When `--generate-commercial` is enabled:
+- Takes each reference frame as input
+- Sends to AI with product photography prompts
+- Generates professional commercial images with:
+  - Clean, consistent backgrounds
+  - Professional lighting
+  - Product isolation (removes hands/distractions)
+  - High-resolution output
+
+If the model doesn't support image generation, creates prompt files
+that can be used with external tools (Midjourney, DALL-E, etc.).
 
 ## Handling Unusable Videos
 
@@ -284,7 +336,8 @@ node index.js video.mp4 --fps 3 --min-gap 1.0
 ```javascript
 import { getVideoMetadata, extractFramesDense } from './video.js';
 import { runSmartFramePipeline } from './smartFrames.js';
-import { initGemini, classifyFramesWithGemini } from './gemini.js';
+import { initGemini, classifyFramesWithGemini, getRecommendedFrames } from './gemini.js';
+import { generateCommercialImages } from './commercialGen.js';
 
 // Extract and score
 const metadata = await getVideoMetadata('./video.mp4');
@@ -298,6 +351,17 @@ const geminiResult = await classifyFramesWithGemini(
   result.candidates,
   result.candidateMetadata,
   metadata
+);
+
+// Get recommended frames
+const recommendedFrames = getRecommendedFrames(geminiResult, result.candidates);
+
+// Generate commercial images (optional)
+const commercialResult = await generateCommercialImages(
+  genAI,
+  recommendedFrames,
+  './output/commercial',
+  { backgroundStyle: 'studio' }
 );
 ```
 

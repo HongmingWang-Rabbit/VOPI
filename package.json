@@ -8,7 +8,9 @@
   },
   "scripts": {
     "extract": "node src/smartFrameExtractor/index.js",
-    "extract:help": "node src/smartFrameExtractor/index.js --help"
+    "extract:help": "node src/smartFrameExtractor/index.js --help",
+    "commercial": "node src/smartFrameExtractor/generateCommercial.js",
+    "commercial:help": "node src/smartFrameExtractor/generateCommercial.js --help"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
