@@ -27,6 +27,3 @@ npm-debug.log*
 
 # Build output
 dist/
-
-# Claude Code local config
-.claude/

@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./scripts/log-edit.sh"
+          },
+          {
+            "type": "command",
+            "command": "./scripts/remind-skills.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/chrome-devtools-mcp"]
+    },
+    "supabase": {
+      "url": "https://mcp.supabase.com/mcp?project_ref=jdxhoqdnxshzbjasfhfz"
+    }
+  }
+}
