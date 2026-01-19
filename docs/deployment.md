@@ -119,6 +119,53 @@ Both servers support hot reload via tsx.
 | `JOB_TIMEOUT_MS` | `600000` | Job timeout (10 minutes) |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 
+### Database Pool Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_POOL_MAX` | `20` | Maximum connections in pool |
+| `DB_POOL_IDLE_TIMEOUT_MS` | `30000` | Idle connection timeout |
+| `DB_POOL_CONNECTION_TIMEOUT_MS` | `2000` | Connection acquisition timeout |
+
+### Worker & Callback Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TEMP_DIR_NAME` | `vopi` | Temp directory name under system temp |
+| `CALLBACK_TIMEOUT_MS` | `30000` | Webhook callback timeout |
+| `CALLBACK_MAX_RETRIES` | `3` | Max callback retry attempts |
+| `API_RETRY_DELAY_MS` | `2000` | Base delay for API retries |
+| `API_RATE_LIMIT_DELAY_MS` | `500` | Delay between API calls |
+
+### Queue Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QUEUE_JOB_ATTEMPTS` | `3` | Max job retry attempts |
+| `QUEUE_BACKOFF_DELAY_MS` | `5000` | Base backoff delay |
+| `QUEUE_COMPLETED_AGE_SECONDS` | `86400` | Keep completed jobs for 24h |
+| `QUEUE_FAILED_AGE_SECONDS` | `604800` | Keep failed jobs for 7 days |
+| `QUEUE_COMPLETED_COUNT` | `100` | Max completed jobs to keep |
+| `QUEUE_FAILED_COUNT` | `1000` | Max failed jobs to keep |
+
+### CORS & Security Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORS_ALLOWED_DOMAINS` | `24rabbit\.com` | Comma-separated allowed CORS domains (regex) |
+| `AUTH_SKIP_PATHS` | `/health,/ready,/docs` | Paths that skip authentication |
+| `CALLBACK_ALLOWED_DOMAINS` | `` | Allowed callback domains (SSRF protection) |
+
+### External API Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model to use |
+| `PHOTOROOM_BASIC_HOST` | `sdk.photoroom.com` | Photoroom basic API host |
+| `PHOTOROOM_PLUS_HOST` | `image-api.photoroom.com` | Photoroom plus API host |
+| `FFMPEG_PATH` | `ffmpeg` | Path to FFmpeg binary |
+| `FFPROBE_PATH` | `ffprobe` | Path to FFprobe binary |
+
 ---
 
 ## Docker Compose Services
@@ -259,6 +306,9 @@ The API provides health check endpoints:
 3. **S3**: Use IAM roles instead of access keys when possible
 4. **Secrets**: Use secret management (Vault, AWS Secrets Manager)
 5. **TLS**: Terminate TLS at load balancer
+6. **CORS**: Configure `CORS_ALLOWED_DOMAINS` to restrict origins
+7. **Callback SSRF Protection**: Set `CALLBACK_ALLOWED_DOMAINS` to whitelist webhook destinations
+8. **Timing-Safe Auth**: API key validation uses constant-time comparison to prevent timing attacks
 
 ### Logging
 

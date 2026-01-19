@@ -74,7 +74,16 @@ Extract the best frame within a time window using a custom scoring function.
 ### Dependencies
 
 - FFmpeg and FFprobe must be installed and available in PATH
-- Can be configured via `FFMPEG_PATH` and `FFPROBE_PATH` environment variables
+- Configurable via `FFMPEG_PATH` and `FFPROBE_PATH` environment variables
+
+### Configuration
+
+FFmpeg paths are loaded from application config:
+```typescript
+const config = getConfig();
+const ffmpegPath = config.ffmpeg.ffmpegPath;   // Default: 'ffmpeg'
+const ffprobePath = config.ffmpeg.ffprobePath; // Default: 'ffprobe'
+```
 
 ---
 
@@ -231,7 +240,9 @@ Send batch of frames to Gemini for classification.
 **Options**:
 ```typescript
 {
-  model?: string;  // Model name (default: "gemini-2.0-flash")
+  model?: string;       // Model name (default from GEMINI_MODEL env)
+  maxRetries?: number;  // Retry attempts (default: 3)
+  retryDelay?: number;  // Base delay for retries (from API_RETRY_DELAY_MS)
 }
 ```
 
@@ -239,11 +250,18 @@ Send batch of frames to Gemini for classification.
 
 Extract recommended frames from Gemini response, selecting the best frame for each discovered variant.
 
+### Configuration
+
+Model and prompts are configurable:
+- `GEMINI_MODEL`: Model to use (default: `gemini-2.0-flash`)
+- System prompt and output schema stored in `src/templates/`
+
 ### Cost Optimization
 
 - Only candidate frames (best per second) are sent to Gemini
 - Frames are batched to reduce API calls
 - Image data is base64-encoded inline (no upload needed)
+- Automatic retry with exponential backoff on failures
 
 ---
 
@@ -257,8 +275,10 @@ Integrates with Photoroom API for background removal and commercial image genera
 
 | Endpoint | Purpose |
 |----------|---------|
-| `sdk.photoroom.com/v1/segment` | Basic background removal |
-| `image-api.photoroom.com/v2/edit` | AI-powered editing and generation |
+| `{PHOTOROOM_BASIC_HOST}/v1/segment` | Basic background removal |
+| `{PHOTOROOM_PLUS_HOST}/v2/edit` | AI-powered editing and generation |
+
+Hosts are configurable via environment variables (defaults: `sdk.photoroom.com`, `image-api.photoroom.com`).
 
 ### Commercial Image Versions
 
@@ -302,6 +322,12 @@ Generate all commercial versions for a frame.
 ### AI Cleanup
 
 When `aiCleanup: true` and obstructions are detected, Photoroom's edit API is used to remove hands, cords, and other obstructions before generating commercial images.
+
+### Rate Limiting
+
+API calls are rate-limited with configurable delays:
+- `API_RATE_LIMIT_DELAY_MS`: Delay between API calls (default: 500ms)
+- `API_RETRY_DELAY_MS`: Base delay for retries with exponential backoff
 
 ---
 
@@ -426,7 +452,7 @@ interface PipelineProgress {
 ### Temp Directory Structure
 
 ```
-/tmp/vopi/{jobId}/
+/tmp/{TEMP_DIR_NAME}/{jobId}/
 ├── video/          # Downloaded video
 ├── frames/         # All extracted frames
 ├── candidates/     # Best frame per second
@@ -434,4 +460,46 @@ interface PipelineProgress {
 └── commercial/     # Generated images
 ```
 
+The temp directory name is configurable via `TEMP_DIR_NAME` (default: `vopi`).
+
 All temp files are cleaned up after pipeline completion (success or failure).
+
+### Refactored Architecture
+
+The pipeline service has been refactored for better maintainability:
+
+- **PipelineContext**: Shared context passed between pipeline steps
+- **WorkDirs**: Structured working directory configuration
+- Modular step functions for each pipeline phase
+- Job config validation using Zod schemas
+
+---
+
+## URL Validator Utility
+
+**File**: `src/utils/url-validator.ts`
+
+Provides URL validation utilities for SSRF protection.
+
+### Methods
+
+#### `isCallbackUrlAllowed(url: string): boolean`
+
+Check if a callback URL domain is in the allowed list.
+
+#### `isSafeProtocol(url: string): boolean`
+
+Verify URL uses http or https protocol.
+
+#### `isPrivateUrl(url: string): boolean`
+
+Detect if URL targets private/internal IP addresses (localhost, 10.x.x.x, 172.16-31.x.x, 192.168.x.x).
+
+#### `validateCallbackUrlComprehensive(url: string): { valid: boolean; error?: string }`
+
+Full validation combining protocol, private IP, and domain checks.
+
+### Configuration
+
+- `CALLBACK_ALLOWED_DOMAINS`: Comma-separated whitelist of allowed callback domains
+- Private URL blocking is relaxed in development mode

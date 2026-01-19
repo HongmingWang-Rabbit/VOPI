@@ -68,7 +68,9 @@ The HTTP layer built on Fastify:
 Key features:
 - Zod schema validation for request/response
 - Swagger UI at `/docs`
-- API key authentication via `x-api-key` header
+- API key authentication via `x-api-key` header (timing-safe comparison)
+- Configurable CORS with domain whitelist
+- Configurable auth skip paths
 - Health checks at `/health` and `/ready`
 
 ### Job Queue (`src/queues/`)
@@ -83,7 +85,12 @@ Job lifecycle:
 2. Job is added to BullMQ queue
 3. Worker picks up job and processes through pipeline
 4. Status updates are persisted to PostgreSQL
-5. Optional webhook callback on completion
+5. Optional webhook callback on completion (with SSRF protection)
+
+Queue configuration is fully customizable:
+- Retry attempts and backoff delays
+- Job retention policies (age and count limits)
+- Concurrency settings
 
 ### Worker Process (`src/workers/`)
 
@@ -95,8 +102,9 @@ Independent process that consumes jobs from the queue:
 The worker:
 - Runs independently from API (can be scaled horizontally)
 - Processes one job at a time per worker (configurable concurrency)
-- Handles failures with automatic retry
+- Handles failures with automatic retry and exponential backoff
 - Cleans up temp files after each job
+- Sends webhook callbacks with timeout and retry logic
 
 ### Services (`src/services/`)
 

@@ -61,6 +61,8 @@ The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) pr
 - `src/routes/` + `src/controllers/` - HTTP layer
 - `src/workers/` - BullMQ job processors
 - `src/db/schema.ts` - Drizzle ORM schema (jobs, videos, frames, commercialImages)
+- `src/templates/` - Gemini prompts and output schemas
+- `src/utils/` - Shared utilities (logging, errors, URL validation)
 - `src/smartFrameExtractor/` - Standalone CLI tool (JavaScript)
 
 ### Database Relationships
@@ -93,6 +95,12 @@ API docs available at `http://localhost:3000/docs` (Swagger UI)
 
 All `/api/v1/*` endpoints require `x-api-key` header. Valid keys are configured via `API_KEYS` env var (comma-separated).
 
+Security features:
+- Timing-safe API key comparison (prevents timing attacks)
+- Configurable auth skip paths via `AUTH_SKIP_PATHS`
+- CORS domain whitelist via `CORS_ALLOWED_DOMAINS`
+- Callback URL SSRF protection via `CALLBACK_ALLOWED_DOMAINS`
+
 ## Frame Scoring Algorithm
 
 ```
@@ -104,9 +112,19 @@ score = sharpness - (alpha × motion × 255)
 
 ## External Dependencies
 
-- **FFmpeg** must be installed and in PATH
-- **Gemini API** for frame classification (cost-optimized: only top-K candidates sent)
-- **Photoroom API** for background removal and commercial image generation
+- **FFmpeg** must be installed and in PATH (configurable via `FFMPEG_PATH`, `FFPROBE_PATH`)
+- **Gemini API** for frame classification (configurable model via `GEMINI_MODEL`)
+- **Photoroom API** for background removal (configurable hosts via `PHOTOROOM_*_HOST`)
+
+## Configuration
+
+All configuration is via environment variables with sensible defaults. Key categories:
+- **Database**: Connection pooling settings (`DB_POOL_*`)
+- **Queue**: Job retry and retention (`QUEUE_*`)
+- **Worker**: Concurrency, timeouts, rate limiting (`WORKER_*`, `API_*`)
+- **Security**: CORS, auth skip paths, callback domains
+
+See `.env.example` for all available options.
 
 ## Documentation
 
