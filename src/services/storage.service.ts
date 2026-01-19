@@ -192,22 +192,30 @@ export class StorageService {
       const writeStream = createWriteStream(localPath);
       const reader = response.body?.getReader();
       if (!reader) {
+        writeStream.destroy();
         throw new Error('No response body');
       }
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        writeStream.write(value);
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          writeStream.write(value);
+        }
+
+        writeStream.end();
+        await new Promise<void>((resolve, reject) => {
+          writeStream.on('finish', resolve);
+          writeStream.on('error', reject);
+        });
+
+        logger.info({ url, localPath }, 'File downloaded from URL');
+      } catch (error) {
+        // Clean up: cancel the reader and destroy the write stream
+        await reader.cancel().catch(() => {});
+        writeStream.destroy();
+        throw error;
       }
-
-      writeStream.end();
-      await new Promise<void>((resolve, reject) => {
-        writeStream.on('finish', resolve);
-        writeStream.on('error', reject);
-      });
-
-      logger.info({ url, localPath }, 'File downloaded from URL');
       return;
     }
 
@@ -303,10 +311,28 @@ export class StorageService {
   }
 
   /**
+   * Sanitize a path segment for S3 key usage
+   * Removes path traversal attempts and invalid characters
+   */
+  private sanitizeKeySegment(segment: string): string {
+    return segment
+      // Remove path traversal attempts
+      .replace(/\.\./g, '')
+      // Remove leading/trailing slashes
+      .replace(/^\/+|\/+$/g, '')
+      // Replace multiple slashes with single
+      .replace(/\/+/g, '/')
+      // Remove potentially dangerous characters, keep alphanumeric, dash, underscore, dot
+      .replace(/[^a-zA-Z0-9\-_.]/g, '_');
+  }
+
+  /**
    * Generate S3 key for job artifacts
    */
   getJobKey(jobId: string, ...parts: string[]): string {
-    return ['jobs', jobId, ...parts].join('/');
+    const sanitizedJobId = this.sanitizeKeySegment(jobId);
+    const sanitizedParts = parts.map((p) => this.sanitizeKeySegment(p));
+    return ['jobs', sanitizedJobId, ...sanitizedParts].join('/');
   }
 }
 

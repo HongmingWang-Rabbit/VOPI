@@ -5,6 +5,24 @@ import type { VideoMetadata, FrameScores } from '../types/job.types.js';
 
 const logger = createChildLogger({ service: 'frame-scoring' });
 
+/**
+ * Frame scoring constants
+ */
+const SCORING_CONSTANTS = {
+  /** Size to resize images for motion comparison */
+  MOTION_COMPARISON_SIZE: 256,
+  /** Maximum pixel value for normalization */
+  MAX_PIXEL_VALUE: 255,
+  /** Threshold below which sharpness is considered poor */
+  LOW_SHARPNESS_THRESHOLD: 5,
+  /** Threshold above which motion is considered high */
+  HIGH_MOTION_THRESHOLD: 0.2,
+  /** Threshold below which motion is considered low */
+  LOW_MOTION_THRESHOLD: 0.1,
+  /** Minimum number of low motion frames for good quality */
+  MIN_LOW_MOTION_FRAMES: 5,
+} as const;
+
 export interface ScoredFrame extends ExtractedFrame {
   sharpness: number;
   motion: number;
@@ -101,7 +119,7 @@ export class FrameScoringService {
     if (!imagePath1) return 0;
 
     try {
-      const size = 256;
+      const size = SCORING_CONSTANTS.MOTION_COMPARISON_SIZE;
 
       const [img1, img2] = await Promise.all([
         sharp(imagePath1).greyscale().resize(size, size, { fit: 'fill' }).raw().toBuffer(),
@@ -114,7 +132,7 @@ export class FrameScoringService {
       }
 
       const avgDiff = totalDiff / img1.length;
-      return avgDiff / 255;
+      return avgDiff / SCORING_CONSTANTS.MAX_PIXEL_VALUE;
     } catch (e) {
       logger.error({ error: e }, 'Failed to compute motion');
       return 0.5;
@@ -245,22 +263,41 @@ export class FrameScoringService {
    * Generate quality report
    */
   generateQualityReport(scoredFrames: ScoredFrame[], videoMetadata: VideoMetadata): QualityReport {
+    // Guard against empty arrays to prevent division by zero
+    if (scoredFrames.length === 0) {
+      return {
+        video: {
+          filename: videoMetadata.filename,
+          duration_sec: videoMetadata.duration,
+        },
+        analysis: {
+          total_frames_analyzed: 0,
+          average_sharpness: 0,
+          max_sharpness: 0,
+          average_motion: 0,
+          low_motion_frames: 0,
+        },
+        tips_for_better_results: ['No frames were analyzed'],
+        status: 'no_frames',
+      };
+    }
+
     const sharpnessValues = scoredFrames.map((f) => f.sharpness);
     const motionValues = scoredFrames.map((f) => f.motion);
 
     const avgSharpness = sharpnessValues.reduce((a, b) => a + b, 0) / sharpnessValues.length;
     const maxSharpness = Math.max(...sharpnessValues);
     const avgMotion = motionValues.reduce((a, b) => a + b, 0) / motionValues.length;
-    const lowMotionFrames = scoredFrames.filter((f) => f.motion < 0.1);
+    const lowMotionFrames = scoredFrames.filter((f) => f.motion < SCORING_CONSTANTS.LOW_MOTION_THRESHOLD);
 
     const tips: string[] = [];
-    if (avgSharpness < 5) {
+    if (avgSharpness < SCORING_CONSTANTS.LOW_SHARPNESS_THRESHOLD) {
       tips.push('Better lighting would improve frame quality');
     }
-    if (avgMotion > 0.2) {
+    if (avgMotion > SCORING_CONSTANTS.HIGH_MOTION_THRESHOLD) {
       tips.push('Slower rotation would give sharper frames');
     }
-    if (lowMotionFrames.length < 5) {
+    if (lowMotionFrames.length < SCORING_CONSTANTS.MIN_LOW_MOTION_FRAMES) {
       tips.push('Brief pauses at each angle help capture clearer frames');
     }
 

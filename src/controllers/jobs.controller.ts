@@ -3,13 +3,13 @@ import { eq, desc, and, SQL, sql } from 'drizzle-orm';
 import { createChildLogger } from '../utils/logger.js';
 import { NotFoundError, BadRequestError } from '../utils/errors.js';
 import { addPipelineJob } from '../queues/pipeline.queue.js';
+import { validateCallbackUrlComprehensive } from '../utils/url-validator.js';
 import {
-  createJobSchema,
-  jobListQuerySchema,
   jobConfigSchema,
   type CreateJobRequest,
   type JobListQuery,
   type JobConfig,
+  type JobProgress,
 } from '../types/job.types.js';
 import type { Job, NewJob } from '../db/schema.js';
 
@@ -25,16 +25,23 @@ export class JobsController {
   async createJob(data: CreateJobRequest): Promise<Job> {
     const db = getDatabase();
 
-    // Validate and parse config
-    const validated = createJobSchema.parse(data);
-    const config = jobConfigSchema.parse(validated.config || {});
+    // Validate callback URL for SSRF protection
+    if (data.callbackUrl) {
+      const validation = validateCallbackUrlComprehensive(data.callbackUrl);
+      if (!validation.valid) {
+        throw new BadRequestError(validation.error || 'Invalid callback URL');
+      }
+    }
+
+    // Data is already validated by route, just parse config defaults
+    const config = jobConfigSchema.parse(data.config || {});
 
     const [job] = await db
       .insert(schema.jobs)
       .values({
-        videoUrl: validated.videoUrl,
+        videoUrl: data.videoUrl,
         config: config as JobConfig,
-        callbackUrl: validated.callbackUrl,
+        callbackUrl: data.callbackUrl,
         status: 'pending',
       } satisfies NewJob)
       .returning();
@@ -52,12 +59,11 @@ export class JobsController {
    */
   async listJobs(query: JobListQuery): Promise<{ jobs: Job[]; total: number }> {
     const db = getDatabase();
-    const validated = jobListQuerySchema.parse(query);
-
+    // Data is already validated by route
     const conditions: SQL[] = [];
 
-    if (validated.status) {
-      conditions.push(eq(schema.jobs.status, validated.status));
+    if (query.status) {
+      conditions.push(eq(schema.jobs.status, query.status));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -68,8 +74,8 @@ export class JobsController {
         .from(schema.jobs)
         .where(whereClause)
         .orderBy(desc(schema.jobs.createdAt))
-        .limit(validated.limit)
-        .offset(validated.offset),
+        .limit(query.limit)
+        .offset(query.offset),
       db
         .select({ count: sql<number>`count(*)` })
         .from(schema.jobs)
@@ -107,7 +113,7 @@ export class JobsController {
   async getJobStatus(jobId: string): Promise<{
     id: string;
     status: string;
-    progress: unknown;
+    progress: JobProgress | null;
     createdAt: Date;
     updatedAt: Date;
   }> {
@@ -134,35 +140,37 @@ export class JobsController {
 
   /**
    * Cancel a job
+   * Uses atomic update with status check to prevent race conditions
    */
   async cancelJob(jobId: string): Promise<Job> {
     const db = getDatabase();
 
-    const [job] = await db
-      .select()
-      .from(schema.jobs)
-      .where(eq(schema.jobs.id, jobId))
-      .limit(1);
-
-    if (!job) {
-      throw new NotFoundError(`Job ${jobId} not found`);
-    }
-
-    // Can only cancel pending jobs
-    if (job.status !== 'pending') {
-      throw new BadRequestError(
-        `Cannot cancel job in ${job.status} status. Only pending jobs can be cancelled.`
-      );
-    }
-
+    // Atomic update: only cancel if status is 'pending'
     const [updated] = await db
       .update(schema.jobs)
       .set({
         status: 'cancelled',
         updatedAt: new Date(),
       })
-      .where(eq(schema.jobs.id, jobId))
+      .where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.status, 'pending')))
       .returning();
+
+    if (!updated) {
+      // Check if job exists to provide appropriate error
+      const [job] = await db
+        .select({ id: schema.jobs.id, status: schema.jobs.status })
+        .from(schema.jobs)
+        .where(eq(schema.jobs.id, jobId))
+        .limit(1);
+
+      if (!job) {
+        throw new NotFoundError(`Job ${jobId} not found`);
+      }
+
+      throw new BadRequestError(
+        `Cannot cancel job in ${job.status} status. Only pending jobs can be cancelled.`
+      );
+    }
 
     logger.info({ jobId }, 'Job cancelled');
 

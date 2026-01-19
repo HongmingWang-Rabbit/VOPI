@@ -4,6 +4,8 @@ import { readFile } from 'fs/promises';
 import { createChildLogger } from '../utils/logger.js';
 import { ExternalApiError } from '../utils/errors.js';
 import { getConfig } from '../config/index.js';
+import { GEMINI_SYSTEM_PROMPT } from '../templates/gemini-system-prompt.js';
+import { GEMINI_OUTPUT_SCHEMA } from '../templates/gemini-output-schema.js';
 import type { ScoredFrame } from './frame-scoring.service.js';
 import type {
   VideoMetadata,
@@ -64,133 +66,6 @@ export interface RecommendedFrame extends ScoredFrame {
   backgroundRecommendations: BackgroundRecommendations;
 }
 
-/**
- * System prompt for Gemini
- */
-const SYSTEM_PROMPT = `You are extracting REFERENCE frames for AI image generation from a product video.
-
-## YOUR MISSION: DISCOVER ALL UNIQUE VIEWS (VARIANTS) OF EACH PRODUCT
-
-### STEP 1: DETECT ALL PRODUCTS
-Identify every distinct product in the video:
-- Different items = different products (product_1, product_2, etc.)
-- Same item at different times = same product
-
-### STEP 2: DISCOVER VARIANTS (UNIQUE VIEWS)
-
-**Instead of fixed angles, discover VARIANTS dynamically:**
-
-Go through each frame and ask: "Is this a NEW unique view, or SIMILAR to one I've seen?"
-
-**CREATE A NEW VARIANT when you see:**
-- A distinctly different angle/perspective of the product
-- The product in a different state (open vs closed, folded vs unfolded)
-- A close-up showing different details
-- A significantly different composition
-
-**GROUP INTO SAME VARIANT when:**
-- The angle/perspective is essentially the same
-- Only minor differences (slightly rotated, different moment of same view)
-- Would be redundant to keep both
-
-### QUALITY SCORING
-
-**Base score starts at 50, then adjust:**
-
-Visibility:
-- Product fully visible with gap from edges: +20
-- Product touching edge slightly: +10
-- Minor cut-off (<10%): -10
-- Significant cut-off (>10%): -30
-
-Sharpness/Focus:
-- Sharp and clear: +15
-- Slightly soft: +5
-- Noticeably blurry: -15
-
-Obstructions:
-- No obstructions: +10
-- Removable obstructions (hands, etc.): -10
-- Blocking key features: -30
-
-### OBSTRUCTION DETECTION
-
-**Report obstructions for each frame:**
-- "hand" - human hand holding/gripping product
-- "finger" - fingers touching product
-- "arm" - arm visible in frame
-- "cord" - power cords, cables, straps
-- "tag" - price tags, labels not part of product
-- "reflection" - unwanted reflections
-- "shadow" - harsh shadows
-- "other_object" - any other covering object
-
-### BACKGROUND RECOMMENDATIONS
-
-**For each variant, suggest backgrounds for commercial use:**
-
-1. **solid_color**: A hex color that complements the product
-2. **real_life_setting**: A realistic setting appropriate for the product
-3. **creative_shot**: An abstract/artistic concept for marketing
-
-IMPORTANT: Return ONLY valid JSON. No markdown, no explanation.`;
-
-/**
- * Output schema for Gemini
- */
-const OUTPUT_SCHEMA = `{
-  "video": {
-    "filename": "string",
-    "duration_sec": "number"
-  },
-  "products_detected": [
-    {
-      "product_id": "string",
-      "description": "string",
-      "product_category": "string"
-    }
-  ],
-  "frame_evaluation": [
-    {
-      "frame_id": "string",
-      "timestamp_sec": "number",
-      "product_id": "string",
-      "variant_id": "string",
-      "angle_estimate": "string",
-      "quality_score_0_100": "number",
-      "similarity_note": "string",
-      "obstructions": {
-        "has_obstruction": "boolean",
-        "obstruction_types": ["array"],
-        "obstruction_description": "string or null",
-        "removable_by_ai": "boolean"
-      }
-    }
-  ],
-  "variants_discovered": [
-    {
-      "product_id": "string",
-      "variant_id": "string",
-      "angle_estimate": "string",
-      "description": "string",
-      "best_frame_id": "string",
-      "best_frame_score": "number",
-      "all_frame_ids": ["array"],
-      "obstructions": {
-        "has_obstruction": "boolean",
-        "obstruction_types": ["array"],
-        "obstruction_description": "string or null",
-        "removable_by_ai": "boolean"
-      },
-      "background_recommendations": {
-        "solid_color": "string",
-        "solid_color_name": "string",
-        "real_life_setting": "string",
-        "creative_shot": "string"
-      }
-    }
-  ]
-}`;
 
 /**
  * GeminiService - Gemini API wrapper for frame classification
@@ -216,10 +91,12 @@ export class GeminiService {
   /**
    * Get model instance
    */
-  private getModel(modelName = 'gemini-2.0-flash'): GenerativeModel {
+  private getModel(modelName?: string): GenerativeModel {
+    const config = getConfig();
+    const model = modelName || config.apis.geminiModel;
     const client = this.init();
     return client.getGenerativeModel({
-      model: modelName,
+      model,
       generationConfig: {
         temperature: 0.2,
         topP: 0.8,
@@ -237,10 +114,21 @@ export class GeminiService {
     const imageData = await readFile(imagePath);
     const base64 = imageData.toString('base64');
 
+    // Detect MIME type from file extension
+    const ext = imagePath.toLowerCase().split('.').pop();
+    const mimeTypes: Record<string, string> = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      webp: 'image/webp',
+    };
+    const mimeType = mimeTypes[ext || ''] || 'image/png';
+
     return {
       inlineData: {
         data: base64,
-        mimeType: 'image/png',
+        mimeType,
       },
     };
   }
@@ -277,7 +165,7 @@ ${metadataStr}
 4. Assess overall video quality
 
 ## Required Output Schema
-${OUTPUT_SCHEMA}
+${GEMINI_OUTPUT_SCHEMA}
 
 Return ONLY the JSON object. No additional text.`;
   }
@@ -334,7 +222,12 @@ Return ONLY the JSON object. No additional text.`;
     videoMetadata: VideoMetadata,
     options: { model?: string; maxRetries?: number; retryDelay?: number } = {}
   ): Promise<GeminiResponse> {
-    const { model = 'gemini-2.0-flash', maxRetries = 3, retryDelay = 2000 } = options;
+    const config = getConfig();
+    const {
+      model = config.apis.geminiModel,
+      maxRetries = 3,
+      retryDelay = config.worker.apiRetryDelayMs,
+    } = options;
 
     logger.info({ count: candidates.length, model }, 'Classifying frames with Gemini');
 
@@ -347,7 +240,7 @@ Return ONLY the JSON object. No additional text.`;
 
     // Build content
     const content = [
-      { text: SYSTEM_PROMPT },
+      { text: GEMINI_SYSTEM_PROMPT },
       { text: '\n\n## Candidate Frame Images\n\nImages are provided in order:\n\n' },
       ...imageParts.flatMap((img, idx) => [
         { text: `\n--- Frame ${idx + 1} (${candidateMetadata[idx].frame_id}) ---\n` },

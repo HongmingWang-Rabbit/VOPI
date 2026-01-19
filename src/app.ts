@@ -31,7 +31,35 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await app.register(cors, {
-    origin: true,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (e.g., mobile apps, curl)
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      // Check against configured allowed domains
+      const isAllowed = config.cors.allowedDomains.some((domain) => {
+        const pattern = new RegExp(`^https?:\\/\\/([a-z0-9-]+\\.)*${domain}$`);
+        return pattern.test(origin);
+      });
+
+      if (isAllowed) {
+        callback(null, true);
+        return;
+      }
+
+      // In development, also allow localhost
+      if (config.server.env === 'development') {
+        const localhostPattern = /^https?:\/\/localhost(:\d+)?$/;
+        if (localhostPattern.test(origin)) {
+          callback(null, true);
+          return;
+        }
+      }
+
+      callback(new Error('Not allowed by CORS'), false);
+    },
     credentials: true,
   });
 

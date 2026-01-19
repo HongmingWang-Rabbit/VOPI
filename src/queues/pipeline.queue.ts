@@ -25,18 +25,18 @@ export function initPipelineQueue(): Queue<PipelineJobData> {
   queue = new Queue<PipelineJobData>(QUEUE_NAME, {
     connection: { url: config.redis.url },
     defaultJobOptions: {
-      attempts: 3,
+      attempts: config.queue.jobAttempts,
       backoff: {
         type: 'exponential',
-        delay: 5000,
+        delay: config.queue.backoffDelayMs,
       },
       removeOnComplete: {
-        count: 100,
-        age: 24 * 3600, // 24 hours
+        count: config.queue.completedCount,
+        age: config.queue.completedAgeSeconds,
       },
       removeOnFail: {
-        count: 1000,
-        age: 7 * 24 * 3600, // 7 days
+        count: config.queue.failedCount,
+        age: config.queue.failedAgeSeconds,
       },
     },
   });

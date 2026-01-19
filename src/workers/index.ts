@@ -6,6 +6,7 @@ import { getLogger } from '../utils/logger.js';
 import { initDatabase, closeDatabase } from '../db/index.js';
 import { initRedis, closeRedis } from '../queues/redis.js';
 import { startPipelineWorker, stopPipelineWorker } from './pipeline.worker.js';
+import { videoService } from '../services/video.service.js';
 
 /**
  * Worker entry point
@@ -18,6 +19,17 @@ async function main(): Promise<void> {
   const logger = getLogger();
 
   logger.info({ env: config.server.env }, 'Starting VOPI worker');
+
+  // Check FFmpeg availability
+  const ffmpegCheck = await videoService.checkFfmpegInstalled();
+  if (!ffmpegCheck.available) {
+    logger.error({ error: ffmpegCheck.error }, 'FFmpeg not available - worker cannot process videos');
+    process.exit(1);
+  }
+  logger.info(
+    { ffmpegVersion: ffmpegCheck.ffmpegVersion, ffprobeVersion: ffmpegCheck.ffprobeVersion },
+    'FFmpeg available'
+  );
 
   // Initialize connections
   await initDatabase();
@@ -52,6 +64,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error('Fatal error:', error);
+  // Use stderr for fatal errors before/after logger availability
+  process.stderr.write(`Fatal error: ${error instanceof Error ? error.message : String(error)}\n`);
+  if (error instanceof Error && error.stack) {
+    process.stderr.write(`${error.stack}\n`);
+  }
   process.exit(1);
 });

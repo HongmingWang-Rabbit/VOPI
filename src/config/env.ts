@@ -11,6 +11,9 @@ export const envSchema = z.object({
 
   // Database
   DATABASE_URL: z.string().url(),
+  DB_POOL_MAX: z.coerce.number().default(20),
+  DB_POOL_IDLE_TIMEOUT_MS: z.coerce.number().default(30000),
+  DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().default(2000),
 
   // Redis
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
@@ -28,14 +31,54 @@ export const envSchema = z.object({
 
   // External APIs
   GOOGLE_AI_API_KEY: z.string(),
+  GEMINI_MODEL: z.string().default('gemini-2.0-flash'),
   PHOTOROOM_API_KEY: z.string(),
+  PHOTOROOM_BASIC_HOST: z.string().default('sdk.photoroom.com'),
+  PHOTOROOM_PLUS_HOST: z.string().default('image-api.photoroom.com'),
 
   // Worker
   WORKER_CONCURRENCY: z.coerce.number().default(2),
   JOB_TIMEOUT_MS: z.coerce.number().default(600000), // 10 minutes
+  TEMP_DIR_NAME: z.string().default('vopi'),
+  CALLBACK_TIMEOUT_MS: z.coerce.number().default(30000), // 30 seconds
+  CALLBACK_MAX_RETRIES: z.coerce.number().default(3),
+  API_RETRY_DELAY_MS: z.coerce.number().default(2000),
+  API_RATE_LIMIT_DELAY_MS: z.coerce.number().default(500),
+
+  // Queue
+  QUEUE_JOB_ATTEMPTS: z.coerce.number().default(3),
+  QUEUE_BACKOFF_DELAY_MS: z.coerce.number().default(5000),
+  QUEUE_COMPLETED_AGE_SECONDS: z.coerce.number().default(86400), // 24 hours
+  QUEUE_FAILED_AGE_SECONDS: z.coerce.number().default(604800), // 7 days
 
   // Logging
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+
+  // CORS
+  CORS_ALLOWED_DOMAINS: z
+    .string()
+    .default('24rabbit\\.com')
+    .transform((val) => val.split(',').map((d) => d.trim()).filter(Boolean)),
+
+  // Auth
+  AUTH_SKIP_PATHS: z
+    .string()
+    .default('/health,/ready,/docs')
+    .transform((val) => val.split(',').map((p) => p.trim()).filter(Boolean)),
+
+  // Callback SSRF protection
+  CALLBACK_ALLOWED_DOMAINS: z
+    .string()
+    .default('')
+    .transform((val) => val.split(',').map((d) => d.trim()).filter(Boolean)),
+
+  // FFmpeg
+  FFMPEG_PATH: z.string().default('ffmpeg'),
+  FFPROBE_PATH: z.string().default('ffprobe'),
+
+  // Queue counts (for removeOnComplete/removeOnFail)
+  QUEUE_COMPLETED_COUNT: z.coerce.number().default(100),
+  QUEUE_FAILED_COUNT: z.coerce.number().default(1000),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -54,8 +97,9 @@ export function parseEnv(): Env {
 
   if (!result.success) {
     const errors = result.error.format();
-    console.error('Environment validation failed:');
-    console.error(JSON.stringify(errors, null, 2));
+    // Use stderr for pre-logger initialization errors
+    process.stderr.write('Environment validation failed:\n');
+    process.stderr.write(JSON.stringify(errors, null, 2) + '\n');
     throw new Error('Invalid environment configuration');
   }
 

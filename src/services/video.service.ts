@@ -2,11 +2,8 @@ import { spawn } from 'child_process';
 import { mkdir, rm, readdir, rename, copyFile } from 'fs/promises';
 import path from 'path';
 
-// Use system ffmpeg/ffprobe for local dev, package binaries for Docker
-const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
-const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
-
 import { createChildLogger } from '../utils/logger.js';
+import { getConfig } from '../config/index.js';
 import type { VideoMetadata } from '../types/job.types.js';
 
 const logger = createChildLogger({ service: 'video' });
@@ -34,6 +31,8 @@ export class VideoService {
    * Get video metadata using ffprobe
    */
   async getMetadata(videoPath: string): Promise<VideoMetadata> {
+    const config = getConfig();
+
     return new Promise((resolve, reject) => {
       const args = [
         '-v', 'quiet',
@@ -43,7 +42,7 @@ export class VideoService {
         videoPath,
       ];
 
-      const ffprobe = spawn(ffprobePath, args);
+      const ffprobe = spawn(config.ffmpeg.ffprobePath, args);
       let stdout = '';
       let stderr = '';
 
@@ -105,6 +104,7 @@ export class VideoService {
     outputDir: string,
     options: ExtractFramesOptions = {}
   ): Promise<ExtractedFrame[]> {
+    const config = getConfig();
     const { fps = 5, quality = 2, scale = null } = options;
 
     // Ensure output directory exists
@@ -134,7 +134,7 @@ export class VideoService {
       ];
 
       logger.info({ fps }, 'Extracting frames');
-      const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const ffmpeg = spawn(config.ffmpeg.ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
       let stderr = '';
       ffmpeg.stderr?.on('data', (data: Buffer) => {
@@ -208,6 +208,7 @@ export class VideoService {
     outputPath: string,
     options: { quality?: number } = {}
   ): Promise<string> {
+    const config = getConfig();
     const { quality = 1 } = options;
 
     await mkdir(path.dirname(outputPath), { recursive: true });
@@ -223,7 +224,7 @@ export class VideoService {
         outputPath,
       ];
 
-      const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const ffmpeg = spawn(config.ffmpeg.ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
       let stderr = '';
       ffmpeg.stderr?.on('data', (data: Buffer) => {
@@ -295,10 +296,40 @@ export class VideoService {
   }
 
   /**
-   * Check if ffmpeg is available
+   * Check if ffmpeg is available by running -version
    */
-  checkFfmpegInstalled(): boolean {
-    return !!ffmpegPath && !!ffprobePath;
+  async checkFfmpegInstalled(): Promise<{ available: boolean; ffmpegVersion?: string; ffprobeVersion?: string; error?: string }> {
+    const config = getConfig();
+
+    const checkVersion = (cmd: string): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const proc = spawn(cmd, ['-version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        proc.stdout?.on('data', (data: Buffer) => {
+          stdout += data.toString();
+        });
+        proc.on('close', (code) => {
+          if (code === 0) {
+            // Extract version from first line (e.g., "ffmpeg version 6.0 ...")
+            const match = stdout.match(/version\s+([^\s]+)/);
+            resolve(match?.[1] || 'unknown');
+          } else {
+            reject(new Error(`${cmd} exited with code ${code}`));
+          }
+        });
+        proc.on('error', reject);
+      });
+    };
+
+    try {
+      const [ffmpegVersion, ffprobeVersion] = await Promise.all([
+        checkVersion(config.ffmpeg.ffmpegPath),
+        checkVersion(config.ffmpeg.ffprobePath),
+      ]);
+      return { available: true, ffmpegVersion, ffprobeVersion };
+    } catch (error) {
+      return { available: false, error: (error as Error).message };
+    }
   }
 }
 

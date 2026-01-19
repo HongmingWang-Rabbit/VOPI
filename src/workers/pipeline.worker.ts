@@ -47,28 +47,80 @@ async function processJob(bullJob: BullJob<PipelineJobData>): Promise<void> {
 
   // Send callback if configured
   if (job.callbackUrl) {
+    await sendCallbackWithRetry(jobId, job.callbackUrl, db);
+  }
+}
+
+/**
+ * Send callback with timeout and retry logic
+ */
+async function sendCallbackWithRetry(
+  jobId: string,
+  callbackUrl: string,
+  db: ReturnType<typeof getDatabase>
+): Promise<void> {
+  const config = getConfig();
+  const { callbackTimeoutMs, callbackMaxRetries, apiRetryDelayMs } = config.worker;
+
+  const [updatedJob] = await db
+    .select()
+    .from(schema.jobs)
+    .where(eq(schema.jobs.id, jobId))
+    .limit(1);
+
+  const payload = JSON.stringify({
+    jobId,
+    status: updatedJob?.status,
+    result: updatedJob?.result,
+  });
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= callbackMaxRetries; attempt++) {
     try {
-      const [updatedJob] = await db
-        .select()
-        .from(schema.jobs)
-        .where(eq(schema.jobs.id, jobId))
-        .limit(1);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), callbackTimeoutMs);
 
-      await fetch(job.callbackUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId,
-          status: updatedJob?.status,
-          result: updatedJob?.result,
-        }),
-      });
+      try {
+        const response = await fetch(callbackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          signal: controller.signal,
+        });
 
-      logger.info({ jobId, callbackUrl: job.callbackUrl }, 'Callback sent');
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`Callback returned status ${response.status}`);
+        }
+
+        logger.info({ jobId, callbackUrl, attempt }, 'Callback sent successfully');
+        return;
+      } finally {
+        clearTimeout(timeoutId);
+      }
     } catch (error) {
-      logger.error({ error, jobId, callbackUrl: job.callbackUrl }, 'Callback failed');
+      lastError = error as Error;
+      const isAbortError = (error as Error).name === 'AbortError';
+      const errorMessage = isAbortError ? 'Callback timed out' : (error as Error).message;
+
+      logger.warn(
+        { jobId, callbackUrl, attempt, maxRetries: callbackMaxRetries, error: errorMessage },
+        'Callback attempt failed'
+      );
+
+      if (attempt < callbackMaxRetries) {
+        const delay = apiRetryDelayMs * Math.pow(2, attempt - 1); // Exponential backoff
+        await new Promise((r) => setTimeout(r, delay));
+      }
     }
   }
+
+  logger.error(
+    { jobId, callbackUrl, error: lastError?.message, attempts: callbackMaxRetries },
+    'Callback failed after all retries'
+  );
 }
 
 /**
@@ -84,8 +136,8 @@ export function startPipelineWorker(): Worker<PipelineJobData> {
   worker = new Worker<PipelineJobData>(QUEUE_NAME, processJob, {
     connection: { url: config.redis.url },
     concurrency: config.worker.concurrency,
-    removeOnComplete: { count: 100 },
-    removeOnFail: { count: 1000 },
+    removeOnComplete: { count: config.queue.completedCount },
+    removeOnFail: { count: config.queue.failedCount },
   });
 
   worker.on('completed', (job) => {

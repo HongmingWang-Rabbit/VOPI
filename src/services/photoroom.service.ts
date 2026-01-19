@@ -11,10 +11,21 @@ import type { FrameObstructions } from '../types/job.types.js';
 
 const logger = createChildLogger({ service: 'photoroom' });
 
-const PHOTOROOM_BASIC_URL = 'sdk.photoroom.com';
-const PHOTOROOM_BASIC_ENDPOINT = '/v1/segment';
-const PHOTOROOM_PLUS_URL = 'image-api.photoroom.com';
-const PHOTOROOM_EDIT_ENDPOINT = '/v2/edit';
+/**
+ * Photoroom API constants
+ */
+const PHOTOROOM_CONSTANTS = {
+  BASIC_ENDPOINT: '/v1/segment',
+  EDIT_ENDPOINT: '/v2/edit',
+  /** Default commercial image versions to generate */
+  DEFAULT_VERSIONS: ['transparent', 'solid', 'real', 'creative'] as const,
+  /** Default background color for solid backgrounds */
+  DEFAULT_BG_COLOR: '#FFFFFF',
+  /** Default padding for generated images */
+  DEFAULT_PADDING: '0.12',
+  /** Maximum retry attempts for API calls */
+  MAX_RETRIES: 3,
+} as const;
 
 export interface ProcessResult {
   success: boolean;
@@ -179,8 +190,8 @@ export class PhotoroomService {
 
     const imageBuffer = await this.makeRequest(
       {
-        hostname: PHOTOROOM_PLUS_URL,
-        path: PHOTOROOM_EDIT_ENDPOINT,
+        hostname: config.apis.photoroomPlusHost,
+        path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
         method: 'POST',
         headers: {
           'x-api-key': config.apis.photoroom,
@@ -220,8 +231,8 @@ export class PhotoroomService {
 
     const imageBuffer = await this.makeRequest(
       {
-        hostname: PHOTOROOM_PLUS_URL,
-        path: PHOTOROOM_EDIT_ENDPOINT,
+        hostname: config.apis.photoroomPlusHost,
+        path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
         method: 'POST',
         headers: {
           'x-api-key': config.apis.photoroom,
@@ -262,8 +273,8 @@ export class PhotoroomService {
 
     const imageBuffer = await this.makeRequest(
       {
-        hostname: PHOTOROOM_PLUS_URL,
-        path: PHOTOROOM_EDIT_ENDPOINT,
+        hostname: config.apis.photoroomPlusHost,
+        path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
         method: 'POST',
         headers: {
           'x-api-key': config.apis.photoroom,
@@ -300,8 +311,8 @@ export class PhotoroomService {
 
     const imageBuffer = await this.makeRequest(
       {
-        hostname: PHOTOROOM_BASIC_URL,
-        path: PHOTOROOM_BASIC_ENDPOINT,
+        hostname: config.apis.photoroomBasicHost,
+        path: PHOTOROOM_CONSTANTS.BASIC_ENDPOINT,
         method: 'POST',
         headers: {
           'x-api-key': config.apis.photoroom,
@@ -353,12 +364,14 @@ export class PhotoroomService {
       versions?: string[];
     } = {}
   ): Promise<AllVersionsResult> {
-    const { useAIEdit = false, versions = ['transparent', 'solid', 'real', 'creative'] } = options;
+    const config = getConfig();
+    const { apiRetryDelayMs, apiRateLimitDelayMs } = config.worker;
+    const { useAIEdit = false, versions = [...PHOTOROOM_CONSTANTS.DEFAULT_VERSIONS] } = options;
 
     const baseName = `${frame.recommendedType}_${frame.frameId}`;
     const hasObstruction = frame.obstructions?.has_obstruction;
     const bgRec = frame.backgroundRecommendations || {
-      solid_color: '#FFFFFF',
+      solid_color: PHOTOROOM_CONSTANTS.DEFAULT_BG_COLOR,
       real_life_setting: 'on a clean white surface with soft lighting',
       creative_shot: 'floating with soft shadow on gradient background',
     };
@@ -373,8 +386,7 @@ export class PhotoroomService {
     const transparentPath = path.join(outputDir, `${baseName}_transparent.png`);
     let transparentSuccess = false;
 
-    const maxRetries = 3;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    for (let attempt = 1; attempt <= PHOTOROOM_CONSTANTS.MAX_RETRIES; attempt++) {
       try {
         if (useAIEdit && hasObstruction) {
           results.versions.transparent = await this.editImageWithAI(frame.path, transparentPath, {
@@ -388,12 +400,12 @@ export class PhotoroomService {
       } catch (err) {
         logger.error({ error: err, attempt }, 'Transparent generation failed');
         results.versions.transparent = { success: false, error: (err as Error).message };
-        if (attempt < maxRetries) {
-          await new Promise((r) => setTimeout(r, 1000));
+        if (attempt < PHOTOROOM_CONSTANTS.MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, apiRetryDelayMs));
         }
       }
     }
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, apiRateLimitDelayMs));
 
     if (hasObstruction && !transparentSuccess) {
       logger.error({ baseName }, 'Skipping other versions - transparent failed with obstructions');
@@ -414,7 +426,7 @@ export class PhotoroomService {
       } catch (err) {
         results.versions.solid = { success: false, error: (err as Error).message };
       }
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, apiRateLimitDelayMs));
     }
 
     // 3. Real-life setting
@@ -429,7 +441,7 @@ export class PhotoroomService {
       } catch (err) {
         results.versions.real = { success: false, error: (err as Error).message };
       }
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, apiRateLimitDelayMs));
     }
 
     // 4. Creative shot
