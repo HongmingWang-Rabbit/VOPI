@@ -21,7 +21,10 @@
     "commercial": "node src/smartFrameExtractor/generateCommercial.js",
     "commercial:help": "node src/smartFrameExtractor/generateCommercial.js --help",
     "lint": "eslint src --ext .ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.500.0",
@@ -48,9 +51,11 @@
   "devDependencies": {
     "@types/node": "^20.10.0",
     "@types/pg": "^8.10.0",
+    "@vitest/coverage-v8": "^4.0.17",
     "drizzle-kit": "^0.20.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.17"
   },
   "keywords": [
     "video",
