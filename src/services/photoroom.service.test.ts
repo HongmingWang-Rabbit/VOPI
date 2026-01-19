@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PhotoroomService, type ProcessResult, type AllVersionsResult } from './photoroom.service.js';
+import { PhotoroomService } from './photoroom.service.js';
 import type { RecommendedFrame } from './gemini.service.js';
 
 // Mock https module
@@ -87,20 +87,20 @@ describe('PhotoroomService', () => {
     const mockReq = {
       write: vi.fn(),
       end: vi.fn(),
-      on: vi.fn((event, callback) => {
-        if (event === 'error') {
-          // Don't call error by default
-        }
+      on: vi.fn((_event: string, _callback: () => void) => {
+        // Don't call error by default
       }),
       setHeader: vi.fn(),
     };
 
-    vi.mocked(https.request).mockImplementation((options, callback) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(https.request).mockImplementation(((...args: any[]) => {
+      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : undefined;
       setTimeout(() => {
-        callback?.(response as any);
+        callback?.(response as unknown);
       }, 0);
-      return mockReq as any;
-    });
+      return mockReq as unknown as ReturnType<typeof https.request>;
+    }) as any);
 
     return mockReq;
   };

@@ -6,10 +6,23 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 vi.mock('../config/index.js', () => ({
   getConfig: vi.fn(() => ({
     auth: {
-      apiKeys: ['valid-key-1', 'valid-key-2'],
+      apiKeys: ['valid-config-key'],
       skipPaths: ['/health', '/ready', '/docs'],
     },
   })),
+}));
+
+// Mock the database module
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockWhere: any = vi.fn(() => Promise.resolve([]));
+const mockFrom = vi.fn(() => ({ where: mockWhere }));
+vi.mock('../db/index.js', () => ({
+  getDatabase: vi.fn(() => ({
+    select: () => ({ from: mockFrom }),
+  })),
+  schema: {
+    apiKeys: {},
+  },
 }));
 
 describe('auth.middleware', () => {
@@ -51,7 +64,6 @@ describe('auth.middleware', () => {
   describe('authMiddleware', () => {
     let mockRequest: Partial<FastifyRequest>;
     let mockReply: Partial<FastifyReply>;
-    let mockDone: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
       mockRequest = {
@@ -61,45 +73,23 @@ describe('auth.middleware', () => {
         status: vi.fn().mockReturnThis(),
         send: vi.fn().mockReturnThis(),
       };
-      mockDone = vi.fn();
+      // Reset mock to return empty array (no db keys)
+      mockWhere.mockResolvedValue([]);
     });
 
-    it('should call done() for valid API key', () => {
-      mockRequest.headers = { 'x-api-key': 'valid-key-1' };
+    it('should pass for valid config-based API key (fallback)', async () => {
+      mockRequest.headers = { 'x-api-key': 'valid-config-key' };
 
-      authMiddleware(
-        mockRequest as FastifyRequest,
-        mockReply as FastifyReply,
-        mockDone
-      );
+      await authMiddleware(mockRequest as FastifyRequest, mockReply as FastifyReply);
 
-      expect(mockDone).toHaveBeenCalled();
       expect(mockReply.status).not.toHaveBeenCalled();
     });
 
-    it('should call done() for second valid API key', () => {
-      mockRequest.headers = { 'x-api-key': 'valid-key-2' };
-
-      authMiddleware(
-        mockRequest as FastifyRequest,
-        mockReply as FastifyReply,
-        mockDone
-      );
-
-      expect(mockDone).toHaveBeenCalled();
-      expect(mockReply.status).not.toHaveBeenCalled();
-    });
-
-    it('should return 401 for missing API key', () => {
+    it('should return 401 for missing API key', async () => {
       mockRequest.headers = {};
 
-      authMiddleware(
-        mockRequest as FastifyRequest,
-        mockReply as FastifyReply,
-        mockDone
-      );
+      await authMiddleware(mockRequest as FastifyRequest, mockReply as FastifyReply);
 
-      expect(mockDone).not.toHaveBeenCalled();
       expect(mockReply.status).toHaveBeenCalledWith(401);
       expect(mockReply.send).toHaveBeenCalledWith({
         error: 'UNAUTHORIZED',
@@ -107,16 +97,11 @@ describe('auth.middleware', () => {
       });
     });
 
-    it('should return 401 for invalid API key', () => {
+    it('should return 401 for invalid API key', async () => {
       mockRequest.headers = { 'x-api-key': 'invalid-key' };
 
-      authMiddleware(
-        mockRequest as FastifyRequest,
-        mockReply as FastifyReply,
-        mockDone
-      );
+      await authMiddleware(mockRequest as FastifyRequest, mockReply as FastifyReply);
 
-      expect(mockDone).not.toHaveBeenCalled();
       expect(mockReply.status).toHaveBeenCalledWith(401);
       expect(mockReply.send).toHaveBeenCalledWith({
         error: 'UNAUTHORIZED',
@@ -124,56 +109,58 @@ describe('auth.middleware', () => {
       });
     });
 
-    it('should return 401 for non-string API key (array)', () => {
+    it('should return 401 for non-string API key (array)', async () => {
       mockRequest.headers = { 'x-api-key': ['key1', 'key2'] as unknown as string };
 
-      authMiddleware(
-        mockRequest as FastifyRequest,
-        mockReply as FastifyReply,
-        mockDone
-      );
+      await authMiddleware(mockRequest as FastifyRequest, mockReply as FastifyReply);
 
-      expect(mockDone).not.toHaveBeenCalled();
       expect(mockReply.status).toHaveBeenCalledWith(401);
     });
 
-    it('should reject keys that are substrings of valid keys', () => {
-      mockRequest.headers = { 'x-api-key': 'valid-key' }; // Missing "-1"
+    it('should reject keys that are substrings of valid keys', async () => {
+      mockRequest.headers = { 'x-api-key': 'valid-config' }; // Missing "-key"
 
-      authMiddleware(
-        mockRequest as FastifyRequest,
-        mockReply as FastifyReply,
-        mockDone
-      );
+      await authMiddleware(mockRequest as FastifyRequest, mockReply as FastifyReply);
 
-      expect(mockDone).not.toHaveBeenCalled();
       expect(mockReply.status).toHaveBeenCalledWith(401);
     });
 
-    it('should reject keys with extra characters', () => {
-      mockRequest.headers = { 'x-api-key': 'valid-key-1-extra' };
+    it('should reject keys with extra characters', async () => {
+      mockRequest.headers = { 'x-api-key': 'valid-config-key-extra' };
 
-      authMiddleware(
-        mockRequest as FastifyRequest,
-        mockReply as FastifyReply,
-        mockDone
-      );
+      await authMiddleware(mockRequest as FastifyRequest, mockReply as FastifyReply);
 
-      expect(mockDone).not.toHaveBeenCalled();
       expect(mockReply.status).toHaveBeenCalledWith(401);
     });
 
-    it('should be case-sensitive', () => {
-      mockRequest.headers = { 'x-api-key': 'VALID-KEY-1' };
+    it('should be case-sensitive', async () => {
+      mockRequest.headers = { 'x-api-key': 'VALID-CONFIG-KEY' };
 
-      authMiddleware(
-        mockRequest as FastifyRequest,
-        mockReply as FastifyReply,
-        mockDone
-      );
+      await authMiddleware(mockRequest as FastifyRequest, mockReply as FastifyReply);
 
-      expect(mockDone).not.toHaveBeenCalled();
       expect(mockReply.status).toHaveBeenCalledWith(401);
+    });
+
+    it('should accept database API key and attach to request', async () => {
+      const dbKey = {
+        id: 'test-id',
+        key: 'db-api-key',
+        name: 'Test Key',
+        maxUses: 10,
+        usedCount: 5,
+        createdAt: new Date(),
+        expiresAt: null,
+        revokedAt: null,
+      };
+
+      mockWhere.mockResolvedValue([dbKey]);
+
+      mockRequest.headers = { 'x-api-key': 'db-api-key' };
+
+      await authMiddleware(mockRequest as FastifyRequest, mockReply as FastifyReply);
+
+      expect(mockReply.status).not.toHaveBeenCalled();
+      expect((mockRequest as FastifyRequest).apiKey).toEqual(dbKey);
     });
   });
 });

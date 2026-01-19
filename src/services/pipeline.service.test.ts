@@ -244,7 +244,7 @@ import { mkdir, rm } from 'fs/promises';
 
 describe('PipelineService', () => {
   let service: PipelineService;
-  const mockJob: Job = {
+  const mockJob = {
     id: 'job-123',
     videoUrl: 'https://example.com/video.mp4',
     config: {},
@@ -257,7 +257,7 @@ describe('PipelineService', () => {
     error: null,
     startedAt: null,
     completedAt: null,
-  };
+  } as Job;
 
   beforeEach(() => {
     service = new PipelineService();
@@ -368,13 +368,13 @@ describe('PipelineService', () => {
     });
 
     it('should use config from job', async () => {
-      const jobWithConfig: Job = {
+      const jobWithConfig = {
         ...mockJob,
         config: {
           fps: 10,
           batchSize: 12,
         },
-      };
+      } as Job;
 
       mockDb.returning
         .mockResolvedValueOnce([{ id: 'video-1' }])
@@ -477,10 +477,10 @@ describe('PipelineService', () => {
         },
       ]);
 
-      const jobWithAICleanup: Job = {
+      const jobWithAICleanup = {
         ...mockJob,
         config: { aiCleanup: true },
-      };
+      } as Job;
 
       mockDb.returning
         .mockResolvedValueOnce([{ id: 'video-1' }])

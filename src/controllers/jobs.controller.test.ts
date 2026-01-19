@@ -70,7 +70,7 @@ describe('JobsController', () => {
         id: 'job-123',
         videoUrl: 'https://example.com/video.mp4',
         status: 'pending',
-        config: { extractionFps: 5, topK: 24 },
+        config: { fps: 10, batchSize: 30 },
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -79,7 +79,7 @@ describe('JobsController', () => {
 
       const result = await controller.createJob({
         videoUrl: 'https://example.com/video.mp4',
-      });
+      } as any);
 
       expect(result.id).toBe('job-123');
       expect(addPipelineJob).toHaveBeenCalledWith('job-123');
@@ -101,7 +101,7 @@ describe('JobsController', () => {
       await controller.createJob({
         videoUrl: 'https://example.com/video.mp4',
         callbackUrl: 'https://callback.example.com/webhook',
-      });
+      } as any);
 
       expect(validateCallbackUrlComprehensive).toHaveBeenCalledWith(
         'https://callback.example.com/webhook'
@@ -118,7 +118,7 @@ describe('JobsController', () => {
         controller.createJob({
           videoUrl: 'https://example.com/video.mp4',
           callbackUrl: 'https://evil.com/webhook',
-        })
+        } as any)
       ).rejects.toThrow('Invalid domain');
     });
   });

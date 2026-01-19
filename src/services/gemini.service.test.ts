@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GeminiService, type GeminiResponse, type RecommendedFrame } from './gemini.service.js';
+import { GeminiService, type GeminiResponse } from './gemini.service.js';
 import type { ScoredFrame } from './frame-scoring.service.js';
 
 // Mock @google/generative-ai

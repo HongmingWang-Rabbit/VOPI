@@ -36,7 +36,7 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 import { spawn } from 'child_process';
-import { mkdir, readdir, rename } from 'fs/promises';
+import { mkdir, readdir } from 'fs/promises';
 
 describe('VideoService', () => {
   let service: VideoService;
