@@ -20,27 +20,27 @@ VOPI (Video Object Processing Infrastructure) is a TypeScript backend service th
 
 ```bash
 # Development (run both in separate terminals)
-npm run dev              # API server with hot reload
-npm run dev:worker       # Job queue worker with hot reload
+pnpm dev              # API server with hot reload
+pnpm dev:worker       # Job queue worker with hot reload
 
 # Database
-npm run db:migrate       # Run migrations
-npm run db:push          # Push schema changes directly
-npm run db:studio        # Open Drizzle Studio GUI
+pnpm db:migrate       # Run migrations
+pnpm db:push          # Push schema changes directly
+pnpm db:studio        # Open Drizzle Studio GUI
 
 # Build & Production
-npm run build            # TypeScript compilation
-npm run start            # Production API server
-npm run start:worker     # Production worker
+pnpm build            # TypeScript compilation
+pnpm start            # Production API server
+pnpm start:worker     # Production worker
 
 # Type checking & Linting
-npm run typecheck        # tsc --noEmit
-npm run lint             # ESLint
+pnpm typecheck        # tsc --noEmit
+pnpm lint             # ESLint
 
 # CLI tool (standalone frame extraction)
-npm run extract [video.mp4] [options]
-npm run extract -- --skip-gemini     # Scoring only, no AI
-npm run commercial                    # Generate commercial images
+pnpm extract [video.mp4] [options]
+pnpm extract -- --skip-gemini     # Scoring only, no AI
+pnpm commercial                    # Generate commercial images
 ```
 
 ## Architecture
@@ -73,18 +73,18 @@ All relationships use cascade delete.
 
 ```bash
 # Start infrastructure (Postgres, Redis, MinIO)
-docker-compose up -d postgres redis minio minio-init
+docker compose up -d postgres redis minio minio-init
 
 # Configure environment
 cp .env.example .env
 # Edit .env: add GOOGLE_AI_API_KEY and PHOTOROOM_API_KEY
 
 # Initialize database
-npm run db:migrate
+pnpm db:migrate
 
 # Run services
-npm run dev          # Terminal 1
-npm run dev:worker   # Terminal 2
+pnpm dev          # Terminal 1
+pnpm dev:worker   # Terminal 2
 ```
 
 API docs available at `http://localhost:3000/docs` (Swagger UI)
@@ -107,3 +107,12 @@ score = sharpness - (alpha × motion × 255)
 - **FFmpeg** must be installed and in PATH
 - **Gemini API** for frame classification (cost-optimized: only top-K candidates sent)
 - **Photoroom API** for background removal and commercial image generation
+
+## Documentation
+
+Detailed documentation is available in the `/docs` folder:
+- [Architecture](./docs/architecture.md) - System design and data flow
+- [API Reference](./docs/api.md) - REST API endpoints
+- [Services](./docs/services.md) - Core service modules
+- [Database](./docs/database.md) - Schema and migrations
+- [Deployment](./docs/deployment.md) - Setup and production guide
