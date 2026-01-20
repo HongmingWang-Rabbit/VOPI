@@ -344,6 +344,7 @@ export class PipelineService {
 
   /**
    * Save frame records to database
+   * Uses batch insert for better performance
    */
   private async saveFrameRecords(
     ctx: PipelineContext,
@@ -355,31 +356,40 @@ export class PipelineService {
     const db = getDatabase();
     const frameRecords = new Map<string, string>(); // frameId -> db id
 
-    for (const frame of scoredFrames) {
-      const recommended = recommendedFrames.find((r) => r.frameId === frame.frameId);
-      const isCandidate = candidateFrames.some((c) => c.frameId === frame.frameId);
+    // Build candidate and recommended lookup sets for O(1) access
+    const candidateSet = new Set(candidateFrames.map((c) => c.frameId));
+    const recommendedMap = new Map(recommendedFrames.map((r) => [r.frameId, r]));
 
-      const [record] = await db
-        .insert(schema.frames)
-        .values({
-          jobId: ctx.jobId,
-          videoId,
-          frameId: frame.frameId,
-          timestamp: frame.timestamp,
-          localPath: frame.path,
-          scores: frameScoringService.toFrameScores(frame),
-          productId: recommended?.productId,
-          variantId: recommended?.variantId,
-          angleEstimate: recommended?.angleEstimate,
-          variantDescription: recommended?.variantDescription,
-          obstructions: recommended?.obstructions,
-          backgroundRecommendations: recommended?.backgroundRecommendations,
-          isBestPerSecond: isCandidate,
-          isFinalSelection: !!recommended,
-        } satisfies NewFrame)
-        .returning();
+    // Prepare all frame values for batch insert
+    const frameValues: NewFrame[] = scoredFrames.map((frame) => {
+      const recommended = recommendedMap.get(frame.frameId);
+      return {
+        jobId: ctx.jobId,
+        videoId,
+        frameId: frame.frameId,
+        timestamp: frame.timestamp,
+        localPath: frame.path,
+        scores: frameScoringService.toFrameScores(frame),
+        productId: recommended?.productId,
+        variantId: recommended?.variantId,
+        angleEstimate: recommended?.angleEstimate,
+        variantDescription: recommended?.variantDescription,
+        obstructions: recommended?.obstructions,
+        backgroundRecommendations: recommended?.backgroundRecommendations,
+        isBestPerSecond: candidateSet.has(frame.frameId),
+        isFinalSelection: !!recommended,
+      } satisfies NewFrame;
+    });
 
-      frameRecords.set(frame.frameId, record.id);
+    // Batch insert all frames at once
+    const records = await db
+      .insert(schema.frames)
+      .values(frameValues)
+      .returning();
+
+    // Map frameId to database id
+    for (const record of records) {
+      frameRecords.set(record.frameId, record.id);
     }
 
     return frameRecords;

@@ -27,16 +27,9 @@ export class JobsController {
   async createJob(data: CreateJobRequest, apiKey?: ApiKey): Promise<Job> {
     const db = getDatabase();
 
-    // Check API key usage limits if provided
+    // Atomically increment API key usage count if provided
     if (apiKey) {
-      if (apiKey.usedCount >= apiKey.maxUses) {
-        throw new ForbiddenError(
-          `API key usage limit exceeded (${apiKey.usedCount}/${apiKey.maxUses}). Please contact support.`,
-          'USAGE_LIMIT_EXCEEDED'
-        );
-      }
-
-      // Atomically increment usage count (with optimistic locking)
+      // Single atomic update with optimistic locking - no separate check needed
       const [updated] = await db
         .update(schema.apiKeys)
         .set({
@@ -51,9 +44,9 @@ export class JobsController {
         .returning();
 
       if (!updated) {
-        // Race condition: another request used the last available slot
+        // Usage limit reached (either already at limit or race condition)
         throw new ForbiddenError(
-          `API key usage limit exceeded. Please contact support.`,
+          `API key usage limit exceeded (limit: ${apiKey.maxUses}). Please contact support.`,
           'USAGE_LIMIT_EXCEEDED'
         );
       }

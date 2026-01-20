@@ -37,6 +37,7 @@ Options for 'create':
   --name <name>       Optional name/description for the key
   --max-uses <n>      Maximum number of job creations (default: 10)
   --expires <date>    Expiration date (ISO format, e.g., 2025-12-31)
+  --quiet             Only output the API key value (for scripting)
 
 Options for 'list':
   --all               Include revoked and expired keys
@@ -87,6 +88,7 @@ async function createKey(options: Record<string, string | boolean | undefined>):
 
   const name = options['name'] as string | undefined;
   const maxUses = options['max-uses'] ? parseInt(options['max-uses'] as string, 10) : 10;
+  const quiet = options['quiet'] === true;
   const expiresAt = options['expires']
     ? new Date(options['expires'] as string)
     : null;
@@ -113,15 +115,20 @@ async function createKey(options: Record<string, string | boolean | undefined>):
     })
     .returning();
 
-  console.log('\n✓ API Key Created\n');
-  console.log('Key Details:');
-  console.log(`  ID:        ${created.id}`);
-  console.log(`  Key:       ${created.key}`);
-  console.log(`  Name:      ${created.name || '(none)'}`);
-  console.log(`  Max Uses:  ${created.maxUses}`);
-  console.log(`  Expires:   ${created.expiresAt?.toISOString() || 'Never'}`);
-  console.log(`  Created:   ${created.createdAt.toISOString()}`);
-  console.log('\n⚠️  Save this key securely - it cannot be retrieved later!\n');
+  if (quiet) {
+    // Only output the key value for scripting/piping
+    console.log(created.key);
+  } else {
+    console.log('\n✓ API Key Created\n');
+    console.log('Key Details:');
+    console.log(`  ID:        ${created.id}`);
+    console.log(`  Key:       ${created.key}`);
+    console.log(`  Name:      ${created.name || '(none)'}`);
+    console.log(`  Max Uses:  ${created.maxUses}`);
+    console.log(`  Expires:   ${created.expiresAt?.toISOString() || 'Never'}`);
+    console.log(`  Created:   ${created.createdAt.toISOString()}`);
+    console.log('\n⚠️  Save this key securely - it cannot be retrieved later!\n');
+  }
 }
 
 async function listKeys(options: Record<string, string | boolean | undefined>): Promise<void> {

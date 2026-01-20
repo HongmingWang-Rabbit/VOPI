@@ -187,35 +187,20 @@ export class StorageService {
         throw new Error(`Failed to download ${url}: ${response.status}`);
       }
 
-      await mkdir(path.dirname(localPath), { recursive: true });
-
-      const writeStream = createWriteStream(localPath);
-      const reader = response.body?.getReader();
-      if (!reader) {
-        writeStream.destroy();
+      if (!response.body) {
         throw new Error('No response body');
       }
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          writeStream.write(value);
-        }
+      await mkdir(path.dirname(localPath), { recursive: true });
 
-        writeStream.end();
-        await new Promise<void>((resolve, reject) => {
-          writeStream.on('finish', resolve);
-          writeStream.on('error', reject);
-        });
+      // Convert Web ReadableStream to Node.js Readable and use pipeline for proper cleanup
+      const nodeStream = Readable.fromWeb(response.body as import('stream/web').ReadableStream);
+      const writeStream = createWriteStream(localPath);
 
-        logger.info({ url, localPath }, 'File downloaded from URL');
-      } catch (error) {
-        // Clean up: cancel the reader and destroy the write stream
-        await reader.cancel().catch(() => {});
-        writeStream.destroy();
-        throw error;
-      }
+      // pipeline automatically handles cleanup on success or error
+      await pipeline(nodeStream, writeStream);
+
+      logger.info({ url, localPath }, 'File downloaded from URL');
       return;
     }
 
