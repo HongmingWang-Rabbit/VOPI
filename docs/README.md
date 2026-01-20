@@ -32,6 +32,26 @@ VOPI is a TypeScript backend service that automatically extracts high-quality pr
 - **Main README**: [../README.md](../README.md)
 - **Postman Collection**: [../postman/](../postman/)
 
+## CLI Testing Tool
+
+VOPI includes an interactive CLI for manually testing individual pipeline steps:
+
+```bash
+pnpm test:cli
+```
+
+The menu provides options to test:
+1. **Download** - Download video from URL (HTTP/S3)
+2. **Extract** - Extract frames from video (FFmpeg)
+3. **Score** - Score frames (sharpness/motion)
+4. **Classify** - Classify frames with Gemini AI
+5. **Generate** - Generate commercial images (Photoroom)
+6. **Upload** - Upload to S3/MinIO
+7. **S3 Operations** - List, download, delete files
+8. **Photoroom Single** - Test individual Photoroom operations
+
+Each test prompts for required inputs and uses real services.
+
 ## Key Concepts
 
 ### Processing Pipeline

@@ -41,6 +41,9 @@ pnpm lint             # ESLint
 pnpm extract [video.mp4] [options]
 pnpm extract -- --skip-gemini     # Scoring only, no AI
 pnpm commercial                    # Generate commercial images
+
+# Pipeline testing CLI (interactive menu)
+pnpm test:cli             # Test individual pipeline steps
 ```
 
 ## Architecture
@@ -61,7 +64,7 @@ The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) pr
 - `src/routes/` + `src/controllers/` - HTTP layer
 - `src/workers/` - BullMQ job processors
 - `src/db/schema.ts` - Drizzle ORM schema (api_keys, jobs, videos, frames, commercialImages)
-- `src/cli/` - CLI commands (API key management)
+- `src/cli/` - CLI commands (API key management, pipeline testing)
 - `src/templates/` - Gemini prompts and output schemas
 - `src/utils/` - Shared utilities (logging, errors, URL validation)
 - `src/smartFrameExtractor/` - Standalone CLI tool (JavaScript)
