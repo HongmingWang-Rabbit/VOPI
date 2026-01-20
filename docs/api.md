@@ -622,6 +622,12 @@ pnpm keys create --name "John's Beta Access" --max-uses 20
 # Create with expiration
 pnpm keys create --name "Trial Access" --max-uses 5 --expires "2025-06-30"
 
+# Create with quiet mode (outputs only the key, useful for scripting)
+pnpm keys create --name "Script Key" --quiet
+
+# Use in scripts
+API_KEY=$(pnpm keys create --name "Auto Key" --quiet)
+
 # List active API keys
 pnpm keys list
 
