@@ -69,6 +69,9 @@ export interface AppConfig {
     ffmpegPath: string;
     ffprobePath: string;
   };
+  upload: {
+    presignExpirationSeconds: number;
+  };
 }
 
 /**
@@ -138,6 +141,9 @@ export function buildConfig(env: Env): AppConfig {
     ffmpeg: {
       ffmpegPath: env.FFMPEG_PATH,
       ffprobePath: env.FFPROBE_PATH,
+    },
+    upload: {
+      presignExpirationSeconds: env.PRESIGN_EXPIRATION_SECONDS,
     },
   };
 }

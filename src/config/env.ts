@@ -79,6 +79,9 @@ export const envSchema = z.object({
   // Queue counts (for removeOnComplete/removeOnFail)
   QUEUE_COMPLETED_COUNT: z.coerce.number().default(100),
   QUEUE_FAILED_COUNT: z.coerce.number().default(1000),
+
+  // Upload settings
+  PRESIGN_EXPIRATION_SECONDS: z.coerce.number().min(60).max(86400).default(3600), // 1 hour default
 });
 
 export type Env = z.infer<typeof envSchema>;

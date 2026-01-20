@@ -78,6 +78,16 @@ function parseArgs(
   return result;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function validateUuid(value: string, paramName: string): void {
+  if (!UUID_REGEX.test(value)) {
+    console.error(`\nError: ${paramName} must be a valid UUID.\n`);
+    console.error(`Received: ${value}\n`);
+    process.exit(1);
+  }
+}
+
 function generateApiKey(): string {
   // Generate a secure 32-byte random key, encode as base64url
   return randomBytes(32).toString('base64url');
@@ -271,6 +281,7 @@ async function main(): Promise<void> {
         console.error('Usage: npx tsx src/cli/api-keys.ts revoke <key-id>\n');
         process.exit(1);
       }
+      validateUuid(keyId, 'key-id');
       await revokeKey(keyId);
       break;
     }
@@ -281,6 +292,7 @@ async function main(): Promise<void> {
         console.error('Usage: npx tsx src/cli/api-keys.ts info <key-id>\n');
         process.exit(1);
       }
+      validateUuid(infoKeyId, 'key-id');
       await getKeyInfo(infoKeyId);
       break;
     }

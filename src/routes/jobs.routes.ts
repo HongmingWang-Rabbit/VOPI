@@ -4,6 +4,7 @@ import path from 'path';
 import { jobsController } from '../controllers/jobs.controller.js';
 import { createJobSchema, jobListQuerySchema } from '../types/job.types.js';
 import { storageService } from '../services/storage.service.js';
+import { getConfig } from '../config/index.js';
 import { z } from 'zod';
 
 const jobIdParamsSchema = z.object({
@@ -310,7 +311,8 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const s3Key = `uploads/${uploadId}.${ext}`;
-      const expiresIn = body.expiresIn ?? 3600; // Default 1 hour
+      const config = getConfig();
+      const expiresIn = body.expiresIn ?? config.upload.presignExpirationSeconds;
       const result = await storageService.getPresignedUploadUrl(s3Key, body.contentType, expiresIn);
 
       return reply.send({

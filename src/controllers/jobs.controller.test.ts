@@ -25,6 +25,10 @@ vi.mock('../db/index.js', () => ({
       createdAt: 'createdAt',
       updatedAt: 'updatedAt',
     },
+    apiKeys: {
+      id: 'id',
+      usedCount: 'usedCount',
+    },
   },
 }));
 
@@ -120,6 +124,79 @@ describe('JobsController', () => {
           callbackUrl: 'https://evil.com/webhook',
         } as any)
       ).rejects.toThrow('Invalid domain');
+    });
+
+    it('should increment API key usage when apiKey is provided', async () => {
+      const mockApiKey = {
+        id: 'key-123',
+        key: 'test-key',
+        maxUses: 10,
+        usedCount: 5,
+      };
+      const mockUpdatedKey = { ...mockApiKey, usedCount: 6 };
+      const mockJob = {
+        id: 'job-123',
+        videoUrl: 'https://example.com/video.mp4',
+        status: 'pending',
+        config: {},
+        apiKeyId: 'key-123',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // First returning() call is for API key update, second is for job insert
+      let callCount = 0;
+      mockDb.returning.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve([mockUpdatedKey]);
+        return Promise.resolve([mockJob]);
+      });
+
+      const result = await controller.createJob(
+        { videoUrl: 'https://example.com/video.mp4' } as any,
+        mockApiKey as any
+      );
+
+      expect(result.id).toBe('job-123');
+      expect(mockDb.update).toHaveBeenCalled();
+    });
+
+    it('should throw ForbiddenError when API key usage limit exceeded', async () => {
+      const mockApiKey = {
+        id: 'key-123',
+        key: 'test-key',
+        maxUses: 10,
+        usedCount: 10, // Already at limit
+      };
+
+      // Atomic update returns nothing (limit exceeded)
+      mockDb.returning.mockResolvedValue([]);
+
+      await expect(
+        controller.createJob(
+          { videoUrl: 'https://example.com/video.mp4' } as any,
+          mockApiKey as any
+        )
+      ).rejects.toThrow('API key usage limit exceeded');
+    });
+
+    it('should throw ForbiddenError on race condition (atomic update fails)', async () => {
+      const mockApiKey = {
+        id: 'key-123',
+        key: 'test-key',
+        maxUses: 10,
+        usedCount: 9, // One use left, but another request takes it
+      };
+
+      // Atomic update returns nothing (another request used the last slot)
+      mockDb.returning.mockResolvedValue([]);
+
+      await expect(
+        controller.createJob(
+          { videoUrl: 'https://example.com/video.mp4' } as any,
+          mockApiKey as any
+        )
+      ).rejects.toThrow('API key usage limit exceeded');
     });
   });
 

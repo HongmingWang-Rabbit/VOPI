@@ -15,7 +15,7 @@ import type {
  */
 export const apiKeys = pgTable('api_keys', {
   id: uuid('id').primaryKey().defaultRandom(),
-  key: varchar('key', { length: 64 }).notNull().unique(),
+  key: varchar('key', { length: 128 }).notNull().unique(), // 128 chars for future key format flexibility
   name: varchar('name', { length: 100 }), // e.g., "John's beta access"
   maxUses: integer('max_uses').notNull().default(10),
   usedCount: integer('used_count').notNull().default(0),

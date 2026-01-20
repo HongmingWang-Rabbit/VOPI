@@ -105,11 +105,11 @@ export class PipelineService {
       await this.handlePipelineError(ctx, error as Error);
       throw error;
     } finally {
-      // Cleanup temp directory
-      await rm(workDirs.root, { recursive: true, force: true }).catch(() => {});
-
-      // Cleanup uploaded video from S3 if it was uploaded through our presigned URL endpoint
-      await this.cleanupUploadedVideo(ctx.job.videoUrl);
+      // Cleanup temp directory and uploaded video in parallel
+      await Promise.all([
+        rm(workDirs.root, { recursive: true, force: true }).catch(() => {}),
+        this.cleanupUploadedVideo(ctx.job.videoUrl),
+      ]);
     }
   }
 
