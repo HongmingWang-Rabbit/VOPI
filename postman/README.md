@@ -28,6 +28,9 @@ This folder contains Postman collection and environment files for testing the VO
 - `GET /api/v1/jobs/:id/status` - Get job status (lightweight)
 - `DELETE /api/v1/jobs/:id` - Cancel a job
 
+### Uploads (Mobile App Integration)
+- `POST /api/v1/uploads/presign` - Get presigned S3 URL for direct upload
+
 ### Results
 - `GET /api/v1/jobs/:id/video` - Get video metadata
 - `GET /api/v1/jobs/:id/frames` - Get all frames
@@ -42,6 +45,8 @@ This folder contains Postman collection and environment files for testing the VO
 | `baseUrl` | API base URL | `http://localhost:3000` |
 | `API_KEY` | API key for authentication | `test-api-key` |
 | `JOB_ID` | Current job ID (auto-set on job creation) | - |
+| `uploadUrl` | Presigned S3 upload URL (auto-set) | - |
+| `videoPublicUrl` | Public URL of uploaded video (auto-set) | - |
 
 ## Quick Test Flow
 
@@ -93,3 +98,81 @@ The callback will receive a POST with:
   "result": { ... }
 }
 ```
+
+## Mobile App Upload Flow
+
+For mobile apps that need to upload videos directly from the device:
+
+### 1. Get Presigned URL
+
+```json
+POST /api/v1/uploads/presign
+{
+  "contentType": "video/mp4",
+  "expiresIn": 3600
+}
+```
+
+Response:
+```json
+{
+  "uploadUrl": "https://s3.../uploads/uuid.mp4?X-Amz-Signature=...",
+  "key": "uploads/abc123.mp4",
+  "publicUrl": "https://storage.example.com/uploads/abc123.mp4",
+  "expiresIn": 3600
+}
+```
+
+### 2. Upload Video Directly to S3
+
+```bash
+curl -X PUT "${uploadUrl}" \
+  -H "Content-Type: video/mp4" \
+  --data-binary @video.mp4
+```
+
+### 3. Create Job with Public URL
+
+```json
+POST /api/v1/jobs
+{
+  "videoUrl": "${publicUrl}",
+  "config": {
+    "fps": 10,
+    "commercialVersions": ["transparent", "solid"]
+  }
+}
+```
+
+The video is automatically deleted from S3 after job completion (success or failure).
+
+### Supported Video Types
+
+| Content Type | Extension |
+|--------------|-----------|
+| `video/mp4` | .mp4 |
+| `video/quicktime` | .mov |
+| `video/webm` | .webm |
+
+## API Key Management
+
+API keys can be managed via CLI commands:
+
+```bash
+# Create a new API key
+pnpm keys create --name "My App" --max-uses 100
+
+# List active API keys
+pnpm keys list
+
+# List all keys including revoked/expired
+pnpm keys list --all
+
+# Get key details
+pnpm keys info <key-id>
+
+# Revoke a key
+pnpm keys revoke <key-id>
+```
+
+Keys are stored in the database with usage tracking. Each job creation increments the usage count, and jobs fail with 403 when the limit is exceeded.

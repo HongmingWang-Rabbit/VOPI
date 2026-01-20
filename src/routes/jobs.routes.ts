@@ -1,10 +1,19 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { randomUUID } from 'crypto';
+import path from 'path';
 import { jobsController } from '../controllers/jobs.controller.js';
 import { createJobSchema, jobListQuerySchema } from '../types/job.types.js';
+import { storageService } from '../services/storage.service.js';
 import { z } from 'zod';
 
 const jobIdParamsSchema = z.object({
   id: z.string().uuid(),
+});
+
+const presignBodySchema = z.object({
+  filename: z.string().max(255).optional(),
+  contentType: z.enum(['video/mp4', 'video/quicktime', 'video/webm']).default('video/mp4'),
+  expiresIn: z.number().int().min(60).max(86400).optional(), // 1 minute to 24 hours
 });
 
 /**
@@ -58,7 +67,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const validated = createJobSchema.parse(request.body);
-      const job = await jobsController.createJob(validated);
+      const job = await jobsController.createJob(validated, request.apiKey);
       return reply.status(201).send(job);
     }
   );
@@ -239,6 +248,74 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
         id: job.id,
         status: job.status,
         message: 'Job cancelled successfully',
+      });
+    }
+  );
+
+  /**
+   * Get presigned URL for video upload
+   */
+  fastify.post(
+    '/uploads/presign',
+    {
+      schema: {
+        description: 'Get a presigned URL for uploading a video',
+        tags: ['Uploads'],
+        body: {
+          type: 'object',
+          properties: {
+            filename: { type: 'string', maxLength: 255, description: 'Original filename (for extension detection)' },
+            contentType: {
+              type: 'string',
+              default: 'video/mp4',
+              enum: ['video/mp4', 'video/quicktime', 'video/webm'],
+              description: 'MIME type of the video'
+            },
+            expiresIn: {
+              type: 'number',
+              minimum: 60,
+              maximum: 86400,
+              default: 3600,
+              description: 'Presigned URL expiration in seconds (1 minute to 24 hours)'
+            },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              uploadUrl: { type: 'string', description: 'Presigned URL for PUT request' },
+              key: { type: 'string', description: 'S3 key for the uploaded file' },
+              publicUrl: { type: 'string', description: 'Public URL after upload completes' },
+              expiresIn: { type: 'number', description: 'Seconds until the presigned URL expires' },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const body = presignBodySchema.parse(request.body);
+
+      // Generate unique key for the upload
+      const uploadId = randomUUID();
+
+      // Safely extract extension using path.extname (handles edge cases like .mp4, video..mp4)
+      let ext = 'mp4';
+      if (body.filename) {
+        const parsed = path.extname(body.filename).toLowerCase();
+        // Remove the leading dot and validate it's a safe extension
+        if (parsed && /^\.[a-z0-9]+$/.test(parsed)) {
+          ext = parsed.slice(1);
+        }
+      }
+
+      const s3Key = `uploads/${uploadId}.${ext}`;
+      const expiresIn = body.expiresIn ?? 3600; // Default 1 hour
+      const result = await storageService.getPresignedUploadUrl(s3Key, body.contentType, expiresIn);
+
+      return reply.send({
+        ...result,
+        expiresIn,
       });
     }
   );

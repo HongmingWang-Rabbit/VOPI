@@ -60,16 +60,24 @@ The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) pr
 - `src/services/` - Core business logic (one service per domain: video, scoring, gemini, photoroom, storage)
 - `src/routes/` + `src/controllers/` - HTTP layer
 - `src/workers/` - BullMQ job processors
-- `src/db/schema.ts` - Drizzle ORM schema (jobs, videos, frames, commercialImages)
+- `src/db/schema.ts` - Drizzle ORM schema (api_keys, jobs, videos, frames, commercialImages)
+- `src/cli/` - CLI commands (API key management)
 - `src/templates/` - Gemini prompts and output schemas
 - `src/utils/` - Shared utilities (logging, errors, URL validation)
 - `src/smartFrameExtractor/` - Standalone CLI tool (JavaScript)
 
 ### Database Relationships
 ```
-jobs (1) → videos (1) → frames (N) → commercialImages (N)
+api_keys (1) → jobs (N) → videos (1) → frames (N) → commercialImages (N)
 ```
-All relationships use cascade delete.
+All relationships use cascade delete (api_keys → jobs uses SET NULL).
+
+### Mobile App Integration
+For mobile clients uploading videos:
+1. Get presigned URL: `POST /api/v1/uploads/presign`
+2. Upload video directly to S3 using the presigned URL
+3. Create job with the returned `publicUrl`
+4. Uploaded video is automatically deleted after job completion
 
 ## Local Development Setup
 
@@ -93,7 +101,21 @@ API docs available at `http://localhost:3000/docs` (Swagger UI)
 
 ## API Authentication
 
-All `/api/v1/*` endpoints require `x-api-key` header. Valid keys are configured via `API_KEYS` env var (comma-separated).
+All `/api/v1/*` endpoints require `x-api-key` header. API keys can come from:
+1. **Database** (recommended) - Keys in `api_keys` table with usage tracking
+2. **Environment** (fallback) - Keys in `API_KEYS` env var (comma-separated)
+
+Database keys support:
+- Usage limits: `max_uses` and `used_count` per key
+- Expiration: Optional `expires_at` timestamp
+- Revocation: Soft delete via `revoked_at`
+
+Manage keys via CLI:
+```bash
+pnpm keys create --name "User Name" --max-uses 20
+pnpm keys list
+pnpm keys revoke <key-id>
+```
 
 Security features:
 - Timing-safe API key comparison (prevents timing attacks)

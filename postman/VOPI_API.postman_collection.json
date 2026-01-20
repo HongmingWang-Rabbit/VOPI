@@ -378,6 +378,117 @@
       "description": "Job management endpoints"
     },
     {
+      "name": "Uploads",
+      "item": [
+        {
+          "name": "Get Presigned Upload URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set('UPLOAD_URL', response.uploadUrl);",
+                  "    pm.environment.set('UPLOAD_KEY', response.key);",
+                  "    pm.environment.set('VIDEO_PUBLIC_URL', response.publicUrl);",
+                  "    console.log('Upload URL saved');",
+                  "    console.log('Public URL:', response.publicUrl);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filename\": \"product-video.mp4\",\n  \"contentType\": \"video/mp4\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/uploads/presign",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "uploads", "presign"]
+            },
+            "description": "Get a presigned URL for uploading a video directly to S3.\n\n**Usage Flow:**\n1. Call this endpoint to get a presigned URL\n2. Upload the video using PUT to the `uploadUrl`\n3. Create a job using the `publicUrl` as the videoUrl\n4. The video is automatically deleted after job completion\n\n**Supported Content Types:**\n- video/mp4\n- video/quicktime\n- video/webm"
+          },
+          "response": [
+            {
+              "name": "Presigned URL Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"filename\": \"product-video.mp4\",\n  \"contentType\": \"video/mp4\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/uploads/presign",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "uploads", "presign"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"uploadUrl\": \"https://s3.amazonaws.com/vopi-storage/uploads/550e8400-e29b-41d4-a716-446655440000.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...\",\n  \"key\": \"uploads/550e8400-e29b-41d4-a716-446655440000.mp4\",\n  \"publicUrl\": \"https://s3.amazonaws.com/vopi-storage/uploads/550e8400-e29b-41d4-a716-446655440000.mp4\",\n  \"expiresIn\": 3600\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Job from Upload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set('JOB_ID', response.id);",
+                  "    console.log('Job ID saved:', response.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"videoUrl\": \"{{VIDEO_PUBLIC_URL}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Create a job using a video uploaded via presigned URL.\n\n**Prerequisites:**\n1. First call 'Get Presigned Upload URL'\n2. Upload your video to the presigned URL\n3. Then call this endpoint\n\nThe VIDEO_PUBLIC_URL environment variable is automatically set by the 'Get Presigned Upload URL' request."
+          },
+          "response": []
+        }
+      ],
+      "description": "Video upload endpoints for mobile/frontend apps.\n\nThese endpoints allow you to upload videos directly to S3 without passing them through the backend.\n\n**Typical Flow:**\n1. Get presigned URL\n2. Upload video directly to S3 (PUT request to uploadUrl)\n3. Create job with the publicUrl\n4. Video is auto-deleted after processing"
+    },
+    {
       "name": "Results",
       "item": [
         {

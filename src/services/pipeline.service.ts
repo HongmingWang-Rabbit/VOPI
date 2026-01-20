@@ -107,7 +107,69 @@ export class PipelineService {
     } finally {
       // Cleanup temp directory
       await rm(workDirs.root, { recursive: true, force: true }).catch(() => {});
+
+      // Cleanup uploaded video from S3 if it was uploaded through our presigned URL endpoint
+      await this.cleanupUploadedVideo(ctx.job.videoUrl);
     }
+  }
+
+  /**
+   * Cleanup uploaded video from S3 if it was uploaded through our presigned URL endpoint
+   */
+  private async cleanupUploadedVideo(videoUrl: string): Promise<void> {
+    try {
+      const config = getConfig();
+
+      // Check if this is an S3 URL from our bucket's uploads prefix
+      const s3Key = this.extractS3KeyFromUrl(videoUrl, config.storage);
+
+      if (s3Key && s3Key.startsWith('uploads/')) {
+        await storageService.deleteFile(s3Key);
+        logger.info({ s3Key }, 'Uploaded video cleaned up from S3');
+      }
+    } catch (error) {
+      // Log but don't fail the job if cleanup fails
+      logger.warn({ videoUrl, error: (error as Error).message }, 'Failed to cleanup uploaded video');
+    }
+  }
+
+  /**
+   * Extract S3 key from URL if it matches our bucket
+   */
+  private extractS3KeyFromUrl(
+    url: string,
+    storageConfig: { bucket: string; endpoint?: string; region: string }
+  ): string | null {
+    // Handle S3 protocol URLs: s3://bucket/key
+    if (url.startsWith('s3://')) {
+      const match = url.match(/^s3:\/\/([^/]+)\/(.+)$/);
+      if (match && match[1] === storageConfig.bucket) {
+        return match[2];
+      }
+      return null;
+    }
+
+    // Handle HTTP URLs from our bucket
+    // Custom endpoint (MinIO): http://endpoint/bucket/key
+    if (storageConfig.endpoint) {
+      const endpoint = storageConfig.endpoint.replace(/\/$/, '');
+      const pathStylePattern = new RegExp(`^${endpoint}/${storageConfig.bucket}/(.+)$`);
+      const match = url.match(pathStylePattern);
+      if (match) {
+        return match[1];
+      }
+    }
+
+    // AWS S3: https://bucket.s3.region.amazonaws.com/key
+    const awsPattern = new RegExp(
+      `^https?://${storageConfig.bucket}\\.s3\\.${storageConfig.region}\\.amazonaws\\.com/(.+)$`
+    );
+    const awsMatch = url.match(awsPattern);
+    if (awsMatch) {
+      return awsMatch[1];
+    }
+
+    return null;
   }
 
   /**

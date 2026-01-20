@@ -6,9 +6,23 @@ VOPI uses PostgreSQL 16 with Drizzle ORM for database operations.
 
 ```
 ┌─────────────────┐
+│    api_keys     │
+│─────────────────│
+│ id (PK)         │
+│ key             │
+│ name            │
+│ maxUses         │
+│ usedCount       │
+│ timestamps      │
+└────────┬────────┘
+         │
+         │ 1:N
+         ▼
+┌─────────────────┐
 │      jobs       │
 │─────────────────│
 │ id (PK)         │
+│ apiKeyId (FK)   │
 │ status          │
 │ videoUrl        │
 │ config          │
@@ -64,6 +78,33 @@ VOPI uses PostgreSQL 16 with Drizzle ORM for database operations.
 
 ## Tables
 
+### api_keys
+
+Stores API keys for authentication and usage tracking.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | No | `gen_random_uuid()` | Primary key |
+| `key` | VARCHAR(64) | No | - | The API key value (unique) |
+| `name` | VARCHAR(100) | Yes | - | Optional name/description |
+| `max_uses` | INTEGER | No | `10` | Maximum number of job creations |
+| `used_count` | INTEGER | No | `0` | Current usage count |
+| `created_at` | TIMESTAMP | No | `NOW()` | Creation timestamp |
+| `expires_at` | TIMESTAMP | Yes | - | Optional expiration date |
+| `revoked_at` | TIMESTAMP | Yes | - | Revocation timestamp (soft delete) |
+
+**Indexes:**
+- Primary key on `id`
+- Unique index on `key`
+
+**Usage:**
+- Each job creation increments `used_count` atomically
+- Job creation fails with 403 when `used_count >= max_uses`
+- Keys with `revoked_at` set are rejected
+- Keys with `expires_at` in the past are rejected
+
+---
+
 ### jobs
 
 Main table tracking processing jobs.
@@ -71,6 +112,7 @@ Main table tracking processing jobs.
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
 | `id` | UUID | No | `gen_random_uuid()` | Primary key |
+| `api_key_id` | UUID | Yes | - | FK to api_keys (ON DELETE SET NULL) |
 | `status` | VARCHAR(50) | No | `'pending'` | Current job status |
 | `video_url` | TEXT | No | - | Source video URL |
 | `config` | JSONB | No | - | Job configuration |

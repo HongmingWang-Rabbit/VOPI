@@ -292,6 +292,31 @@ export class StorageService {
   }
 
   /**
+   * Get a presigned URL for upload
+   */
+  async getPresignedUploadUrl(
+    s3Key: string,
+    contentType = 'video/mp4',
+    expiresIn = 3600
+  ): Promise<{ uploadUrl: string; key: string; publicUrl: string }> {
+    const client = this.init();
+    const bucket = this.getBucket();
+
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: s3Key,
+      ContentType: contentType,
+    });
+
+    const uploadUrl = await getSignedUrl(client, command, { expiresIn });
+    const publicUrl = this.getPublicUrl(s3Key);
+
+    logger.info({ key: s3Key, expiresIn }, 'Generated presigned upload URL');
+
+    return { uploadUrl, key: s3Key, publicUrl };
+  }
+
+  /**
    * Get public URL for a key
    */
   getPublicUrl(s3Key: string): string {

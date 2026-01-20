@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { and, isNull, or, gt } from 'drizzle-orm';
+import { and, isNull, or, gt, eq } from 'drizzle-orm';
 import { getConfig } from '../config/index.js';
 import { getDatabase, schema } from '../db/index.js';
 import { UnauthorizedError } from '../utils/errors.js';
@@ -15,10 +15,12 @@ declare module 'fastify' {
 
 /**
  * Constant-time string comparison to prevent timing attacks
+ * Note: When lengths differ, we perform a dummy comparison against itself
+ * to maintain constant time execution, preventing timing-based length inference.
  */
 function safeCompare(a: string, b: string): boolean {
   if (a.length !== b.length) {
-    // Compare against itself to maintain constant time even when lengths differ
+    // Dummy comparison to maintain constant time even when lengths differ
     const dummy = Buffer.from(a);
     timingSafeEqual(dummy, dummy);
     return false;
@@ -48,19 +50,18 @@ export async function authMiddleware(
   const db = getDatabase();
   const now = new Date();
 
-  // Query for valid API keys (not revoked and not expired)
-  const apiKeys = await db
+  // Query for the specific API key directly (not revoked and not expired)
+  const [matchedKey] = await db
     .select()
     .from(schema.apiKeys)
     .where(
       and(
+        eq(schema.apiKeys.key, apiKeyHeader),
         isNull(schema.apiKeys.revokedAt),
         or(isNull(schema.apiKeys.expiresAt), gt(schema.apiKeys.expiresAt, now))
       )
-    );
-
-  // Use constant-time comparison to prevent timing attacks
-  const matchedKey = apiKeys.find((key) => safeCompare(apiKeyHeader, key.key));
+    )
+    .limit(1);
 
   if (!matchedKey) {
     // Fall back to config-based keys for backwards compatibility

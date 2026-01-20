@@ -14,14 +14,19 @@ vi.mock('../config/index.js', () => ({
 
 // Mock the database module
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockWhere: any = vi.fn(() => Promise.resolve([]));
+const mockLimit: any = vi.fn(() => Promise.resolve([]));
+const mockWhere = vi.fn(() => ({ limit: mockLimit }));
 const mockFrom = vi.fn(() => ({ where: mockWhere }));
 vi.mock('../db/index.js', () => ({
   getDatabase: vi.fn(() => ({
     select: () => ({ from: mockFrom }),
   })),
   schema: {
-    apiKeys: {},
+    apiKeys: {
+      key: 'key',
+      revokedAt: 'revokedAt',
+      expiresAt: 'expiresAt',
+    },
   },
 }));
 
@@ -74,7 +79,7 @@ describe('auth.middleware', () => {
         send: vi.fn().mockReturnThis(),
       };
       // Reset mock to return empty array (no db keys)
-      mockWhere.mockResolvedValue([]);
+      mockLimit.mockResolvedValue([]);
     });
 
     it('should pass for valid config-based API key (fallback)', async () => {
@@ -153,7 +158,7 @@ describe('auth.middleware', () => {
         revokedAt: null,
       };
 
-      mockWhere.mockResolvedValue([dbKey]);
+      mockLimit.mockResolvedValue([dbKey]);
 
       mockRequest.headers = { 'x-api-key': 'db-api-key' };
 

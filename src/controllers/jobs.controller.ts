@@ -1,7 +1,7 @@
 import { getDatabase, schema } from '../db/index.js';
-import { eq, desc, and, SQL, sql } from 'drizzle-orm';
+import { eq, desc, and, SQL, sql, lt } from 'drizzle-orm';
 import { createChildLogger } from '../utils/logger.js';
-import { NotFoundError, BadRequestError } from '../utils/errors.js';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors.js';
 import { addPipelineJob } from '../queues/pipeline.queue.js';
 import { validateCallbackUrlComprehensive } from '../utils/url-validator.js';
 import {
@@ -11,7 +11,7 @@ import {
   type JobConfig,
   type JobProgress,
 } from '../types/job.types.js';
-import type { Job, NewJob } from '../db/schema.js';
+import type { Job, NewJob, ApiKey } from '../db/schema.js';
 
 const logger = createChildLogger({ service: 'jobs-controller' });
 
@@ -21,9 +21,48 @@ const logger = createChildLogger({ service: 'jobs-controller' });
 export class JobsController {
   /**
    * Create a new job
+   * @param data - Job creation request data
+   * @param apiKey - Optional API key record for usage tracking
    */
-  async createJob(data: CreateJobRequest): Promise<Job> {
+  async createJob(data: CreateJobRequest, apiKey?: ApiKey): Promise<Job> {
     const db = getDatabase();
+
+    // Check API key usage limits if provided
+    if (apiKey) {
+      if (apiKey.usedCount >= apiKey.maxUses) {
+        throw new ForbiddenError(
+          `API key usage limit exceeded (${apiKey.usedCount}/${apiKey.maxUses}). Please contact support.`,
+          'USAGE_LIMIT_EXCEEDED'
+        );
+      }
+
+      // Atomically increment usage count (with optimistic locking)
+      const [updated] = await db
+        .update(schema.apiKeys)
+        .set({
+          usedCount: sql`${schema.apiKeys.usedCount} + 1`,
+        })
+        .where(
+          and(
+            eq(schema.apiKeys.id, apiKey.id),
+            lt(schema.apiKeys.usedCount, apiKey.maxUses)
+          )
+        )
+        .returning();
+
+      if (!updated) {
+        // Race condition: another request used the last available slot
+        throw new ForbiddenError(
+          `API key usage limit exceeded. Please contact support.`,
+          'USAGE_LIMIT_EXCEEDED'
+        );
+      }
+
+      logger.info(
+        { apiKeyId: apiKey.id, usedCount: updated.usedCount, maxUses: apiKey.maxUses },
+        'API key usage incremented'
+      );
+    }
 
     // Validate callback URL for SSRF protection
     if (data.callbackUrl) {
@@ -43,10 +82,11 @@ export class JobsController {
         config: config as JobConfig,
         callbackUrl: data.callbackUrl,
         status: 'pending',
+        apiKeyId: apiKey?.id,
       } satisfies NewJob)
       .returning();
 
-    logger.info({ jobId: job.id, videoUrl: job.videoUrl }, 'Job created');
+    logger.info({ jobId: job.id, videoUrl: job.videoUrl, apiKeyId: apiKey?.id }, 'Job created');
 
     // Add to queue
     await addPipelineJob(job.id);

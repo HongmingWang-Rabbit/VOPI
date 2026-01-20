@@ -14,7 +14,29 @@ All `/api/v1/*` endpoints require an API key via the `x-api-key` header.
 curl -H "x-api-key: your-api-key" http://localhost:3000/api/v1/jobs
 ```
 
-Valid API keys are configured via the `API_KEYS` environment variable (comma-separated).
+### API Key Sources
+
+API keys can come from two sources (checked in order):
+
+1. **Database** (recommended) - Keys stored in the `api_keys` table with usage tracking
+2. **Environment variable** (fallback) - Keys in `API_KEYS` env var (comma-separated, no usage tracking)
+
+### Database API Keys
+
+Database-stored keys support:
+- **Usage limits**: Each key has a `max_uses` limit (default: 10)
+- **Usage tracking**: Each job creation increments `used_count`
+- **Expiration**: Optional `expires_at` timestamp
+- **Revocation**: Soft delete via `revoked_at` timestamp
+
+Manage keys via CLI:
+```bash
+pnpm keys create --name "John's Beta Access" --max-uses 20
+pnpm keys list
+pnpm keys revoke <key-id>
+```
+
+See [CLI Commands](#cli-commands) for full documentation.
 
 ## Interactive Documentation
 
@@ -258,6 +280,68 @@ Cancel a pending job. Uses atomic update to prevent race conditions.
   "error": "Job cannot be cancelled - status is not pending",
   "statusCode": 400
 }
+```
+
+---
+
+## Upload Endpoints
+
+### POST /api/v1/uploads/presign
+
+Get a presigned URL for uploading a video directly to S3. This is the recommended way for mobile apps to upload videos.
+
+**Request Body**
+```json
+{
+  "filename": "product-video.mp4",
+  "contentType": "video/mp4",
+  "expiresIn": 3600
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `filename` | string | No | - | Original filename (max 255 chars, used to detect extension) |
+| `contentType` | string | No | video/mp4 | MIME type: `video/mp4`, `video/quicktime`, or `video/webm` |
+| `expiresIn` | number | No | 3600 | Presigned URL expiration in seconds (60-86400, i.e., 1 min to 24 hours) |
+
+**Response** `200 OK`
+```json
+{
+  "uploadUrl": "https://s3.amazonaws.com/bucket/uploads/550e8400-e29b-41d4-a716-446655440000.mp4?X-Amz-...",
+  "key": "uploads/550e8400-e29b-41d4-a716-446655440000.mp4",
+  "publicUrl": "https://s3.amazonaws.com/bucket/uploads/550e8400-e29b-41d4-a716-446655440000.mp4",
+  "expiresIn": 3600
+}
+```
+
+**Usage Flow**:
+1. Call this endpoint to get a presigned upload URL
+2. Upload the video directly to S3 using a PUT request to `uploadUrl`
+3. Create a job using the `publicUrl` as the `videoUrl`
+4. After job completion, the uploaded video is automatically deleted from S3
+
+**Example (with curl)**:
+```bash
+# Step 1: Get presigned URL
+UPLOAD_INFO=$(curl -s -X POST http://localhost:3000/api/v1/uploads/presign \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"filename": "video.mp4"}')
+
+UPLOAD_URL=$(echo $UPLOAD_INFO | jq -r '.uploadUrl')
+PUBLIC_URL=$(echo $UPLOAD_INFO | jq -r '.publicUrl')
+
+# Step 2: Upload video to S3
+curl -X PUT "$UPLOAD_URL" \
+  -H "Content-Type: video/mp4" \
+  --data-binary @video.mp4
+
+# Step 3: Create job with the video URL
+curl -X POST http://localhost:3000/api/v1/jobs \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d "{\"videoUrl\": \"$PUBLIC_URL\"}"
 ```
 
 ---
@@ -521,4 +605,63 @@ curl -X POST http://localhost:3000/api/v1/jobs \
     "videoUrl": "https://example.com/video.mp4",
     "callbackUrl": "https://your-server.com/vopi-webhook"
   }'
+```
+
+---
+
+## CLI Commands
+
+VOPI includes CLI commands for managing API keys.
+
+### API Key Management
+
+```bash
+# Create a new API key
+pnpm keys create --name "John's Beta Access" --max-uses 20
+
+# Create with expiration
+pnpm keys create --name "Trial Access" --max-uses 5 --expires "2025-06-30"
+
+# List active API keys
+pnpm keys list
+
+# List all keys (including revoked/expired)
+pnpm keys list --all
+
+# Get details about a specific key
+pnpm keys info <key-id>
+
+# Revoke an API key
+pnpm keys revoke <key-id>
+
+# Show help
+pnpm keys help
+```
+
+### Output Examples
+
+**Creating a key:**
+```
+✓ API Key Created
+
+Key Details:
+  ID:        550e8400-e29b-41d4-a716-446655440000
+  Key:       dG9wX3NlY3JldF9rZXlfaGVyZQ...
+  Name:      John's Beta Access
+  Max Uses:  20
+  Expires:   Never
+  Created:   2025-01-19T10:00:00.000Z
+
+⚠️  Save this key securely - it cannot be retrieved later!
+```
+
+**Listing keys:**
+```
+API Keys (3 total):
+
+ID                                    Name                     Usage       Status      Created
+----------------------------------------------------------------------------------------------------
+550e8400-e29b-41d4-a716-446655440000  John's Beta Access       5/20        Active      2025-01-19
+660e8400-e29b-41d4-a716-446655440001  Trial User               3/5         Active      2025-01-18
+770e8400-e29b-41d4-a716-446655440002  Old Key                  10/10       Revoked     2025-01-10
 ```
