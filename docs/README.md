@@ -15,6 +15,16 @@ VOPI is a TypeScript backend service that automatically extracts high-quality pr
 | [Services](./services.md) | Core service modules and business logic |
 | [Database](./database.md) | Schema design and relationships |
 | [Deployment](./deployment.md) | Docker setup, configuration, and production deployment |
+| [Mobile Integration](./front-end-integration/) | Front-end integration guides for mobile apps |
+
+### Mobile Integration Guides
+
+| Platform | Guide |
+|----------|-------|
+| iOS | [Swift/SwiftUI Integration](./front-end-integration/ios-integration.md) |
+| Android | [Kotlin/Jetpack Compose Integration](./front-end-integration/android-integration.md) |
+| React Native | [TypeScript/React Native Integration](./front-end-integration/react-native-integration.md) |
+| Flutter | [Dart/Flutter Integration](./front-end-integration/flutter-integration.md) |
 
 ## Quick Links
 
