@@ -137,6 +137,12 @@ Both servers support hot reload via tsx.
 | `API_RETRY_DELAY_MS` | `2000` | Base delay for API retries |
 | `API_RATE_LIMIT_DELAY_MS` | `500` | Delay between API calls |
 
+### Upload Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PRESIGN_EXPIRATION_SECONDS` | `3600` | Presigned URL expiration (60-86400 seconds) |
+
 ### Queue Configuration
 
 | Variable | Default | Description |
