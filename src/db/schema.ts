@@ -11,10 +11,28 @@ import type {
 } from '../types/job.types.js';
 
 /**
+ * API Keys table - invitation codes with usage limits
+ */
+export const apiKeys = pgTable('api_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  key: varchar('key', { length: 64 }).notNull().unique(),
+  name: varchar('name', { length: 100 }), // e.g., "John's beta access"
+  maxUses: integer('max_uses').notNull().default(10),
+  usedCount: integer('used_count').notNull().default(0),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  expiresAt: timestamp('expires_at'), // Optional time-based expiry
+  revokedAt: timestamp('revoked_at'), // Soft delete
+});
+
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type NewApiKey = typeof apiKeys.$inferInsert;
+
+/**
  * Jobs table - tracks extraction/commercial jobs
  */
 export const jobs = pgTable('jobs', {
   id: uuid('id').primaryKey().defaultRandom(),
+  apiKeyId: uuid('api_key_id').references(() => apiKeys.id, { onDelete: 'set null' }),
   status: varchar('status', { length: 50 }).notNull().default('pending'),
   videoUrl: text('video_url').notNull(),
   config: jsonb('config').$type<JobConfig>().notNull(),
@@ -111,7 +129,15 @@ export type NewCommercialImage = typeof commercialImages.$inferInsert;
 /**
  * Relations
  */
+export const apiKeysRelations = relations(apiKeys, ({ many }) => ({
+  jobs: many(jobs),
+}));
+
 export const jobsRelations = relations(jobs, ({ one, many }) => ({
+  apiKey: one(apiKeys, {
+    fields: [jobs.apiKeyId],
+    references: [apiKeys.id],
+  }),
   video: one(videos, {
     fields: [jobs.id],
     references: [videos.jobId],

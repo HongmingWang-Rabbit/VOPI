@@ -124,12 +124,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // Auth middleware (skip for health routes)
-  app.addHook('preHandler', (request, reply, done) => {
+  app.addHook('preHandler', async (request, reply) => {
     if (shouldSkipAuth(request.url)) {
-      done();
       return;
     }
-    authMiddleware(request, reply, done);
+    await authMiddleware(request, reply);
   });
 
   // Error handler
