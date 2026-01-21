@@ -5,6 +5,7 @@ import os from 'os';
 import { createChildLogger } from '../utils/logger.js';
 import { getConfig } from '../config/index.js';
 import { extractS3KeyFromUrl } from '../utils/s3-url.js';
+import { PipelineTimer } from '../utils/timer.js';
 import { getDatabase, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { videoService } from './video.service.js';
@@ -51,6 +52,7 @@ interface PipelineContext {
   config: JobConfig;
   workDirs: WorkDirs;
   onProgress?: ProgressCallback;
+  timer: PipelineTimer;
 }
 
 /**
@@ -69,6 +71,9 @@ export class PipelineService {
     const appConfig = getConfig();
     const jobId = job.id;
 
+    // Create timer for performance tracking
+    const timer = new PipelineTimer(jobId);
+
     // Create temp working directories
     const workDirs = await this.createWorkDirs(jobId, appConfig.worker.tempDirName);
 
@@ -78,36 +83,57 @@ export class PipelineService {
       config,
       workDirs,
       onProgress,
+      timer,
     };
 
     try {
       // Step 1: Download video
+      timer.startStep('download');
       const videoPath = await this.downloadVideo(ctx);
+      timer.endStep();
 
       // Step 2: Extract and analyze video
+      timer.startStep('extract');
       const { video, metadata, frames } = await this.extractVideoFrames(ctx, videoPath);
+      timer.endStep();
 
       // Step 3: Score frames
+      timer.startStep('score');
       const { scoredFrames, candidateFrames } = await this.scoreFrames(ctx, frames);
+      timer.endStep();
 
       // Step 4: Classify with Gemini
+      timer.startStep('classify');
       const recommendedFrames = await this.classifyWithGemini(ctx, candidateFrames, metadata);
+      timer.endStep();
 
       // Save frame records to database
+      timer.startStep('save_records');
       const frameRecords = await this.saveFrameRecords(ctx, video.id, scoredFrames, candidateFrames, recommendedFrames);
+      timer.endStep();
 
       // Step 5: Extract products (remove background, rotate, center)
+      timer.startStep('extract_product');
       const extractionResults = await this.extractProducts(ctx, recommendedFrames);
+      timer.endStep();
 
       // Step 6: Upload final frames and generate commercial images
+      timer.startStep('generate');
       const finalFrameUrls = await this.uploadFinalFrames(ctx, recommendedFrames, frameRecords);
       const commercialImages = await this.generateCommercialImages(ctx, recommendedFrames, frameRecords, extractionResults);
+      timer.endStep();
 
       // Step 7: Complete job
+      timer.startStep('complete');
       const result = await this.completeJob(ctx, recommendedFrames.length, candidateFrames.length, finalFrameUrls, commercialImages);
+      timer.endStep();
+
+      // Log timing summary
+      timer.logSummary();
 
       return result;
     } catch (error) {
+      timer.logSummary(); // Log timing even on error
       await this.handlePipelineError(ctx, error as Error);
       throw error;
     } finally {
@@ -290,11 +316,11 @@ export class PipelineService {
       const batchMetadata = frameScoringService.prepareCandidateMetadata(batch);
 
       try {
-        const batchResult = await geminiService.classifyFrames(
-          batch,
-          batchMetadata,
-          metadata,
-          { model: ctx.config.geminiModel }
+        // Time the Gemini API call
+        const batchResult = await ctx.timer.timeOperation(
+          'gemini_classify_batch',
+          () => geminiService.classifyFrames(batch, batchMetadata, metadata, { model: ctx.config.geminiModel }),
+          { batchIdx, batchSize: batch.length }
         );
 
         const batchWinners = geminiService.getRecommendedFrames(batchResult, batch);
@@ -394,22 +420,27 @@ export class PipelineService {
       recommendedType: frame.recommendedType,
     }));
 
-    const results = await provider.extractProducts(
-      extractionFrames,
-      ctx.workDirs.extracted,
-      {
-        useAIEdit,
-        onProgress: async (current, total) => {
-          const percentage = 65 + Math.round((current / total) * 5);
-          await this.updateProgress(
-            ctx.job,
-            'extracting_product',
-            percentage,
-            `Extracting product ${current}/${total}`,
-            ctx.onProgress
-          );
-        },
-      }
+    // Time the entire product extraction (includes Photoroom API calls)
+    const results = await ctx.timer.timeOperation(
+      'product_extraction_all',
+      () => provider.extractProducts(
+        extractionFrames,
+        ctx.workDirs.extracted,
+        {
+          useAIEdit,
+          onProgress: async (current, total) => {
+            const percentage = 65 + Math.round((current / total) * 5);
+            await this.updateProgress(
+              ctx.job,
+              'extracting_product',
+              percentage,
+              `Extracting product ${current}/${total}`,
+              ctx.onProgress
+            );
+          },
+        }
+      ),
+      { frameCount: extractionFrames.length, useAIEdit, providerId }
     );
 
     const successCount = [...results.values()].filter((r) => r.success).length;
@@ -441,7 +472,12 @@ export class PipelineService {
       await copyFile(frame.path, localPath);
 
       const s3Key = storageService.getJobKey(ctx.jobId, 'frames', outputFilename);
-      const { url } = await storageService.uploadFile(localPath, s3Key);
+      // Time S3 upload for final frame
+      const { url } = await ctx.timer.timeOperation(
+        's3_upload_frame',
+        () => storageService.uploadFile(localPath, s3Key),
+        { frameId: frame.frameId }
+      );
       finalFrameUrls.push(url);
 
       // Update frame record with S3 URL
@@ -489,11 +525,16 @@ export class PipelineService {
         const extraction = extractionResults.get(frame.frameId);
         const hasExtractedProduct = !!(extraction?.success && extraction.outputPath);
 
-        const result = await photoroomService.generateAllVersions(frame, ctx.workDirs.commercial, {
-          versions: ctx.config.commercialVersions,
-          transparentSource: hasExtractedProduct ? extraction.outputPath : undefined,
-          skipTransparent: hasExtractedProduct,
-        });
+        // Time Photoroom API call for commercial image generation
+        const result = await ctx.timer.timeOperation(
+          'photoroom_generate_versions',
+          () => photoroomService.generateAllVersions(frame, ctx.workDirs.commercial, {
+            versions: ctx.config.commercialVersions,
+            transparentSource: hasExtractedProduct ? extraction.outputPath : undefined,
+            skipTransparent: hasExtractedProduct,
+          }),
+          { frameId: frame.frameId, versions: ctx.config.commercialVersions }
+        );
 
         const variantImages: Record<string, string> = {};
         const frameDbId = frameRecords.get(frame.frameId);
@@ -505,7 +546,12 @@ export class PipelineService {
             'commercial',
             path.basename(extraction.outputPath!)
           );
-          const { url } = await storageService.uploadFile(extraction.outputPath!, s3Key);
+          // Time S3 upload
+          const { url } = await ctx.timer.timeOperation(
+            's3_upload_commercial',
+            () => storageService.uploadFile(extraction.outputPath!, s3Key),
+            { version: 'transparent' }
+          );
           variantImages.transparent = url;
 
           if (frameDbId) {
@@ -527,7 +573,12 @@ export class PipelineService {
               'commercial',
               path.basename(versionResult.outputPath)
             );
-            const { url } = await storageService.uploadFile(versionResult.outputPath, s3Key);
+            // Time S3 upload
+            const { url } = await ctx.timer.timeOperation(
+              's3_upload_commercial',
+              () => storageService.uploadFile(versionResult.outputPath!, s3Key),
+              { version }
+            );
             variantImages[version] = url;
 
             // Save commercial image record
