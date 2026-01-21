@@ -22,6 +22,7 @@ export interface AppConfig {
   };
   auth: {
     apiKeys: string[];
+    adminApiKeys: string[];
     skipPaths: string[];
   };
   cors: {
@@ -72,6 +73,9 @@ export interface AppConfig {
   upload: {
     presignExpirationSeconds: number;
   };
+  configCache: {
+    ttlMs: number;
+  };
 }
 
 /**
@@ -95,6 +99,7 @@ export function buildConfig(env: Env): AppConfig {
     },
     auth: {
       apiKeys: env.API_KEYS,
+      adminApiKeys: env.ADMIN_API_KEYS,
       skipPaths: env.AUTH_SKIP_PATHS,
     },
     cors: {
@@ -144,6 +149,9 @@ export function buildConfig(env: Env): AppConfig {
     },
     upload: {
       presignExpirationSeconds: env.PRESIGN_EXPIRATION_SECONDS,
+    },
+    configCache: {
+      ttlMs: env.CONFIG_CACHE_TTL_MS,
     },
   };
 }

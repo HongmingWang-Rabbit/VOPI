@@ -92,3 +92,35 @@ export function shouldSkipAuth(path: string): boolean {
   const config = getConfig();
   return config.auth.skipPaths.some((p) => path.startsWith(p));
 }
+
+/**
+ * Check if the current request has admin privileges
+ * Admin can be granted via:
+ * 1. Database API key with isAdmin flag (future)
+ * 2. API key in ADMIN_API_KEYS environment variable
+ */
+export function isAdminRequest(request: FastifyRequest): boolean {
+  const apiKeyHeader = request.headers['x-api-key'];
+  if (!apiKeyHeader || typeof apiKeyHeader !== 'string') {
+    return false;
+  }
+
+  const config = getConfig();
+  return config.auth.adminApiKeys.some((adminKey) => safeCompare(apiKeyHeader, adminKey));
+}
+
+/**
+ * Middleware to require admin access
+ * Use as preHandler on routes that need admin privileges
+ */
+export async function requireAdmin(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  if (!isAdminRequest(request)) {
+    reply.status(403).send({
+      error: 'FORBIDDEN',
+      message: 'Admin access required for this operation',
+    });
+  }
+}

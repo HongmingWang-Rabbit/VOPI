@@ -11,6 +11,7 @@ import { authMiddleware, shouldSkipAuth } from './middleware/auth.middleware.js'
 import { healthRoutes } from './routes/health.routes.js';
 import { jobsRoutes } from './routes/jobs.routes.js';
 import { framesRoutes } from './routes/frames.routes.js';
+import { configRoutes } from './routes/config.routes.js';
 import { setupDefaultProviders } from './providers/setup.js';
 
 /**
@@ -142,6 +143,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(healthRoutes);
   await app.register(jobsRoutes, { prefix: '/api/v1' });
   await app.register(framesRoutes, { prefix: '/api/v1' });
+  await app.register(configRoutes, { prefix: '/api/v1' });
 
   return app;
 }

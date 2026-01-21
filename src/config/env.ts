@@ -20,6 +20,10 @@ export const envSchema = z.object({
 
   // Auth
   API_KEYS: z.string().transform((val) => val.split(',').map((k) => k.trim())),
+  ADMIN_API_KEYS: z
+    .string()
+    .default('')
+    .transform((val) => val.split(',').map((k) => k.trim()).filter(Boolean)),
 
   // S3/Storage (S3-compatible storage - MinIO, AWS S3, DigitalOcean Spaces, etc.)
   S3_BUCKET: z.string(),
@@ -82,6 +86,9 @@ export const envSchema = z.object({
 
   // Upload settings
   PRESIGN_EXPIRATION_SECONDS: z.coerce.number().min(60).max(86400).default(3600), // 1 hour default
+
+  // Config cache
+  CONFIG_CACHE_TTL_MS: z.coerce.number().default(60000), // 1 minute
 });
 
 export type Env = z.infer<typeof envSchema>;

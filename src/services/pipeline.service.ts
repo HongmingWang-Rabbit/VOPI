@@ -11,12 +11,16 @@ import { eq } from 'drizzle-orm';
 import { videoService } from './video.service.js';
 import { frameScoringService, type ScoredFrame } from './frame-scoring.service.js';
 import { geminiService, type RecommendedFrame } from './gemini.service.js';
+import { globalConfigService } from './global-config.service.js';
 import { providerRegistry, type ProductExtractionResult } from '../providers/index.js';
+import { geminiVideoAnalysisProvider } from '../providers/implementations/gemini-video-analysis.provider.js';
+import type { VideoAnalysisFrame } from '../providers/interfaces/video-analysis.provider.js';
 import { photoroomService } from './photoroom.service.js';
 import { storageService } from './storage.service.js';
 import type { Job, NewVideo, NewFrame, NewCommercialImage } from '../db/schema.js';
 import { jobConfigSchema, type JobStatus, type JobProgress, type JobResult, type JobConfig } from '../types/job.types.js';
 import type { VideoMetadata } from '../types/job.types.js';
+import { PipelineStrategy } from '../types/config.types.js';
 
 const logger = createChildLogger({ service: 'pipeline' });
 
@@ -53,6 +57,7 @@ interface PipelineContext {
   workDirs: WorkDirs;
   onProgress?: ProgressCallback;
   timer: PipelineTimer;
+  strategy: PipelineStrategy;
 }
 
 /**
@@ -71,6 +76,12 @@ export class PipelineService {
     const appConfig = getConfig();
     const jobId = job.id;
 
+    // Get effective config from database (includes global settings)
+    const effectiveConfig = await globalConfigService.getEffectiveConfig();
+
+    // Determine pipeline strategy
+    const strategy = effectiveConfig.pipelineStrategy;
+
     // Create timer for performance tracking
     const timer = new PipelineTimer(jobId);
 
@@ -84,52 +95,26 @@ export class PipelineService {
       workDirs,
       onProgress,
       timer,
+      strategy,
     };
 
+    logger.info({ jobId, strategy }, 'Starting pipeline with strategy');
+
+    let result: JobResult;
     try {
-      // Step 1: Download video
-      timer.startStep('download');
-      const videoPath = await this.downloadVideo(ctx);
-      timer.endStep();
+      // Route to appropriate strategy
+      switch (strategy) {
+        case PipelineStrategy.GEMINI_VIDEO:
+          result = await this.runGeminiVideoStrategy(ctx, effectiveConfig);
+          break;
+        case PipelineStrategy.CLASSIC:
+        default:
+          result = await this.runClassicStrategy(ctx);
+          break;
+      }
 
-      // Step 2: Extract and analyze video
-      timer.startStep('extract');
-      const { video, metadata, frames } = await this.extractVideoFrames(ctx, videoPath);
-      timer.endStep();
-
-      // Step 3: Score frames
-      timer.startStep('score');
-      const { scoredFrames, candidateFrames } = await this.scoreFrames(ctx, frames);
-      timer.endStep();
-
-      // Step 4: Classify with Gemini
-      timer.startStep('classify');
-      const recommendedFrames = await this.classifyWithGemini(ctx, candidateFrames, metadata);
-      timer.endStep();
-
-      // Save frame records to database
-      timer.startStep('save_records');
-      const frameRecords = await this.saveFrameRecords(ctx, video.id, scoredFrames, candidateFrames, recommendedFrames);
-      timer.endStep();
-
-      // Step 5: Extract products (remove background, rotate, center)
-      timer.startStep('extract_product');
-      const extractionResults = await this.extractProducts(ctx, recommendedFrames);
-      timer.endStep();
-
-      // Step 6: Upload final frames and generate commercial images
-      timer.startStep('generate');
-      const finalFrameUrls = await this.uploadFinalFrames(ctx, recommendedFrames, frameRecords);
-      const commercialImages = await this.generateCommercialImages(ctx, recommendedFrames, frameRecords, extractionResults);
-      timer.endStep();
-
-      // Step 7: Complete job
-      timer.startStep('complete');
-      const result = await this.completeJob(ctx, recommendedFrames.length, candidateFrames.length, finalFrameUrls, commercialImages);
-      timer.endStep();
-
-      // Log timing summary
-      timer.logSummary();
+      // Only cleanup uploaded video on success (not on failure, as job may be retried)
+      await this.cleanupUploadedVideo(ctx.job.videoUrl);
 
       return result;
     } catch (error) {
@@ -137,12 +122,276 @@ export class PipelineService {
       await this.handlePipelineError(ctx, error as Error);
       throw error;
     } finally {
-      // Cleanup temp directory and uploaded video in parallel
-      await Promise.all([
-        rm(workDirs.root, { recursive: true, force: true }).catch(() => {}),
-        this.cleanupUploadedVideo(ctx.job.videoUrl),
-      ]);
+      // Always cleanup temp directory (can be recreated on retry)
+      await rm(workDirs.root, { recursive: true, force: true }).catch(() => {});
     }
+  }
+
+  /**
+   * Classic strategy: Extract all frames → Score → Classify with Gemini
+   */
+  private async runClassicStrategy(ctx: PipelineContext): Promise<JobResult> {
+    const { timer } = ctx;
+
+    // Step 1: Download video
+    timer.startStep('download');
+    const videoPath = await this.downloadVideo(ctx);
+    timer.endStep();
+
+    // Step 2: Extract and analyze video
+    timer.startStep('extract');
+    const { video, metadata, frames } = await this.extractVideoFrames(ctx, videoPath);
+    timer.endStep();
+
+    // Step 3: Score frames
+    timer.startStep('score');
+    const { scoredFrames, candidateFrames } = await this.scoreFrames(ctx, frames);
+    timer.endStep();
+
+    // Step 4: Classify with Gemini
+    timer.startStep('classify');
+    const recommendedFrames = await this.classifyWithGemini(ctx, candidateFrames, metadata);
+    timer.endStep();
+
+    // Save frame records to database
+    timer.startStep('save_records');
+    const frameRecords = await this.saveFrameRecords(ctx, video.id, scoredFrames, candidateFrames, recommendedFrames);
+    timer.endStep();
+
+    // Step 5: Extract products (remove background, rotate, center)
+    timer.startStep('extract_product');
+    const extractionResults = await this.extractProducts(ctx, recommendedFrames);
+    timer.endStep();
+
+    // Step 6: Upload final frames and generate commercial images
+    timer.startStep('generate');
+    const finalFrameUrls = await this.uploadFinalFrames(ctx, recommendedFrames, frameRecords);
+    const commercialImages = await this.generateCommercialImages(ctx, recommendedFrames, frameRecords, extractionResults);
+    timer.endStep();
+
+    // Step 7: Complete job
+    timer.startStep('complete');
+    const result = await this.completeJob(ctx, recommendedFrames.length, candidateFrames.length, finalFrameUrls, commercialImages);
+    timer.endStep();
+
+    // Log timing summary
+    timer.logSummary();
+
+    return result;
+  }
+
+  /**
+   * Gemini Video strategy: Upload video to Gemini → AI selects timestamps → Extract specific frames
+   */
+  private async runGeminiVideoStrategy(
+    ctx: PipelineContext,
+    effectiveConfig: Awaited<ReturnType<typeof globalConfigService.getEffectiveConfig>>
+  ): Promise<JobResult> {
+    const { timer } = ctx;
+    const db = getDatabase();
+
+    // Step 1: Download video
+    timer.startStep('download');
+    const videoPath = await this.downloadVideo(ctx);
+    timer.endStep();
+
+    // Step 2: Get video metadata and create video record
+    timer.startStep('analyze');
+    await this.updateProgress(ctx.job, 'extracting', 10, 'Analyzing video', ctx.onProgress);
+    const metadata = await videoService.getMetadata(videoPath);
+
+    const [video] = await db
+      .insert(schema.videos)
+      .values({
+        jobId: ctx.jobId,
+        sourceUrl: ctx.job.videoUrl,
+        localPath: videoPath,
+        duration: metadata.duration,
+        width: metadata.width,
+        height: metadata.height,
+        fps: metadata.fps,
+        codec: metadata.codec,
+        metadata,
+      })
+      .returning();
+    timer.endStep();
+
+    // Step 3: Analyze video with Gemini (AI selects best timestamps)
+    timer.startStep('gemini_video_analysis');
+    await this.updateProgress(ctx.job, 'classifying', 20, 'AI analyzing video', ctx.onProgress);
+
+    const analysisResult = await timer.timeOperation(
+      'gemini_video_analyze',
+      () => geminiVideoAnalysisProvider.analyzeVideo(videoPath, {
+        model: effectiveConfig.geminiVideoModel,
+        maxFrames: effectiveConfig.geminiVideoMaxFrames,
+        temperature: effectiveConfig.temperature,
+        topP: effectiveConfig.topP,
+      }),
+      { videoPath, maxFrames: effectiveConfig.geminiVideoMaxFrames }
+    );
+
+    logger.info({
+      jobId: ctx.jobId,
+      selectedFrames: analysisResult.selectedFrames.length,
+      products: analysisResult.products.length,
+      duration: analysisResult.videoDuration,
+    }, 'Gemini video analysis complete');
+    timer.endStep();
+
+    // Step 4: Extract specific frames at selected timestamps
+    timer.startStep('extract_selected');
+    await this.updateProgress(ctx.job, 'extracting', 40, 'Extracting selected frames', ctx.onProgress);
+
+    const recommendedFrames = await this.extractSelectedFrames(
+      ctx,
+      videoPath,
+      analysisResult.selectedFrames
+    );
+    timer.endStep();
+
+    // Save frame records to database
+    timer.startStep('save_records');
+    const frameRecords = await this.saveGeminiVideoFrameRecords(ctx, video.id, recommendedFrames);
+    timer.endStep();
+
+    // Step 5: Extract products (remove background, rotate, center)
+    timer.startStep('extract_product');
+    const extractionResults = await this.extractProducts(ctx, recommendedFrames);
+    timer.endStep();
+
+    // Step 6: Upload final frames and generate commercial images
+    timer.startStep('generate');
+    const finalFrameUrls = await this.uploadFinalFrames(ctx, recommendedFrames, frameRecords);
+    const commercialImages = await this.generateCommercialImages(ctx, recommendedFrames, frameRecords, extractionResults);
+    timer.endStep();
+
+    // Step 7: Complete job
+    timer.startStep('complete');
+    const result = await this.completeJob(
+      ctx,
+      recommendedFrames.length,
+      analysisResult.framesAnalyzed,
+      finalFrameUrls,
+      commercialImages
+    );
+    timer.endStep();
+
+    // Log timing summary
+    timer.logSummary();
+
+    return result;
+  }
+
+  /**
+   * Extract specific frames at timestamps selected by Gemini video analysis
+   */
+  private async extractSelectedFrames(
+    ctx: PipelineContext,
+    videoPath: string,
+    selectedFrames: VideoAnalysisFrame[]
+  ): Promise<RecommendedFrame[]> {
+    const recommendedFrames: RecommendedFrame[] = [];
+
+    for (let i = 0; i < selectedFrames.length; i++) {
+      const frame = selectedFrames[i];
+      const progress = 40 + Math.round(((i + 1) / selectedFrames.length) * 20);
+
+      await this.updateProgress(
+        ctx.job,
+        'extracting',
+        progress,
+        `Extracting frame ${i + 1}/${selectedFrames.length}`,
+        ctx.onProgress
+      );
+
+      const frameId = `frame_${String(i + 1).padStart(5, '0')}`;
+      const filename = `${frameId}_t${frame.timestamp.toFixed(2)}.png`;
+      const outputPath = path.join(ctx.workDirs.frames, filename);
+
+      // Extract single frame at timestamp
+      await ctx.timer.timeOperation(
+        'ffmpeg_extract_frame',
+        () => videoService.extractSingleFrame(videoPath, frame.timestamp, outputPath),
+        { timestamp: frame.timestamp, frameId }
+      );
+
+      // Convert VideoAnalysisFrame to RecommendedFrame format
+      const recommendedFrame: RecommendedFrame = {
+        filename,
+        path: outputPath,
+        index: i,
+        timestamp: frame.timestamp,
+        frameId,
+        sharpness: 0, // Not calculated in video analysis strategy
+        motion: 0,
+        score: frame.qualityScore,
+        productId: frame.productId,
+        variantId: frame.variantId,
+        angleEstimate: frame.angleEstimate,
+        recommendedType: `${frame.productId}_${frame.variantId}`,
+        variantDescription: frame.variantDescription,
+        geminiScore: frame.qualityScore,
+        rotationAngleDeg: frame.rotationAngleDeg,
+        allFrameIds: [frameId],
+        obstructions: frame.obstructions,
+        backgroundRecommendations: frame.backgroundRecommendations,
+      };
+
+      recommendedFrames.push(recommendedFrame);
+    }
+
+    logger.info({
+      jobId: ctx.jobId,
+      frameCount: recommendedFrames.length,
+    }, 'Selected frames extracted');
+
+    return recommendedFrames;
+  }
+
+  /**
+   * Save frame records for Gemini video strategy
+   */
+  private async saveGeminiVideoFrameRecords(
+    ctx: PipelineContext,
+    videoId: string,
+    recommendedFrames: RecommendedFrame[]
+  ): Promise<Map<string, string>> {
+    const db = getDatabase();
+    const frameRecords = new Map<string, string>();
+
+    const frameValues: NewFrame[] = recommendedFrames.map((frame) => ({
+      jobId: ctx.jobId,
+      videoId,
+      frameId: frame.frameId,
+      timestamp: frame.timestamp,
+      localPath: frame.path,
+      scores: {
+        sharpness: frame.sharpness,
+        motion: frame.motion,
+        combined: frame.score,
+        geminiScore: frame.geminiScore,
+      },
+      productId: frame.productId,
+      variantId: frame.variantId,
+      angleEstimate: frame.angleEstimate,
+      variantDescription: frame.variantDescription,
+      obstructions: frame.obstructions,
+      backgroundRecommendations: frame.backgroundRecommendations,
+      isBestPerSecond: true, // All selected frames are "best"
+      isFinalSelection: true,
+    }));
+
+    const records = await db
+      .insert(schema.frames)
+      .values(frameValues)
+      .returning();
+
+    for (const record of records) {
+      frameRecords.set(record.frameId, record.id);
+    }
+
+    return frameRecords;
   }
 
   /**

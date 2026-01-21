@@ -9,6 +9,7 @@ import type {
   FrameObstructions,
   BackgroundRecommendations,
 } from '../types/job.types.js';
+import type { GlobalConfigValue } from '../types/config.types.js';
 
 /**
  * API Keys table - invitation codes with usage limits
@@ -125,6 +126,23 @@ export const commercialImages = pgTable('commercial_images', {
 
 export type CommercialImage = typeof commercialImages.$inferSelect;
 export type NewCommercialImage = typeof commercialImages.$inferInsert;
+
+/**
+ * Global config table - runtime configuration with A/B testing support
+ */
+export const globalConfig = pgTable('global_config', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  key: varchar('key', { length: 100 }).notNull().unique(),
+  value: jsonb('value').$type<GlobalConfigValue>().notNull(),
+  category: varchar('category', { length: 50 }).notNull().default('system'),
+  description: text('description'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export type GlobalConfig = typeof globalConfig.$inferSelect;
+export type NewGlobalConfig = typeof globalConfig.$inferInsert;
 
 /**
  * Relations

@@ -227,6 +227,32 @@ vi.mock('./storage.service.js', () => ({
   },
 }));
 
+// Mock globalConfigService
+vi.mock('./global-config.service.js', () => ({
+  globalConfigService: {
+    getEffectiveConfig: vi.fn().mockResolvedValue({
+      pipelineStrategy: 'classic',
+      fps: 10,
+      batchSize: 30,
+      geminiModel: 'gemini-2.0-flash',
+      geminiVideoModel: 'gemini-2.0-flash',
+      temperature: 0.2,
+      topP: 0.8,
+      motionAlpha: 0.3,
+      minTemporalGap: 1.0,
+      topKPercent: 0.3,
+      commercialVersions: ['transparent', 'solid', 'real', 'creative'],
+      aiCleanup: true,
+      geminiVideoFps: 1,
+      geminiVideoMaxFrames: 10,
+    }),
+    getAllConfig: vi.fn().mockResolvedValue(new Map()),
+    getValue: vi.fn(),
+    setValue: vi.fn(),
+    invalidateCache: vi.fn(),
+  },
+}));
+
 // Mock providerRegistry
 const mockProductExtractionProvider = {
   providerId: 'default',
