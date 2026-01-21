@@ -16,6 +16,7 @@ import { pipeline } from 'stream/promises';
 
 import { createChildLogger } from '../utils/logger.js';
 import { getConfig } from '../config/index.js';
+import { extractS3KeyFromUrl } from '../utils/s3-url.js';
 
 const logger = createChildLogger({ service: 'storage' });
 
@@ -165,9 +166,13 @@ export class StorageService {
 
   /**
    * Download file from URL (S3 or HTTP)
+   * For URLs pointing to our own S3 bucket (private), uses S3 client with credentials
+   * For external URLs, uses HTTP fetch
    */
   async downloadFromUrl(url: string, localPath: string): Promise<void> {
-    // Check if it's an S3 URL
+    const config = getConfig();
+
+    // Check if it's an S3 URL (s3://bucket/key)
     if (url.startsWith('s3://')) {
       const match = url.match(/^s3:\/\/([^/]+)\/(.+)$/);
       if (match) {
@@ -180,8 +185,20 @@ export class StorageService {
       }
     }
 
-    // For HTTP(S) URLs, use fetch
+    // For HTTP(S) URLs, check if it's from our own S3 bucket
     if (url.startsWith('http://') || url.startsWith('https://')) {
+      // Try to extract S3 key from the URL (supports path-style and virtual-hosted URLs)
+      // Use allowAnyHost to handle internal Docker URLs (e.g., minio:9000 vs localhost:9000)
+      const s3Key = extractS3KeyFromUrl(url, config.storage, { allowAnyHost: true });
+
+      if (s3Key) {
+        // URL is from our bucket - use S3 client directly (required for private buckets)
+        logger.info({ url, s3Key }, 'Downloading from own S3 bucket using S3 client');
+        await this.downloadFile(s3Key, localPath);
+        return;
+      }
+
+      // External URL - use HTTP fetch
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Failed to download ${url}: ${response.status}`);
