@@ -56,14 +56,15 @@ Each test prompts for required inputs and uses real services.
 
 ### Processing Pipeline
 
-VOPI processes videos through a 6-step asynchronous pipeline:
+VOPI processes videos through a 7-step asynchronous pipeline:
 
 1. **Download** - Fetch video from URL (HTTP or S3)
 2. **Extract** - Dense frame extraction at configurable FPS using FFmpeg
 3. **Score** - Calculate quality scores (sharpness + motion analysis)
 4. **Classify** - AI-powered variant discovery using Google Gemini 2.0
-5. **Generate** - Commercial image generation via Photoroom API
-6. **Upload** - Store results to S3 and persist to database
+5. **Extract Product** - Remove background, rotate, and center the product
+6. **Generate** - Commercial image generation via Photoroom API
+7. **Upload** - Store results to S3 and persist to database
 
 ### Frame Selection Algorithm
 

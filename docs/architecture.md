@@ -151,18 +151,23 @@ See [Database Documentation](./database.md) for schema details.
 │     ├─ Calculate motion penalty (frame difference)                      │
 │     └─ Select best frame per second as candidates                       │
 │                                                                          │
-│  4. CLASSIFY (50-65%)                                                    │
+│  4. CLASSIFY (50-60%)                                                    │
 │     ├─ Send candidate frames to Gemini in batches                       │
 │     ├─ Discover product variants                                        │
 │     ├─ Select best frame per variant                                    │
 │     └─ Get background recommendations                                   │
 │                                                                          │
-│  5. GENERATE (70-95%)                                                    │
-│     ├─ Remove backgrounds via Photoroom                                 │
+│  5. EXTRACT PRODUCT (60-70%)                                             │
+│     ├─ Remove background via Photoroom                                  │
+│     ├─ Rotate product based on Gemini-detected angle                    │
+│     └─ Center product in frame with padding                             │
+│                                                                          │
+│  6. GENERATE (70-95%)                                                    │
+│     ├─ Use extracted product as input                                   │
 │     ├─ Generate 4 versions per frame                                    │
 │     └─ Upload results to S3                                             │
 │                                                                          │
-│  6. COMPLETE (100%)                                                      │
+│  7. COMPLETE (100%)                                                      │
 │     ├─ Update job status                                                │
 │     ├─ Trigger callback if configured                                   │
 │     └─ Cleanup temp files                                               │
@@ -173,9 +178,9 @@ See [Database Documentation](./database.md) for schema details.
 ### Job Status Flow
 
 ```
-pending → downloading → extracting → scoring → classifying → generating → completed
-                                                                       ↘ failed
-                                                          cancelled ←──┘
+pending → downloading → extracting → scoring → classifying → extracting_product → generating → completed
+                                                                                            ↘ failed
+                                                                               cancelled ←──┘
 ```
 
 ### Data Flow
@@ -217,6 +222,13 @@ Video URL
 ┌─────────────────┐
 │  Save final     │───────▶ /tmp/vopi/{jobId}/final/
 │   selections    │         hero_frame_00123_t4.50.png, etc.
+└─────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│Extract product  │───────▶ /tmp/vopi/{jobId}/extracted/
+│  (bg removal,   │         hero_extracted.png (transparent, rotated, centered)
+│   rotate, crop) │
 └─────────────────┘
     │
     ▼

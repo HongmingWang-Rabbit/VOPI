@@ -52,6 +52,7 @@ function createMockRecommendedFrame(options: MockFrameOptions): RecommendedFrame
     angleEstimate: 'front',
     recommendedType: 'test_frame',
     geminiScore: 100,
+    rotationAngleDeg: 0,
     allFrameIds: ['frame_00001'],
     obstructions: {
       has_obstruction: useAIEdit,

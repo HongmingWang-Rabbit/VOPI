@@ -2,6 +2,10 @@
 
 Complete guide for integrating VOPI into Flutter applications using Dart.
 
+> **Important: Private S3 Bucket**
+>
+> The VOPI S3 bucket is private. Direct URLs in job results are not publicly accessible. You must use the `/jobs/:id/download-urls` endpoint to get presigned URLs with temporary access tokens. These URLs expire after a configurable time (default: 1 hour).
+
 ## Table of Contents
 
 - [Setup](#setup)
@@ -226,6 +230,18 @@ class VOPIClient {
         .map((e) => Frame.fromJson(e))
         .toList();
   }
+
+  /// Get presigned download URLs (required for private S3 bucket)
+  Future<DownloadUrlsResponse> getDownloadUrls(
+    String jobId, {
+    int expiresIn = 3600,
+  }) async {
+    final response = await _dio.get(
+      '/api/v1/jobs/$jobId/download-urls',
+      queryParameters: {'expiresIn': expiresIn},
+    );
+    return DownloadUrlsResponse.fromJson(response.data);
+  }
 }
 ```
 
@@ -289,6 +305,8 @@ enum JobStatusType {
   extracting,
   scoring,
   classifying,
+  @JsonValue('extracting_product')
+  extractingProduct,
   generating,
   completed,
   failed,
@@ -382,6 +400,31 @@ class JobListResponse with _$JobListResponse {
 
   factory JobListResponse.fromJson(Map<String, dynamic> json) =>
       _$JobListResponseFromJson(json);
+}
+
+// Download URLs Response (for private S3 bucket)
+@freezed
+class DownloadUrlsResponse with _$DownloadUrlsResponse {
+  const factory DownloadUrlsResponse({
+    required String jobId,
+    required int expiresIn,
+    required List<FrameDownload> frames,
+    required Map<String, Map<String, String>> commercialImages,
+  }) = _DownloadUrlsResponse;
+
+  factory DownloadUrlsResponse.fromJson(Map<String, dynamic> json) =>
+      _$DownloadUrlsResponseFromJson(json);
+}
+
+@freezed
+class FrameDownload with _$FrameDownload {
+  const factory FrameDownload({
+    required String frameId,
+    required String downloadUrl,
+  }) = _FrameDownload;
+
+  factory FrameDownload.fromJson(Map<String, dynamic> json) =>
+      _$FrameDownloadFromJson(json);
 }
 
 // Frame
@@ -584,12 +627,14 @@ class UploadStateNotifier extends StateNotifier<UploadState> {
     try {
       final results = await Future.wait([
         _client.getJob(jobId),
-        _client.getGroupedImages(jobId),
+        // Use presigned download URLs (required for private S3 bucket)
+        _client.getDownloadUrls(jobId),
       ]);
 
+      final downloadUrls = results[1] as DownloadUrlsResponse;
       state = UploadState.completed(
         results[0] as Job,
-        results[1] as Map<String, Map<String, String>>,
+        downloadUrls.commercialImages,
       );
     } catch (e) {
       state = UploadState.error('Failed to fetch results');

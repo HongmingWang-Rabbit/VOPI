@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { authMiddleware, shouldSkipAuth } from './auth.middleware.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
+import type { ApiKey } from '../db/schema.js';
 
 // Mock the config module
 vi.mock('../config/index.js', () => ({
@@ -13,8 +14,7 @@ vi.mock('../config/index.js', () => ({
 }));
 
 // Mock the database module
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockLimit: any = vi.fn(() => Promise.resolve([]));
+const mockLimit = vi.fn().mockResolvedValue([] as ApiKey[]);
 const mockWhere = vi.fn(() => ({ limit: mockLimit }));
 const mockFrom = vi.fn(() => ({ where: mockWhere }));
 vi.mock('../db/index.js', () => ({

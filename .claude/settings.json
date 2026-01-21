@@ -6,11 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./scripts/log-edit.sh"
-          },
-          {
-            "type": "command",
-            "command": "./scripts/remind-skills.sh"
+            "command": "echo 'Reminder: Consider using /code-review or /update-docs'"
           }
         ]
       }

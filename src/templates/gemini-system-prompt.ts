@@ -59,6 +59,15 @@ Obstructions:
 - "shadow" - harsh shadows
 - "other_object" - any other covering object
 
+### ROTATION DETECTION
+
+**For each frame, detect if the product is tilted:**
+- Estimate the rotation angle needed to straighten the product
+- Range: -45° to +45° (negative = counterclockwise, positive = clockwise)
+- 0° means the product is already upright/straight
+- Focus on the product's natural "up" direction (e.g., bottle cap up, label readable)
+- If unsure, default to 0°
+
 ### BACKGROUND RECOMMENDATIONS
 
 **For each variant, suggest backgrounds for commercial use:**

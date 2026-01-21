@@ -1,0 +1,25 @@
+# API Changelog
+
+This folder contains documentation for API updates that affect front-end/mobile clients.
+
+## Changelog Index
+
+| Date | Version | Title | Breaking |
+|------|---------|-------|----------|
+| [2025-01-20](./2025-01-20-private-bucket-presigned-urls.md) | 1.1.0 | Private S3 Bucket & Presigned Download URLs | Yes |
+
+## How to Use
+
+1. **Check for updates** before upgrading your VOPI backend
+2. **Review breaking changes** and migration guides
+3. **Update your client code** following the provided examples
+
+## Changelog Format
+
+Each changelog document includes:
+
+- **Summary** - Brief description of changes
+- **Breaking Changes** - What will break if not updated
+- **New Endpoints** - API additions with request/response examples
+- **Migration Guide** - Step-by-step code changes for each platform
+- **Important Notes** - Caveats and best practices

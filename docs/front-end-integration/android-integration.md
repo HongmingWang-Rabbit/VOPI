@@ -2,6 +2,10 @@
 
 Complete guide for integrating VOPI into Android applications using Kotlin, Retrofit, and Coroutines.
 
+> **Important: Private S3 Bucket**
+>
+> The VOPI S3 bucket is private. Direct URLs in job results are not publicly accessible. You must use the `/jobs/:id/download-urls` endpoint to get presigned URLs with temporary access tokens. These URLs expire after a configurable time (default: 1 hour).
+
 ## Table of Contents
 
 - [Setup](#setup)
@@ -116,6 +120,13 @@ interface VOPIService {
     suspend fun getGroupedImages(
         @Path("id") jobId: String
     ): Response<Map<String, Map<String, String>>>
+
+    // Get presigned download URLs (required for private S3 bucket)
+    @GET("api/v1/jobs/{id}/download-urls")
+    suspend fun getDownloadUrls(
+        @Path("id") jobId: String,
+        @Query("expiresIn") expiresIn: Int = 3600
+    ): Response<DownloadUrlsResponse>
 
     // Get final frames
     @GET("api/v1/jobs/{id}/frames/final")
@@ -245,6 +256,7 @@ enum class JobStatusType {
     @SerializedName("extracting") EXTRACTING,
     @SerializedName("scoring") SCORING,
     @SerializedName("classifying") CLASSIFYING,
+    @SerializedName("extracting_product") EXTRACTING_PRODUCT,
     @SerializedName("generating") GENERATING,
     @SerializedName("completed") COMPLETED,
     @SerializedName("failed") FAILED,
@@ -278,6 +290,19 @@ data class CancelJobResponse(
     val id: String,
     val status: JobStatusType,
     val message: String
+)
+
+// Download URLs (for private S3 bucket)
+data class DownloadUrlsResponse(
+    val jobId: String,
+    val expiresIn: Int,
+    val frames: List<FrameDownload>,
+    val commercialImages: Map<String, Map<String, String>>
+)
+
+data class FrameDownload(
+    val frameId: String,
+    val downloadUrl: String
 )
 
 data class JobListResponse(
@@ -422,7 +447,9 @@ class VOPIRepository(private val context: Context) {
                 when (status.status) {
                     JobStatusType.COMPLETED -> {
                         val fullJob = service.getJob(job.id).body()!!
-                        val images = service.getGroupedImages(job.id).body() ?: emptyMap()
+                        // Use presigned download URLs (required for private S3 bucket)
+                        val downloadUrls = service.getDownloadUrls(job.id).body()
+                        val images = downloadUrls?.commercialImages ?: emptyMap()
                         emit(UploadState.Completed(fullJob, images))
                         return@flow
                     }

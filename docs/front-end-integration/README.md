@@ -2,6 +2,10 @@
 
 This guide covers integrating VOPI (Video Object Processing Infrastructure) into mobile applications. VOPI extracts high-quality product photography frames from videos and generates commercial images.
 
+> **Important: Check API Changelog**
+>
+> Before integrating or upgrading, review the [API Changelog](./api-changelog/) for breaking changes and migration guides.
+
 ## Quick Start
 
 ### Integration Flow
@@ -29,12 +33,17 @@ This guide covers integrating VOPI (Video Object Processing Infrastructure) into
          │  4. Poll status OR receive webhook           │
          │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                       │
          │                       │                       │
-         │  5. Fetch results     │                       │
+         │  5. Get download URLs (presigned)            │
          │──────────────────────>│                       │
          │                       │                       │
-         │  Return images        │                       │
+         │  Return presigned URLs│                       │
          │<──────────────────────│                       │
+         │                       │                       │
+         │  6. Download images using presigned URLs     │
+         │─────────────────────────────────────────────>│
 ```
+
+> **Note:** The S3 bucket is private. Direct URLs in job results are not accessible. Use the `/jobs/:id/download-urls` endpoint to get time-limited presigned URLs.
 
 ## Authentication
 
@@ -132,21 +141,53 @@ Content-Type: video/mp4
     "step": "classifying",
     "percentage": 55,
     "message": "Processing batch 2/4",
-    "totalSteps": 6,
+    "totalSteps": 7,
     "currentStep": 4
   }
 }
 ```
 
-### 5. Get Results
+### 5. Get Download URLs (Required)
+
+**Endpoint:** `GET /api/v1/jobs/:id/download-urls`
+
+Get presigned URLs for accessing job assets. Required because S3 bucket is private.
+
+**Query Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `expiresIn` | 3600 | URL expiration in seconds (60-86400) |
+
+**Response:**
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "expiresIn": 3600,
+  "frames": [
+    {
+      "frameId": "frame_00123",
+      "downloadUrl": "https://s3.../...?X-Amz-..."
+    }
+  ],
+  "commercialImages": {
+    "product_1_variant_hero": {
+      "transparent": "https://s3.../...?X-Amz-...",
+      "solid": "https://s3.../...?X-Amz-...",
+      "real": "https://s3.../...?X-Amz-...",
+      "creative": "https://s3.../...?X-Amz-..."
+    }
+  }
+}
+```
+
+### 6. Get Full Job Details (Optional)
 
 **Endpoint:** `GET /api/v1/jobs/:id`
 
-Returns full job details including results and image URLs.
+Returns full job details including config, progress, and result metadata.
 
-**Endpoint:** `GET /api/v1/jobs/:id/images/grouped`
-
-Returns commercial images grouped by variant for easy display.
+**Note:** The URLs in `job.result.commercialImages` are direct S3 URLs that are **not accessible**. Always use the download-urls endpoint for actual image access.
 
 ## Job Status Values
 
@@ -157,6 +198,7 @@ Returns commercial images grouped by variant for easy display.
 | `extracting` | Extracting frames from video |
 | `scoring` | Calculating frame quality scores |
 | `classifying` | AI classification of frames |
+| `extracting_product` | Extracting and centering product |
 | `generating` | Generating commercial images |
 | `completed` | Job finished successfully |
 | `failed` | Job failed with error |
@@ -207,6 +249,7 @@ All errors follow this format:
 - [Android/Kotlin Integration](./android-integration.md)
 - [React Native Integration](./react-native-integration.md)
 - [Flutter/Dart Integration](./flutter-integration.md)
+- [API Changelog](./api-changelog/) - Breaking changes and migration guides
 
 ## Best Practices
 
@@ -239,3 +282,56 @@ While the API doesn't enforce rate limits directly, external AI services have th
 - Max video duration: 5 minutes
 - Max video file size: 500 MB
 - Min polling interval: 3 seconds
+
+---
+
+## For Maintainers: Updating Documentation
+
+When making API changes that affect front-end clients, follow these steps:
+
+### 1. Create a Changelog Entry
+
+Create a new file in `docs/front-end-integration/api-changelog/` with the format:
+
+```
+YYYY-MM-DD-short-description.md
+```
+
+Example: `2025-01-20-private-bucket-presigned-urls.md`
+
+### 2. Changelog Content
+
+Each changelog should include:
+
+- **Date and Version** - When the change was made
+- **Breaking Change indicator** - Yes/No
+- **Summary** - Brief description
+- **Breaking Changes** - What will break if not updated
+- **New Endpoints** - Full request/response examples
+- **Migration Guide** - Code examples for each platform (iOS, Android, React Native, Flutter)
+- **Important Notes** - Caveats and best practices
+
+### 3. Update Platform Guides
+
+Update all four platform-specific guides:
+
+- `ios-integration.md`
+- `android-integration.md`
+- `react-native-integration.md`
+- `flutter-integration.md`
+
+Changes typically include:
+- New status values in enums
+- New API methods
+- New model/type definitions
+- Updated result handling code
+
+### 4. Update This README
+
+- Add new endpoints to the Core Endpoints section
+- Update status values table if changed
+- Update the integration flow diagram if needed
+
+### 5. Update Changelog Index
+
+Add the new entry to `api-changelog/README.md` index table.

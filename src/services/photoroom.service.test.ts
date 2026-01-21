@@ -93,14 +93,22 @@ describe('PhotoroomService', () => {
       setHeader: vi.fn(),
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(https.request).mockImplementation(((...args: any[]) => {
-      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : undefined;
-      setTimeout(() => {
-        callback?.(response as unknown);
-      }, 0);
-      return mockReq as unknown as ReturnType<typeof https.request>;
-    }) as any);
+    type HttpsRequestCallback = (res: { statusCode: number; headers: Record<string, string>; on: ReturnType<typeof vi.fn> }) => void;
+
+    vi.mocked(https.request).mockImplementation(
+      ((_urlOrOptions: string | URL | https.RequestOptions, optionsOrCallback?: https.RequestOptions | HttpsRequestCallback, maybeCallback?: HttpsRequestCallback) => {
+        // Extract callback from variable argument positions
+        const callback = typeof maybeCallback === 'function'
+          ? maybeCallback
+          : typeof optionsOrCallback === 'function'
+            ? optionsOrCallback
+            : undefined;
+        setTimeout(() => {
+          callback?.(response);
+        }, 0);
+        return mockReq as unknown as ReturnType<typeof https.request>;
+      }) as typeof https.request
+    );
 
     return mockReq;
   };
@@ -246,6 +254,7 @@ describe('PhotoroomService', () => {
       angleEstimate: 'front',
       recommendedType: 'product_1_front_view',
       geminiScore: 85,
+      rotationAngleDeg: 0,
       allFrameIds: ['frame_00001'],
       obstructions: {
         has_obstruction: false,

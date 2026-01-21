@@ -2,6 +2,10 @@
 
 Complete guide for integrating VOPI into iOS applications using Swift and URLSession.
 
+> **Important: Private S3 Bucket**
+>
+> The VOPI S3 bucket is private. Direct URLs in job results are not publicly accessible. You must use the `/jobs/:id/download-urls` endpoint to get presigned URLs with temporary access tokens. These URLs expire after a configurable time (default: 1 hour).
+
 ## Table of Contents
 
 - [Setup](#setup)
@@ -217,6 +221,15 @@ class VOPIClient {
     func getFinalFrames(jobId: String) async throws -> [Frame] {
         return try await request(path: "/api/v1/jobs/\(jobId)/frames/final")
     }
+
+    /// Get presigned download URLs for job assets (required for private S3 bucket)
+    /// - Parameters:
+    ///   - jobId: The job ID
+    ///   - expiresIn: URL expiration in seconds (60-86400, default: 3600)
+    /// - Returns: Presigned URLs for frames and commercial images
+    func getDownloadUrls(jobId: String, expiresIn: Int = 3600) async throws -> DownloadUrlsResponse {
+        return try await request(path: "/api/v1/jobs/\(jobId)/download-urls?expiresIn=\(expiresIn)")
+    }
 }
 
 // MARK: - Upload Progress Delegate
@@ -319,6 +332,7 @@ enum JobStatusType: String, Decodable {
     case extracting
     case scoring
     case classifying
+    case extractingProduct = "extracting_product"
     case generating
     case completed
     case failed
@@ -352,6 +366,20 @@ struct CancelJobResponse: Decodable {
     let id: String
     let status: JobStatusType
     let message: String
+}
+
+// MARK: - Download URLs (for private S3 bucket)
+
+struct DownloadUrlsResponse: Decodable {
+    let jobId: String
+    let expiresIn: Int
+    let frames: [FrameDownload]
+    let commercialImages: [String: [String: String]]
+}
+
+struct FrameDownload: Decodable {
+    let frameId: String
+    let downloadUrl: String
 }
 
 // MARK: - Frame
@@ -525,11 +553,12 @@ class VideoUploadManager: ObservableObject {
     private func fetchResults(jobId: String) async {
         do {
             let job = try await VOPIClient.shared.getJob(id: jobId)
-            let images = try await VOPIClient.shared.getGroupedImages(jobId: jobId)
+            // Use presigned download URLs (required for private S3 bucket)
+            let downloadUrls = try await VOPIClient.shared.getDownloadUrls(jobId: jobId)
 
             await MainActor.run {
                 self.completedJob = job
-                self.groupedImages = images
+                self.groupedImages = downloadUrls.commercialImages
                 self.isProcessing = false
                 self.currentStep = "Completed!"
             }
@@ -733,9 +762,11 @@ struct VideoTransferable: Transferable {
 }
 
 // Results View
+// Note: groupedImages contains presigned URLs from getDownloadUrls()
+// These URLs are time-limited (default: 1 hour) and include authentication tokens
 struct ResultsView: View {
     let job: Job?
-    let groupedImages: [String: [String: String]]
+    let groupedImages: [String: [String: String]]  // Presigned URLs from download-urls endpoint
 
     @Environment(\.dismiss) private var dismiss
 

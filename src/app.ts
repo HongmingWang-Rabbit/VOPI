@@ -11,6 +11,7 @@ import { authMiddleware, shouldSkipAuth } from './middleware/auth.middleware.js'
 import { healthRoutes } from './routes/health.routes.js';
 import { jobsRoutes } from './routes/jobs.routes.js';
 import { framesRoutes } from './routes/frames.routes.js';
+import { setupDefaultProviders } from './providers/setup.js';
 
 /**
  * Build and configure Fastify application
@@ -18,6 +19,9 @@ import { framesRoutes } from './routes/frames.routes.js';
 export async function buildApp(): Promise<FastifyInstance> {
   const config = getConfig();
   const logger = getLogger();
+
+  // Initialize providers
+  setupDefaultProviders();
 
   const app = Fastify({
     logger: false, // We use our own Pino logger

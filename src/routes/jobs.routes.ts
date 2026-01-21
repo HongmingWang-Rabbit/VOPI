@@ -5,6 +5,7 @@ import { jobsController } from '../controllers/jobs.controller.js';
 import { createJobSchema, jobListQuerySchema } from '../types/job.types.js';
 import { storageService } from '../services/storage.service.js';
 import { getConfig } from '../config/index.js';
+import { extractS3KeyFromUrl } from '../utils/s3-url.js';
 import { z } from 'zod';
 
 const jobIdParamsSchema = z.object({
@@ -15,6 +16,10 @@ const presignBodySchema = z.object({
   filename: z.string().max(255).optional(),
   contentType: z.enum(['video/mp4', 'video/quicktime', 'video/webm']).default('video/mp4'),
   expiresIn: z.number().int().min(60).max(86400).optional(), // 1 minute to 24 hours
+});
+
+const downloadPresignQuerySchema = z.object({
+  expiresIn: z.coerce.number().int().min(60).max(86400).default(3600), // 1 minute to 24 hours
 });
 
 /**
@@ -93,6 +98,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
                 'extracting',
                 'scoring',
                 'classifying',
+                'extracting_product',
                 'generating',
                 'completed',
                 'failed',
@@ -249,6 +255,135 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
         id: job.id,
         status: job.status,
         message: 'Job cancelled successfully',
+      });
+    }
+  );
+
+  /**
+   * Get presigned download URLs for job assets
+   * Converts stored S3 URLs to time-limited presigned URLs for secure access
+   */
+  fastify.get(
+    '/jobs/:id/download-urls',
+    {
+      schema: {
+        description: 'Get presigned download URLs for job assets (frames and commercial images)',
+        tags: ['Jobs'],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            expiresIn: {
+              type: 'number',
+              minimum: 60,
+              maximum: 86400,
+              default: 3600,
+              description: 'URL expiration in seconds (1 minute to 24 hours)',
+            },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              jobId: { type: 'string' },
+              expiresIn: { type: 'number' },
+              frames: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    frameId: { type: 'string' },
+                    downloadUrl: { type: 'string' },
+                  },
+                },
+              },
+              commercialImages: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'object',
+                  additionalProperties: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = jobIdParamsSchema.parse(request.params);
+      const { expiresIn } = downloadPresignQuerySchema.parse(request.query);
+
+      // Get job to verify it exists and is complete
+      const job = await jobsController.getJob(id);
+      if (!job.result) {
+        return reply.status(400).send({
+          error: 'BAD_REQUEST',
+          message: 'Job has no results yet. Wait for job to complete.',
+        });
+      }
+
+      const config = getConfig();
+      const storageConfig = {
+        bucket: config.storage.bucket,
+        endpoint: config.storage.endpoint,
+        region: config.storage.region,
+      };
+
+      // Generate presigned URLs for frames in parallel
+      const framePromises = (job.result.finalFrames || []).map(async (frameUrl) => {
+        const s3Key = extractS3KeyFromUrl(frameUrl, storageConfig, { allowAnyHost: true });
+        if (!s3Key) return null;
+
+        const downloadUrl = await storageService.getPresignedUrl(s3Key, expiresIn);
+        // Extract frameId from the URL pattern: ...product_X_variant_Y_frame_XXXXX_tX.XX.png
+        const frameIdMatch = frameUrl.match(/(frame_\d+)/);
+        return {
+          frameId: frameIdMatch ? frameIdMatch[1] : path.basename(frameUrl),
+          downloadUrl,
+        };
+      });
+
+      const frameResults = await Promise.all(framePromises);
+      const frames = frameResults.filter((f): f is { frameId: string; downloadUrl: string } => f !== null);
+
+      // Generate presigned URLs for commercial images in parallel
+      const commercialImages: Record<string, Record<string, string>> = {};
+      const commercialPromises: Promise<void>[] = [];
+
+      for (const [productVariant, versions] of Object.entries(job.result.commercialImages || {})) {
+        commercialImages[productVariant] = {};
+
+        // Type guard: ensure versions is a record of strings
+        if (typeof versions !== 'object' || versions === null) continue;
+
+        for (const [version, url] of Object.entries(versions as Record<string, string>)) {
+          if (typeof url !== 'string') continue;
+
+          const s3Key = extractS3KeyFromUrl(url, storageConfig, { allowAnyHost: true });
+          if (s3Key) {
+            commercialPromises.push(
+              storageService.getPresignedUrl(s3Key, expiresIn).then((presignedUrl) => {
+                commercialImages[productVariant][version] = presignedUrl;
+              })
+            );
+          }
+        }
+      }
+
+      await Promise.all(commercialPromises);
+
+      return reply.send({
+        jobId: id,
+        expiresIn,
+        frames,
+        commercialImages,
       });
     }
   );

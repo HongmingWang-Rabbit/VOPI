@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { JobsController } from './jobs.controller.js';
+import { createJobSchema, type CreateJobRequest } from '../types/job.types.js';
+import type { ApiKey } from '../db/schema.js';
 
 // Mock database - needs to be a proper chain
 const createChainMock = () => {
@@ -81,9 +83,10 @@ describe('JobsController', () => {
 
       mockDb.returning.mockResolvedValue([mockJob]);
 
-      const result = await controller.createJob({
+      const createJobRequest: CreateJobRequest = createJobSchema.parse({
         videoUrl: 'https://example.com/video.mp4',
-      } as any);
+      });
+      const result = await controller.createJob(createJobRequest);
 
       expect(result.id).toBe('job-123');
       expect(addPipelineJob).toHaveBeenCalledWith('job-123');
@@ -102,10 +105,11 @@ describe('JobsController', () => {
 
       mockDb.returning.mockResolvedValue([mockJob]);
 
-      await controller.createJob({
+      const createJobRequest: CreateJobRequest = createJobSchema.parse({
         videoUrl: 'https://example.com/video.mp4',
         callbackUrl: 'https://callback.example.com/webhook',
-      } as any);
+      });
+      await controller.createJob(createJobRequest);
 
       expect(validateCallbackUrlComprehensive).toHaveBeenCalledWith(
         'https://callback.example.com/webhook'
@@ -118,20 +122,25 @@ describe('JobsController', () => {
         error: 'Invalid domain',
       });
 
+      const createJobRequest: CreateJobRequest = createJobSchema.parse({
+        videoUrl: 'https://example.com/video.mp4',
+        callbackUrl: 'https://evil.com/webhook',
+      });
       await expect(
-        controller.createJob({
-          videoUrl: 'https://example.com/video.mp4',
-          callbackUrl: 'https://evil.com/webhook',
-        } as any)
+        controller.createJob(createJobRequest)
       ).rejects.toThrow('Invalid domain');
     });
 
     it('should increment API key usage when apiKey is provided', async () => {
-      const mockApiKey = {
+      const mockApiKey: ApiKey = {
         id: 'key-123',
         key: 'test-key',
+        name: 'Test Key',
         maxUses: 10,
         usedCount: 5,
+        createdAt: new Date(),
+        expiresAt: null,
+        revokedAt: null,
       };
       const mockUpdatedKey = { ...mockApiKey, usedCount: 6 };
       const mockJob = {
@@ -152,50 +161,58 @@ describe('JobsController', () => {
         return Promise.resolve([mockJob]);
       });
 
-      const result = await controller.createJob(
-        { videoUrl: 'https://example.com/video.mp4' } as any,
-        mockApiKey as any
-      );
+      const createJobRequest: CreateJobRequest = createJobSchema.parse({
+        videoUrl: 'https://example.com/video.mp4',
+      });
+      const result = await controller.createJob(createJobRequest, mockApiKey);
 
       expect(result.id).toBe('job-123');
       expect(mockDb.update).toHaveBeenCalled();
     });
 
     it('should throw ForbiddenError when API key usage limit exceeded', async () => {
-      const mockApiKey = {
+      const mockApiKey: ApiKey = {
         id: 'key-123',
         key: 'test-key',
+        name: 'Test Key',
         maxUses: 10,
         usedCount: 10, // Already at limit
+        createdAt: new Date(),
+        expiresAt: null,
+        revokedAt: null,
       };
 
       // Atomic update returns nothing (limit exceeded)
       mockDb.returning.mockResolvedValue([]);
 
+      const createJobRequest: CreateJobRequest = createJobSchema.parse({
+        videoUrl: 'https://example.com/video.mp4',
+      });
       await expect(
-        controller.createJob(
-          { videoUrl: 'https://example.com/video.mp4' } as any,
-          mockApiKey as any
-        )
+        controller.createJob(createJobRequest, mockApiKey)
       ).rejects.toThrow('API key usage limit exceeded');
     });
 
     it('should throw ForbiddenError on race condition (atomic update fails)', async () => {
-      const mockApiKey = {
+      const mockApiKey: ApiKey = {
         id: 'key-123',
         key: 'test-key',
+        name: 'Test Key',
         maxUses: 10,
         usedCount: 9, // One use left, but another request takes it
+        createdAt: new Date(),
+        expiresAt: null,
+        revokedAt: null,
       };
 
       // Atomic update returns nothing (another request used the last slot)
       mockDb.returning.mockResolvedValue([]);
 
+      const createJobRequest: CreateJobRequest = createJobSchema.parse({
+        videoUrl: 'https://example.com/video.mp4',
+      });
       await expect(
-        controller.createJob(
-          { videoUrl: 'https://example.com/video.mp4' } as any,
-          mockApiKey as any
-        )
+        controller.createJob(createJobRequest, mockApiKey)
       ).rejects.toThrow('API key usage limit exceeded');
     });
   });

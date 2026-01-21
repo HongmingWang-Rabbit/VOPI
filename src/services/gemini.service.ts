@@ -36,6 +36,7 @@ export interface GeminiResponse {
     angle_estimate: string;
     quality_score_0_100: number;
     similarity_note: string;
+    rotation_angle_deg?: number;
     obstructions: FrameObstructions;
   }>;
   variants_discovered?: Array<{
@@ -45,6 +46,7 @@ export interface GeminiResponse {
     description: string;
     best_frame_id: string;
     best_frame_score: number;
+    rotation_angle_deg?: number;
     all_frame_ids: string[];
     obstructions: FrameObstructions;
     background_recommendations: BackgroundRecommendations;
@@ -61,6 +63,7 @@ export interface RecommendedFrame extends ScoredFrame {
   recommendedType: string;
   variantDescription?: string;
   geminiScore: number;
+  rotationAngleDeg: number;
   allFrameIds: string[];
   obstructions: FrameObstructions;
   backgroundRecommendations: BackgroundRecommendations;
@@ -290,6 +293,7 @@ Return ONLY the JSON object. No additional text.`;
         score: number;
         variantId: string;
         angleEstimate: string;
+        rotationAngleDeg: number;
         obstructions: FrameObstructions;
         similarityNote: string;
       }
@@ -300,6 +304,7 @@ Return ONLY the JSON object. No additional text.`;
         score: evalItem.quality_score_0_100 || 50,
         variantId: evalItem.variant_id,
         angleEstimate: evalItem.angle_estimate,
+        rotationAngleDeg: evalItem.rotation_angle_deg ?? 0,
         obstructions: evalItem.obstructions || {
           has_obstruction: false,
           obstruction_types: [],
@@ -335,6 +340,7 @@ Return ONLY the JSON object. No additional text.`;
             recommendedType: `${productId}_${variantId}`,
             variantDescription: variant.description,
             geminiScore: variant.best_frame_score || evalData?.score || 50,
+            rotationAngleDeg: variant.rotation_angle_deg ?? evalData?.rotationAngleDeg ?? 0,
             allFrameIds: variant.all_frame_ids || [frameId],
             obstructions: variant.obstructions ||
               evalData?.obstructions || {
@@ -383,6 +389,7 @@ Return ONLY the JSON object. No additional text.`;
             angleEstimate: evalData.angleEstimate || 'unknown',
             recommendedType: `product_1_${variantId}`,
             geminiScore: data.score,
+            rotationAngleDeg: evalData.rotationAngleDeg ?? 0,
             allFrameIds: [data.frameId],
             obstructions: evalData.obstructions,
             backgroundRecommendations: {

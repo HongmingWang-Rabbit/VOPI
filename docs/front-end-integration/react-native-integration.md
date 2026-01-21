@@ -2,6 +2,10 @@
 
 Complete guide for integrating VOPI into React Native applications using TypeScript.
 
+> **Important: Private S3 Bucket**
+>
+> The VOPI S3 bucket is private. Direct URLs in job results are not publicly accessible. You must use the `/jobs/:id/download-urls` endpoint to get presigned URLs with temporary access tokens. These URLs expire after a configurable time (default: 1 hour).
+
 ## Table of Contents
 
 - [Setup](#setup)
@@ -80,6 +84,7 @@ import {
   CancelJobResponse,
   Frame,
   ApiError,
+  DownloadUrlsResponse,
 } from '../types/vopi.types';
 
 class VOPIClient {
@@ -164,6 +169,18 @@ class VOPIClient {
     );
     return data;
   }
+
+  // Get presigned download URLs (required for private S3 bucket)
+  async getDownloadUrls(
+    jobId: string,
+    expiresIn = 3600
+  ): Promise<DownloadUrlsResponse> {
+    const { data } = await this.client.get<DownloadUrlsResponse>(
+      `/api/v1/jobs/${jobId}/download-urls`,
+      { params: { expiresIn } }
+    );
+    return data;
+  }
 }
 
 export const vopiClient = new VOPIClient();
@@ -220,6 +237,7 @@ export type JobStatusType =
   | 'extracting'
   | 'scoring'
   | 'classifying'
+  | 'extracting_product'
   | 'generating'
   | 'completed'
   | 'failed'
@@ -266,6 +284,17 @@ export interface CancelJobResponse {
   id: string;
   status: JobStatusType;
   message: string;
+}
+
+// Download URLs (for private S3 bucket)
+export interface DownloadUrlsResponse {
+  jobId: string;
+  expiresIn: number;
+  frames: Array<{
+    frameId: string;
+    downloadUrl: string;
+  }>;
+  commercialImages: Record<string, Record<string, string>>;
 }
 
 // Frame
@@ -451,15 +480,16 @@ export function useVOPIUpload() {
   const handleJobComplete = async (jobId: string, status: JobStatusType) => {
     if (status === 'completed') {
       try {
-        const [job, images] = await Promise.all([
+        const [job, downloadUrls] = await Promise.all([
           vopiClient.getJob(jobId),
-          vopiClient.getGroupedImages(jobId),
+          // Use presigned download URLs (required for private S3 bucket)
+          vopiClient.getDownloadUrls(jobId),
         ]);
 
         setState({
           status: 'completed',
           job,
-          images,
+          images: downloadUrls.commercialImages,
         });
       } catch (error) {
         setState({

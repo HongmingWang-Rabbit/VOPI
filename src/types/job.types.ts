@@ -9,6 +9,7 @@ export const JobStatus = {
   EXTRACTING: 'extracting',
   SCORING: 'scoring',
   CLASSIFYING: 'classifying',
+  EXTRACTING_PRODUCT: 'extracting_product',
   GENERATING: 'generating',
   COMPLETED: 'completed',
   FAILED: 'failed',
@@ -126,7 +127,18 @@ export interface VideoMetadata {
  * Job list query params
  */
 export const jobListQuerySchema = z.object({
-  status: z.enum(['pending', 'downloading', 'extracting', 'scoring', 'classifying', 'generating', 'completed', 'failed', 'cancelled']).optional(),
+  status: z.enum([
+    'pending',
+    'downloading',
+    'extracting',
+    'scoring',
+    'classifying',
+    'extracting_product',
+    'generating',
+    'completed',
+    'failed',
+    'cancelled',
+  ]).optional(),
   limit: z.coerce.number().min(1).max(100).default(20),
   offset: z.coerce.number().min(0).default(0),
 });

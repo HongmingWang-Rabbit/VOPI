@@ -154,7 +154,7 @@ List all jobs with optional filtering.
 | `limit` | number | 20 | Results per page (1-100) |
 | `offset` | number | 0 | Pagination offset |
 
-**Status Values**: `pending`, `downloading`, `extracting`, `scoring`, `classifying`, `generating`, `completed`, `failed`, `cancelled`
+**Status Values**: `pending`, `downloading`, `extracting`, `scoring`, `classifying`, `extracting_product`, `generating`, `completed`, `failed`, `cancelled`
 
 **Response** `200 OK`
 ```json
@@ -281,6 +281,53 @@ Cancel a pending job. Uses atomic update to prevent race conditions.
   "statusCode": 400
 }
 ```
+
+---
+
+### GET /api/v1/jobs/:id/download-urls
+
+Get presigned download URLs for job assets. Since the S3 bucket is private, this endpoint generates time-limited presigned URLs for secure access to frames and commercial images.
+
+**Query Parameters**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `expiresIn` | number | 3600 | URL expiration in seconds (60-86400) |
+
+**Response** `200 OK`
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "expiresIn": 3600,
+  "frames": [
+    {
+      "frameId": "frame_00123",
+      "downloadUrl": "https://s3.amazonaws.com/bucket/jobs/{id}/frames/...?X-Amz-..."
+    }
+  ],
+  "commercialImages": {
+    "product_1_variant_hero": {
+      "transparent": "https://s3.amazonaws.com/bucket/jobs/{id}/commercial/...?X-Amz-...",
+      "solid": "https://s3.amazonaws.com/bucket/jobs/{id}/commercial/...?X-Amz-...",
+      "real": "https://s3.amazonaws.com/bucket/jobs/{id}/commercial/...?X-Amz-...",
+      "creative": "https://s3.amazonaws.com/bucket/jobs/{id}/commercial/...?X-Amz-..."
+    }
+  }
+}
+```
+
+**Response** `400 Bad Request` (job not complete)
+```json
+{
+  "error": "BAD_REQUEST",
+  "message": "Job has no results yet. Wait for job to complete."
+}
+```
+
+**Usage Notes**:
+- Presigned URLs are time-limited and include authentication tokens
+- URLs work from any client (browser, mobile app, curl)
+- Generate new URLs if they expire before download completes
+- URLs are generated in parallel for performance
 
 ---
 

@@ -4,11 +4,13 @@ import os from 'os';
 
 import { createChildLogger } from '../utils/logger.js';
 import { getConfig } from '../config/index.js';
+import { extractS3KeyFromUrl } from '../utils/s3-url.js';
 import { getDatabase, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { videoService } from './video.service.js';
 import { frameScoringService, type ScoredFrame } from './frame-scoring.service.js';
 import { geminiService, type RecommendedFrame } from './gemini.service.js';
+import { providerRegistry, type ProductExtractionResult } from '../providers/index.js';
 import { photoroomService } from './photoroom.service.js';
 import { storageService } from './storage.service.js';
 import type { Job, NewVideo, NewFrame, NewCommercialImage } from '../db/schema.js';
@@ -35,6 +37,7 @@ interface WorkDirs {
   video: string;
   frames: string;
   candidates: string;
+  extracted: string;
   final: string;
   commercial: string;
 }
@@ -93,11 +96,14 @@ export class PipelineService {
       // Save frame records to database
       const frameRecords = await this.saveFrameRecords(ctx, video.id, scoredFrames, candidateFrames, recommendedFrames);
 
-      // Step 5: Upload final frames and generate commercial images
-      const finalFrameUrls = await this.uploadFinalFrames(ctx, recommendedFrames, frameRecords);
-      const commercialImages = await this.generateCommercialImages(ctx, recommendedFrames, frameRecords);
+      // Step 5: Extract products (remove background, rotate, center)
+      const extractionResults = await this.extractProducts(ctx, recommendedFrames);
 
-      // Step 6: Complete job
+      // Step 6: Upload final frames and generate commercial images
+      const finalFrameUrls = await this.uploadFinalFrames(ctx, recommendedFrames, frameRecords);
+      const commercialImages = await this.generateCommercialImages(ctx, recommendedFrames, frameRecords, extractionResults);
+
+      // Step 7: Complete job
       const result = await this.completeJob(ctx, recommendedFrames.length, candidateFrames.length, finalFrameUrls, commercialImages);
 
       return result;
@@ -119,9 +125,14 @@ export class PipelineService {
   private async cleanupUploadedVideo(videoUrl: string): Promise<void> {
     try {
       const config = getConfig();
+      const storageConfig = {
+        bucket: config.storage.bucket,
+        endpoint: config.storage.endpoint,
+        region: config.storage.region,
+      };
 
       // Check if this is an S3 URL from our bucket's uploads prefix
-      const s3Key = this.extractS3KeyFromUrl(videoUrl, config.storage);
+      const s3Key = extractS3KeyFromUrl(videoUrl, storageConfig, { allowAnyHost: true });
 
       if (s3Key && s3Key.startsWith('uploads/')) {
         await storageService.deleteFile(s3Key);
@@ -134,45 +145,6 @@ export class PipelineService {
   }
 
   /**
-   * Extract S3 key from URL if it matches our bucket
-   */
-  private extractS3KeyFromUrl(
-    url: string,
-    storageConfig: { bucket: string; endpoint?: string; region: string }
-  ): string | null {
-    // Handle S3 protocol URLs: s3://bucket/key
-    if (url.startsWith('s3://')) {
-      const match = url.match(/^s3:\/\/([^/]+)\/(.+)$/);
-      if (match && match[1] === storageConfig.bucket) {
-        return match[2];
-      }
-      return null;
-    }
-
-    // Handle HTTP URLs from our bucket
-    // Custom endpoint (MinIO): http://endpoint/bucket/key
-    if (storageConfig.endpoint) {
-      const endpoint = storageConfig.endpoint.replace(/\/$/, '');
-      const pathStylePattern = new RegExp(`^${endpoint}/${storageConfig.bucket}/(.+)$`);
-      const match = url.match(pathStylePattern);
-      if (match) {
-        return match[1];
-      }
-    }
-
-    // AWS S3: https://bucket.s3.region.amazonaws.com/key
-    const awsPattern = new RegExp(
-      `^https?://${storageConfig.bucket}\\.s3\\.${storageConfig.region}\\.amazonaws\\.com/(.+)$`
-    );
-    const awsMatch = url.match(awsPattern);
-    if (awsMatch) {
-      return awsMatch[1];
-    }
-
-    return null;
-  }
-
-  /**
    * Create working directories for pipeline execution
    */
   private async createWorkDirs(jobId: string, tempDirName: string): Promise<WorkDirs> {
@@ -182,6 +154,7 @@ export class PipelineService {
       video: path.join(root, 'video'),
       frames: path.join(root, 'frames'),
       candidates: path.join(root, 'candidates'),
+      extracted: path.join(root, 'extracted'),
       final: path.join(root, 'final'),
       commercial: path.join(root, 'commercial'),
     };
@@ -190,6 +163,7 @@ export class PipelineService {
       mkdir(workDirs.video, { recursive: true }),
       mkdir(workDirs.frames, { recursive: true }),
       mkdir(workDirs.candidates, { recursive: true }),
+      mkdir(workDirs.extracted, { recursive: true }),
       mkdir(workDirs.final, { recursive: true }),
       mkdir(workDirs.commercial, { recursive: true }),
     ]);
@@ -396,6 +370,58 @@ export class PipelineService {
   }
 
   /**
+   * Step 5: Extract products (remove background, rotate, center)
+   */
+  private async extractProducts(
+    ctx: PipelineContext,
+    recommendedFrames: RecommendedFrame[]
+  ): Promise<Map<string, ProductExtractionResult>> {
+    await this.updateProgress(ctx.job, 'extracting_product', 65, 'Extracting products', ctx.onProgress);
+
+    const hasObstructions = recommendedFrames.some((f) => f.obstructions?.has_obstruction);
+    const useAIEdit = ctx.config.aiCleanup && hasObstructions;
+
+    // Get product extraction provider from registry (supports A/B testing via jobId seed)
+    const { provider, providerId, abTestId } = providerRegistry.get('productExtraction', undefined, ctx.jobId);
+    logger.info({ providerId, abTestId, jobId: ctx.jobId }, 'Using product extraction provider');
+
+    // Map RecommendedFrame to ExtractionFrame interface
+    const extractionFrames = recommendedFrames.map((frame) => ({
+      frameId: frame.frameId,
+      path: frame.path,
+      rotationAngleDeg: frame.rotationAngleDeg || 0,
+      obstructions: frame.obstructions,
+      recommendedType: frame.recommendedType,
+    }));
+
+    const results = await provider.extractProducts(
+      extractionFrames,
+      ctx.workDirs.extracted,
+      {
+        useAIEdit,
+        onProgress: async (current, total) => {
+          const percentage = 65 + Math.round((current / total) * 5);
+          await this.updateProgress(
+            ctx.job,
+            'extracting_product',
+            percentage,
+            `Extracting product ${current}/${total}`,
+            ctx.onProgress
+          );
+        },
+      }
+    );
+
+    const successCount = [...results.values()].filter((r) => r.success).length;
+    logger.info(
+      { jobId: ctx.jobId, total: recommendedFrames.length, success: successCount, providerId },
+      'Product extraction complete'
+    );
+
+    return results;
+  }
+
+  /**
    * Upload final selected frames to S3
    */
   private async uploadFinalFrames(
@@ -437,15 +463,14 @@ export class PipelineService {
   private async generateCommercialImages(
     ctx: PipelineContext,
     recommendedFrames: RecommendedFrame[],
-    frameRecords: Map<string, string>
+    frameRecords: Map<string, string>,
+    extractionResults: Map<string, ProductExtractionResult>
   ): Promise<Record<string, Record<string, string>>> {
     const db = getDatabase();
 
     await this.updateProgress(ctx.job, 'generating', 75, 'Generating commercial images', ctx.onProgress);
 
     const commercialImages: Record<string, Record<string, string>> = {};
-    const hasObstructions = recommendedFrames.some((f) => f.obstructions?.has_obstruction);
-    const useAIEdit = ctx.config.aiCleanup && hasObstructions;
 
     for (let i = 0; i < recommendedFrames.length; i++) {
       const frame = recommendedFrames[i];
@@ -460,13 +485,40 @@ export class PipelineService {
       );
 
       try {
+        // Use pre-extracted product if available
+        const extraction = extractionResults.get(frame.frameId);
+        const hasExtractedProduct = !!(extraction?.success && extraction.outputPath);
+
         const result = await photoroomService.generateAllVersions(frame, ctx.workDirs.commercial, {
-          useAIEdit,
           versions: ctx.config.commercialVersions,
+          transparentSource: hasExtractedProduct ? extraction.outputPath : undefined,
+          skipTransparent: hasExtractedProduct,
         });
 
         const variantImages: Record<string, string> = {};
         const frameDbId = frameRecords.get(frame.frameId);
+
+        // If we have a pre-extracted product, use it as the transparent version
+        if (hasExtractedProduct && ctx.config.commercialVersions.includes('transparent')) {
+          const s3Key = storageService.getJobKey(
+            ctx.jobId,
+            'commercial',
+            path.basename(extraction.outputPath!)
+          );
+          const { url } = await storageService.uploadFile(extraction.outputPath!, s3Key);
+          variantImages.transparent = url;
+
+          if (frameDbId) {
+            await db.insert(schema.commercialImages).values({
+              jobId: ctx.jobId,
+              frameId: frameDbId,
+              version: 'transparent',
+              localPath: extraction.outputPath,
+              s3Url: url,
+              success: true,
+            } satisfies NewCommercialImage);
+          }
+        }
 
         for (const [version, versionResult] of Object.entries(result.versions)) {
           if (versionResult.success && versionResult.outputPath) {
@@ -587,7 +639,7 @@ export class PipelineService {
       step: status,
       percentage,
       message,
-      totalSteps: 6,
+      totalSteps: 7,
       currentStep: this.getStepNumber(status),
     };
 
@@ -622,8 +674,9 @@ export class PipelineService {
       extracting: 2,
       scoring: 3,
       classifying: 4,
-      generating: 5,
-      completed: 6,
+      extracting_product: 5,
+      generating: 6,
+      completed: 7,
       failed: -1,
       cancelled: -1,
     };

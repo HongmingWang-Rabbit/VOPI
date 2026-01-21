@@ -420,9 +420,10 @@ Orchestrates the complete processing pipeline, coordinating all other services.
 1. **Download** (5%) - Fetch video from URL
 2. **Extract** (10-15%) - Get metadata and extract frames
 3. **Score** (30-45%) - Calculate quality scores
-4. **Classify** (50-65%) - AI variant discovery
-5. **Generate** (70-95%) - Commercial image creation
-6. **Complete** (100%) - Finalize and cleanup
+4. **Classify** (50-60%) - AI variant discovery
+5. **Extract Product** (60-70%) - Remove background, rotate, center
+6. **Generate** (70-95%) - Commercial image creation
+7. **Complete** (100%) - Finalize and cleanup
 
 ### Methods
 
@@ -472,6 +473,7 @@ interface PipelineProgress {
 ├── frames/         # All extracted frames
 ├── candidates/     # Best frame per second
 ├── final/          # AI-selected variants
+├── extracted/      # Product extraction results (bg removed, rotated, centered)
 └── commercial/     # Generated images
 ```
 
@@ -487,6 +489,58 @@ The pipeline service has been refactored for better maintainability:
 - **WorkDirs**: Structured working directory configuration
 - Modular step functions for each pipeline phase
 - Job config validation using Zod schemas
+
+---
+
+## S3 URL Utility
+
+**File**: `src/utils/s3-url.ts`
+
+Provides shared utilities for extracting S3 keys from various URL formats.
+
+### Methods
+
+#### `extractS3KeyFromUrl(url, config, options): string | null`
+
+Extract S3 key from various URL formats.
+
+**Supported Formats**:
+- S3 protocol: `s3://bucket/key`
+- Path-style HTTP: `http://endpoint/bucket/key` (MinIO, custom endpoints)
+- Path-style with any host: `http://any-host/bucket/key` (Docker internal URLs)
+- Virtual-hosted AWS: `https://bucket.s3.region.amazonaws.com/key`
+
+**Parameters**:
+```typescript
+interface StorageConfig {
+  bucket: string;
+  endpoint?: string;
+  region: string;
+}
+
+options: {
+  allowAnyHost?: boolean;  // Match any hostname (for Docker internal URLs)
+}
+```
+
+**Returns**: The S3 key or `null` if not a valid S3 URL for this bucket.
+
+**Usage**:
+```typescript
+const config = { bucket: 'vopi-storage', region: 'us-east-1', endpoint: 'http://localhost:9000' };
+
+// Docker internal URL (minio:9000)
+extractS3KeyFromUrl('http://minio:9000/vopi-storage/jobs/123/frame.png', config, { allowAnyHost: true })
+// Returns: 'jobs/123/frame.png'
+
+// S3 protocol
+extractS3KeyFromUrl('s3://vopi-storage/uploads/video.mp4', config)
+// Returns: 'uploads/video.mp4'
+```
+
+#### `isUploadedVideoUrl(url, config): boolean`
+
+Check if a URL belongs to the S3 uploads prefix (uploaded via presigned URL).
 
 ---
 

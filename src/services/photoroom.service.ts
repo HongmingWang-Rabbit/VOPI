@@ -362,11 +362,18 @@ export class PhotoroomService {
     options: {
       useAIEdit?: boolean;
       versions?: string[];
+      transparentSource?: string;
+      skipTransparent?: boolean;
     } = {}
   ): Promise<AllVersionsResult> {
     const config = getConfig();
     const { apiRetryDelayMs, apiRateLimitDelayMs } = config.worker;
-    const { useAIEdit = false, versions = [...PHOTOROOM_CONSTANTS.DEFAULT_VERSIONS] } = options;
+    const {
+      useAIEdit = false,
+      versions = [...PHOTOROOM_CONSTANTS.DEFAULT_VERSIONS],
+      transparentSource,
+      skipTransparent = false,
+    } = options;
 
     const baseName = `${frame.recommendedType}_${frame.frameId}`;
     const hasObstruction = frame.obstructions?.has_obstruction;
@@ -382,37 +389,47 @@ export class PhotoroomService {
       versions: {},
     };
 
-    // 1. Generate transparent PNG first
-    const transparentPath = path.join(outputDir, `${baseName}_transparent.png`);
+    // If we have a pre-extracted transparent source, use it
+    let sourceForBackgrounds: string;
     let transparentSuccess = false;
 
-    for (let attempt = 1; attempt <= PHOTOROOM_CONSTANTS.MAX_RETRIES; attempt++) {
-      try {
-        if (useAIEdit && hasObstruction) {
-          results.versions.transparent = await this.editImageWithAI(frame.path, transparentPath, {
-            obstructions: frame.obstructions,
-          });
-        } else {
-          results.versions.transparent = await this.removeBackground(frame.path, transparentPath);
-        }
-        transparentSuccess = results.versions.transparent?.success ?? false;
-        if (transparentSuccess) break;
-      } catch (err) {
-        logger.error({ error: err, attempt }, 'Transparent generation failed');
-        results.versions.transparent = { success: false, error: (err as Error).message };
-        if (attempt < PHOTOROOM_CONSTANTS.MAX_RETRIES) {
-          await new Promise((r) => setTimeout(r, apiRetryDelayMs));
+    if (transparentSource && skipTransparent) {
+      // Use pre-extracted product as source for backgrounds
+      sourceForBackgrounds = transparentSource;
+      transparentSuccess = true;
+      logger.info({ baseName }, 'Using pre-extracted product for commercial versions');
+    } else {
+      // Generate transparent PNG first
+      const transparentPath = path.join(outputDir, `${baseName}_transparent.png`);
+
+      for (let attempt = 1; attempt <= PHOTOROOM_CONSTANTS.MAX_RETRIES; attempt++) {
+        try {
+          if (useAIEdit && hasObstruction) {
+            results.versions.transparent = await this.editImageWithAI(frame.path, transparentPath, {
+              obstructions: frame.obstructions,
+            });
+          } else {
+            results.versions.transparent = await this.removeBackground(frame.path, transparentPath);
+          }
+          transparentSuccess = results.versions.transparent?.success ?? false;
+          if (transparentSuccess) break;
+        } catch (err) {
+          logger.error({ error: err, attempt }, 'Transparent generation failed');
+          results.versions.transparent = { success: false, error: (err as Error).message };
+          if (attempt < PHOTOROOM_CONSTANTS.MAX_RETRIES) {
+            await new Promise((r) => setTimeout(r, apiRetryDelayMs));
+          }
         }
       }
-    }
-    await new Promise((r) => setTimeout(r, apiRateLimitDelayMs));
+      await new Promise((r) => setTimeout(r, apiRateLimitDelayMs));
 
-    if (hasObstruction && !transparentSuccess) {
-      logger.error({ baseName }, 'Skipping other versions - transparent failed with obstructions');
-      return results;
-    }
+      if (hasObstruction && !transparentSuccess) {
+        logger.error({ baseName }, 'Skipping other versions - transparent failed with obstructions');
+        return results;
+      }
 
-    const sourceForBackgrounds = transparentSuccess ? transparentPath : frame.path;
+      sourceForBackgrounds = transparentSuccess ? transparentPath : frame.path;
+    }
 
     // 2. Solid color background
     if (versions.includes('solid')) {

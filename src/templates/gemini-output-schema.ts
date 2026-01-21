@@ -22,6 +22,7 @@ export const GEMINI_OUTPUT_SCHEMA = `{
       "angle_estimate": "string",
       "quality_score_0_100": "number",
       "similarity_note": "string",
+      "rotation_angle_deg": "number (-45 to 45, angle to straighten product)",
       "obstructions": {
         "has_obstruction": "boolean",
         "obstruction_types": ["array"],
@@ -38,6 +39,7 @@ export const GEMINI_OUTPUT_SCHEMA = `{
       "description": "string",
       "best_frame_id": "string",
       "best_frame_score": "number",
+      "rotation_angle_deg": "number (-45 to 45, angle to straighten product)",
       "all_frame_ids": ["array"],
       "obstructions": {
         "has_obstruction": "boolean",

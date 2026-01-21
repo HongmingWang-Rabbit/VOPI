@@ -173,6 +173,7 @@ vi.mock('./gemini.service.js', () => ({
         angleEstimate: 'front',
         recommendedType: 'product_1_front_view',
         geminiScore: 85,
+        rotationAngleDeg: 0,
         allFrameIds: ['frame_00001'],
         obstructions: {
           has_obstruction: false,
@@ -221,6 +222,35 @@ vi.mock('./storage.service.js', () => ({
       url: 'https://s3.example.com/jobs/job-123/frames/frame.png',
       bucket: 'test-bucket',
       key: 'jobs/job-123/frames/frame.png',
+    }),
+    deleteFile: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+// Mock providerRegistry
+const mockProductExtractionProvider = {
+  providerId: 'default',
+  extractProducts: vi.fn().mockResolvedValue(new Map([
+    ['frame_00001', {
+      success: true,
+      outputPath: '/tmp/extracted/frame_00001_extracted.png',
+      rotationApplied: 0,
+    }],
+  ])),
+  extractProduct: vi.fn(),
+  isAvailable: vi.fn().mockReturnValue(true),
+};
+
+vi.mock('../providers/index.js', () => ({
+  providerRegistry: {
+    get: vi.fn((type: string) => {
+      if (type === 'productExtraction') {
+        return {
+          provider: mockProductExtractionProvider,
+          providerId: 'default',
+        };
+      }
+      throw new Error(`Unknown provider type: ${type}`);
     }),
   },
 }));
@@ -461,6 +491,7 @@ describe('PipelineService', () => {
           angleEstimate: 'front',
           recommendedType: 'product_1_front_view',
           geminiScore: 85,
+          rotationAngleDeg: 0,
           allFrameIds: ['frame_00001'],
           obstructions: {
             has_obstruction: true,
@@ -488,10 +519,21 @@ describe('PipelineService', () => {
 
       await service.runPipeline(jobWithAICleanup);
 
+      // AI edit now happens in the extraction step, not in generateAllVersions
+      expect(mockProductExtractionProvider.extractProducts).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.any(String),
+        expect.objectContaining({ useAIEdit: true })
+      );
+
+      // generateAllVersions should use the pre-extracted product
       expect(photoroomService.generateAllVersions).toHaveBeenCalledWith(
         expect.any(Object),
         expect.any(String),
-        expect.objectContaining({ useAIEdit: true })
+        expect.objectContaining({
+          skipTransparent: true,
+          transparentSource: '/tmp/extracted/frame_00001_extracted.png',
+        })
       );
     });
   });

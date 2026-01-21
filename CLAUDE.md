@@ -49,13 +49,14 @@ pnpm test:cli             # Test individual pipeline steps
 ## Architecture
 
 ### Async Job Processing
-Jobs are processed asynchronously through a 6-step pipeline:
+Jobs are processed asynchronously through a 7-step pipeline:
 1. **Download** - Fetch video from URL
 2. **Extract** - Dense frame extraction at configurable FPS via FFmpeg
 3. **Score** - Calculate sharpness (Laplacian variance) + motion penalty
 4. **Classify** - Send top-K candidates to Gemini for classification
-5. **Generate** - Optional commercial image generation (Photoroom)
-6. **Upload** - Store results to S3, persist to database
+5. **Extract Product** - Remove background, rotate, and center product
+6. **Generate** - Optional commercial image generation (Photoroom)
+7. **Upload** - Store results to S3, persist to database
 
 The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) process queued jobs independently. This separation allows horizontal scaling of workers.
 
@@ -66,7 +67,7 @@ The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) pr
 - `src/db/schema.ts` - Drizzle ORM schema (api_keys, jobs, videos, frames, commercialImages)
 - `src/cli/` - CLI commands (API key management, pipeline testing)
 - `src/templates/` - Gemini prompts and output schemas
-- `src/utils/` - Shared utilities (logging, errors, URL validation)
+- `src/utils/` - Shared utilities (logging, errors, URL validation, S3 URL parsing)
 - `src/smartFrameExtractor/` - Standalone CLI tool (JavaScript)
 
 ### Database Relationships
@@ -80,7 +81,11 @@ For mobile clients uploading videos:
 1. Get presigned URL: `POST /api/v1/uploads/presign`
 2. Upload video directly to S3 using the presigned URL
 3. Create job with the returned `publicUrl`
-4. Uploaded video is automatically deleted after job completion
+4. Poll job status or use webhook callback
+5. Get presigned download URLs: `GET /api/v1/jobs/:id/download-urls`
+6. Uploaded video is automatically deleted after job completion
+
+**Note**: S3 bucket is private. Use the download-urls endpoint to get time-limited presigned URLs for accessing results.
 
 ## Local Development Setup
 

@@ -1,5 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ChildProcess } from 'child_process';
 import { VideoService } from './video.service.js';
+
+// Type for mock spawn process - simplified for test needs
+interface MockSpawnProcess {
+  stdout?: {
+    on: ReturnType<typeof vi.fn>;
+  };
+  stderr?: {
+    on: ReturnType<typeof vi.fn>;
+  };
+  on: ReturnType<typeof vi.fn>;
+}
 
 // Mock child_process
 vi.mock('child_process', () => ({
@@ -63,7 +75,7 @@ describe('VideoService', () => {
         },
       });
 
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stdout: {
           on: vi.fn((event, callback) => {
             if (event === 'data') callback(Buffer.from(mockOutput));
@@ -77,7 +89,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       const result = await service.getMetadata('/path/to/video.mp4');
 
@@ -105,7 +117,7 @@ describe('VideoService', () => {
         },
       });
 
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stdout: {
           on: vi.fn((event, callback) => {
             if (event === 'data') callback(Buffer.from(mockOutput));
@@ -119,7 +131,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       const result = await service.getMetadata('/path/to/video.mp4');
 
@@ -127,7 +139,7 @@ describe('VideoService', () => {
     });
 
     it('should reject when ffprobe exits with non-zero code', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stdout: {
           on: vi.fn(),
         },
@@ -141,7 +153,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       await expect(service.getMetadata('/path/to/video.mp4')).rejects.toThrow(
         'ffprobe failed'
@@ -158,7 +170,7 @@ describe('VideoService', () => {
         format: {},
       });
 
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stdout: {
           on: vi.fn((event, callback) => {
             if (event === 'data') callback(Buffer.from(mockOutput));
@@ -172,7 +184,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       await expect(service.getMetadata('/path/to/video.mp4')).rejects.toThrow(
         'No video stream found'
@@ -180,7 +192,7 @@ describe('VideoService', () => {
     });
 
     it('should reject when ffprobe is not found', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stdout: {
           on: vi.fn(),
         },
@@ -192,7 +204,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       await expect(service.getMetadata('/path/to/video.mp4')).rejects.toThrow(
         'ffprobe not found'
@@ -200,7 +212,7 @@ describe('VideoService', () => {
     });
 
     it('should reject when JSON parsing fails', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stdout: {
           on: vi.fn((event, callback) => {
             if (event === 'data') callback(Buffer.from('invalid json'));
@@ -214,7 +226,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       await expect(service.getMetadata('/path/to/video.mp4')).rejects.toThrow(
         'Failed to parse ffprobe output'
@@ -224,7 +236,7 @@ describe('VideoService', () => {
 
   describe('extractFramesDense', () => {
     it('should create output directory and extract frames', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stderr: {
           on: vi.fn(),
         },
@@ -233,8 +245,9 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
-      vi.mocked(readdir).mockResolvedValue(['frame_00001.png', 'frame_00002.png'] as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
+      // @ts-expect-error - readdir mock returns string[] for simplicity
+      vi.mocked(readdir).mockResolvedValue(['frame_00001.png', 'frame_00002.png']);
 
       const result = await service.extractFramesDense('/path/to/video.mp4', '/output', {
         fps: 5,
@@ -251,7 +264,7 @@ describe('VideoService', () => {
     });
 
     it('should apply scale filter when provided', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stderr: {
           on: vi.fn(),
         },
@@ -260,8 +273,8 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
-      vi.mocked(readdir).mockResolvedValue([] as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
+      vi.mocked(readdir).mockResolvedValue([]);
 
       await service.extractFramesDense('/path/to/video.mp4', '/output', {
         fps: 5,
@@ -276,7 +289,7 @@ describe('VideoService', () => {
     });
 
     it('should reject when ffmpeg exits with non-zero code', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stderr: {
           on: vi.fn((event, callback) => {
             if (event === 'data') callback(Buffer.from('Error'));
@@ -287,7 +300,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       await expect(
         service.extractFramesDense('/path/to/video.mp4', '/output')
@@ -297,7 +310,7 @@ describe('VideoService', () => {
 
   describe('extractSingleFrame', () => {
     it('should extract a single frame at specified timestamp', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stderr: {
           on: vi.fn(),
         },
@@ -306,7 +319,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       const result = await service.extractSingleFrame(
         '/path/to/video.mp4',
@@ -324,7 +337,7 @@ describe('VideoService', () => {
     });
 
     it('should seek slightly before timestamp for accuracy', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stderr: {
           on: vi.fn(),
         },
@@ -333,7 +346,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       await service.extractSingleFrame('/path/to/video.mp4', 5.0, '/output/frame.png');
 
@@ -345,7 +358,7 @@ describe('VideoService', () => {
     });
 
     it('should not seek to negative timestamp', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stderr: {
           on: vi.fn(),
         },
@@ -354,7 +367,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       await service.extractSingleFrame('/path/to/video.mp4', 0.05, '/output/frame.png');
 
@@ -367,7 +380,7 @@ describe('VideoService', () => {
 
   describe('checkFfmpegInstalled', () => {
     it('should return available true when both ffmpeg and ffprobe work', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stdout: {
           on: vi.fn((event, callback) => {
             if (event === 'data') callback(Buffer.from('ffmpeg version 6.0'));
@@ -378,7 +391,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       const result = await service.checkFfmpegInstalled();
 
@@ -388,7 +401,7 @@ describe('VideoService', () => {
     });
 
     it('should return available false when ffmpeg is not found', async () => {
-      const mockProcess = {
+      const mockProcess: MockSpawnProcess = {
         stdout: {
           on: vi.fn(),
         },
@@ -397,7 +410,7 @@ describe('VideoService', () => {
         }),
       };
 
-      vi.mocked(spawn).mockReturnValue(mockProcess as any);
+      vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       const result = await service.checkFfmpegInstalled();
 
