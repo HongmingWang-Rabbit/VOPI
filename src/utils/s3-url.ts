@@ -5,7 +5,7 @@
 
 export interface StorageConfig {
   bucket: string;
-  endpoint?: string;
+  endpoint: string;
   region: string;
 }
 

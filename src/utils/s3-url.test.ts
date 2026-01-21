@@ -102,8 +102,9 @@ describe('s3-url', () => {
         expect(extractS3KeyFromUrl(url, baseConfig)).toBe('a/b/c/d/e/f/file.png');
       });
 
-      it('should work without endpoint configured', () => {
-        const config = { bucket: 'vopi-storage', region: 'us-east-1' };
+      it('should extract from AWS virtual-hosted URLs when endpoint is different', () => {
+        // Even when endpoint is configured for MinIO, we should still be able to extract from AWS URLs
+        const config = { bucket: 'vopi-storage', endpoint: 'http://localhost:9000', region: 'us-east-1' };
         const url = 'https://vopi-storage.s3.us-east-1.amazonaws.com/key.png';
         expect(extractS3KeyFromUrl(url, config)).toBe('key.png');
       });
