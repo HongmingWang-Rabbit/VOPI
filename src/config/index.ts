@@ -33,7 +33,7 @@ export interface AppConfig {
   storage: {
     bucket: string;
     region: string;
-    endpoint?: string;
+    endpoint: string;
     accessKeyId: string;
     secretAccessKey: string;
     forcePathStyle: boolean;

@@ -100,6 +100,7 @@ Both servers support hot reload via tsx.
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379` |
 | `API_KEYS` | Comma-separated valid API keys | `key1,key2,key3` |
 | `S3_BUCKET` | S3 bucket name | `vopi-storage` |
+| `S3_ENDPOINT` | S3-compatible storage endpoint | `http://localhost:9000` (MinIO) or `https://s3.us-east-1.amazonaws.com` (AWS) |
 | `S3_ACCESS_KEY_ID` | S3 access key | `minioadmin` |
 | `S3_SECRET_ACCESS_KEY` | S3 secret key | `minioadmin` |
 | `GOOGLE_AI_API_KEY` | Google AI API key | `AIza...` |
@@ -113,7 +114,6 @@ Both servers support hot reload via tsx.
 | `PORT` | `3000` | API server port |
 | `HOST` | `0.0.0.0` | API server host |
 | `S3_REGION` | `us-east-1` | S3 region |
-| `S3_ENDPOINT` | - | Custom S3 endpoint (for MinIO) |
 | `S3_FORCE_PATH_STYLE` | `false` | Use path-style URLs (required for MinIO) |
 | `WORKER_CONCURRENCY` | `2` | Concurrent jobs per worker |
 | `JOB_TIMEOUT_MS` | `600000` | Job timeout (10 minutes) |
@@ -347,11 +347,13 @@ For production with AWS S3:
 ```env
 S3_BUCKET=your-bucket-name
 S3_REGION=us-east-1
+S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
 S3_ACCESS_KEY_ID=AKIA...
 S3_SECRET_ACCESS_KEY=...
 S3_FORCE_PATH_STYLE=false
-# Don't set S3_ENDPOINT for AWS
 ```
+
+> **Note:** `S3_ENDPOINT` is required for all S3-compatible storage providers, including AWS S3.
 
 ### Bucket Policy
 

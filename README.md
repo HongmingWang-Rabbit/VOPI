@@ -201,7 +201,7 @@ See `src/smartFrameExtractor/README.md` for detailed CLI documentation.
 | `API_KEYS` | Comma-separated valid API keys | - |
 | `S3_BUCKET` | S3 bucket name | - |
 | `S3_REGION` | S3 region | `us-east-1` |
-| `S3_ENDPOINT` | S3 endpoint (for MinIO) | - |
+| `S3_ENDPOINT` | S3-compatible storage endpoint (required) | - |
 | `S3_ACCESS_KEY_ID` | S3 access key | - |
 | `S3_SECRET_ACCESS_KEY` | S3 secret key | - |
 | `GOOGLE_AI_API_KEY` | Google AI API key for Gemini | - |

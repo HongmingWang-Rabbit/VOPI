@@ -21,10 +21,10 @@ export const envSchema = z.object({
   // Auth
   API_KEYS: z.string().transform((val) => val.split(',').map((k) => k.trim())),
 
-  // S3/Storage
+  // S3/Storage (S3-compatible storage - MinIO, AWS S3, DigitalOcean Spaces, etc.)
   S3_BUCKET: z.string(),
   S3_REGION: z.string().default('us-east-1'),
-  S3_ENDPOINT: z.string().url().optional(),
+  S3_ENDPOINT: z.string().url(), // Required - e.g., http://localhost:9000 for MinIO, https://s3.us-east-1.amazonaws.com for AWS
   S3_ACCESS_KEY_ID: z.string(),
   S3_SECRET_ACCESS_KEY: z.string(),
   S3_FORCE_PATH_STYLE: z.coerce.boolean().default(false),

@@ -400,12 +400,12 @@ Generate standardized S3 key for job assets.
 ### Configuration
 
 Configured via environment variables:
-- `S3_BUCKET`: Bucket name
-- `S3_REGION`: AWS region
-- `S3_ENDPOINT`: Custom endpoint (for MinIO)
-- `S3_ACCESS_KEY_ID`: Access key
-- `S3_SECRET_ACCESS_KEY`: Secret key
-- `S3_FORCE_PATH_STYLE`: Use path-style URLs (required for MinIO)
+- `S3_BUCKET`: Bucket name (required)
+- `S3_REGION`: Region (default: `us-east-1`)
+- `S3_ENDPOINT`: Storage endpoint URL (required) - e.g., `http://localhost:9000` for MinIO, `https://s3.us-east-1.amazonaws.com` for AWS
+- `S3_ACCESS_KEY_ID`: Access key (required)
+- `S3_SECRET_ACCESS_KEY`: Secret key (required)
+- `S3_FORCE_PATH_STYLE`: Use path-style URLs (required for MinIO, default: `false`)
 
 ---
 

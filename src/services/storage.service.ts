@@ -303,21 +303,19 @@ export class StorageService {
 
   /**
    * Get public URL for a key
+   * Works with any S3-compatible storage (MinIO, AWS S3, DigitalOcean Spaces, etc.)
    */
   getPublicUrl(s3Key: string): string {
     const config = getConfig();
+    const endpoint = config.storage.endpoint.replace(/\/$/, '');
 
-    if (config.storage.endpoint) {
-      // Custom endpoint (MinIO, etc.)
-      const endpoint = config.storage.endpoint.replace(/\/$/, '');
-      if (config.storage.forcePathStyle) {
-        return `${endpoint}/${config.storage.bucket}/${s3Key}`;
-      }
-      return `${endpoint}/${s3Key}`;
+    if (config.storage.forcePathStyle) {
+      // Path-style URL: http://endpoint/bucket/key (required for MinIO and some S3-compatible services)
+      return `${endpoint}/${config.storage.bucket}/${s3Key}`;
     }
 
-    // AWS S3
-    return `https://${config.storage.bucket}.s3.${config.storage.region}.amazonaws.com/${s3Key}`;
+    // Virtual-hosted-style URL: endpoint/key (for AWS S3, set endpoint to https://bucket.s3.region.amazonaws.com)
+    return `${endpoint}/${s3Key}`;
   }
 
   /**
