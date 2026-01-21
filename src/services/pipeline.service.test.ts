@@ -227,25 +227,33 @@ vi.mock('./storage.service.js', () => ({
   },
 }));
 
-// Mock globalConfigService
+// Default effective config for tests
+const defaultEffectiveConfig = {
+  pipelineStrategy: 'classic' as const,
+  fps: 10,
+  batchSize: 30,
+  geminiModel: 'gemini-2.0-flash',
+  geminiVideoModel: 'gemini-2.0-flash',
+  temperature: 0.2,
+  topP: 0.8,
+  motionAlpha: 0.3,
+  minTemporalGap: 1.0,
+  topKPercent: 0.3,
+  commercialVersions: ['transparent', 'solid', 'real', 'creative'],
+  aiCleanup: true,
+  geminiVideoFps: 1,
+  geminiVideoMaxFrames: 10,
+  debugEnabled: false,
+};
+
+// Mock globalConfigService - use vi.hoisted to define mock before vi.mock hoisting
+const { mockGetEffectiveConfig } = vi.hoisted(() => ({
+  mockGetEffectiveConfig: vi.fn(),
+}));
+
 vi.mock('./global-config.service.js', () => ({
   globalConfigService: {
-    getEffectiveConfig: vi.fn().mockResolvedValue({
-      pipelineStrategy: 'classic',
-      fps: 10,
-      batchSize: 30,
-      geminiModel: 'gemini-2.0-flash',
-      geminiVideoModel: 'gemini-2.0-flash',
-      temperature: 0.2,
-      topP: 0.8,
-      motionAlpha: 0.3,
-      minTemporalGap: 1.0,
-      topKPercent: 0.3,
-      commercialVersions: ['transparent', 'solid', 'real', 'creative'],
-      aiCleanup: true,
-      geminiVideoFps: 1,
-      geminiVideoMaxFrames: 10,
-    }),
+    getEffectiveConfig: mockGetEffectiveConfig,
     getAllConfig: vi.fn().mockResolvedValue(new Map()),
     getValue: vi.fn(),
     setValue: vi.fn(),
@@ -331,6 +339,9 @@ describe('PipelineService', () => {
     // Default returning values
     mockDb.returning.mockResolvedValue([{ id: 'video-1' }]);
     mockDb.where.mockResolvedValue(undefined);
+
+    // Reset effective config to default
+    mockGetEffectiveConfig.mockResolvedValue(defaultEffectiveConfig);
   });
 
   describe('runPipeline', () => {
@@ -561,6 +572,80 @@ describe('PipelineService', () => {
           transparentSource: '/tmp/extracted/frame_00001_extracted.png',
         })
       );
+    });
+  });
+
+  describe('debug mode', () => {
+    it('should preserve temp directory when debug mode is enabled', async () => {
+      mockGetEffectiveConfig.mockResolvedValue({
+        ...defaultEffectiveConfig,
+        debugEnabled: true,
+      });
+
+      mockDb.returning
+        .mockResolvedValueOnce([{ id: 'video-1' }])
+        .mockResolvedValueOnce([{ id: 'frame-1' }]);
+
+      await service.runPipeline(mockJob);
+
+      // rm should NOT be called when debug mode is enabled
+      expect(rm).not.toHaveBeenCalled();
+    });
+
+    it('should skip S3 video cleanup when debug mode is enabled', async () => {
+      const jobWithS3Url = {
+        ...mockJob,
+        videoUrl: 'https://s3.example.com/uploads/video.mp4',
+      } as Job;
+
+      mockGetEffectiveConfig.mockResolvedValue({
+        ...defaultEffectiveConfig,
+        debugEnabled: true,
+      });
+
+      mockDb.returning
+        .mockResolvedValueOnce([{ id: 'video-1' }])
+        .mockResolvedValueOnce([{ id: 'frame-1' }]);
+
+      await service.runPipeline(jobWithS3Url);
+
+      // deleteFile should NOT be called when debug mode is enabled
+      expect(storageService.deleteFile).not.toHaveBeenCalled();
+    });
+
+    it('should cleanup temp directory when debug mode is disabled', async () => {
+      mockGetEffectiveConfig.mockResolvedValue({
+        ...defaultEffectiveConfig,
+        debugEnabled: false,
+      });
+
+      mockDb.returning
+        .mockResolvedValueOnce([{ id: 'video-1' }])
+        .mockResolvedValueOnce([{ id: 'frame-1' }]);
+
+      await service.runPipeline(mockJob);
+
+      // rm should be called when debug mode is disabled
+      expect(rm).toHaveBeenCalledWith(expect.any(String), {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    it('should preserve temp directory on error when debug mode is enabled', async () => {
+      mockGetEffectiveConfig.mockResolvedValue({
+        ...defaultEffectiveConfig,
+        debugEnabled: true,
+      });
+
+      vi.mocked(storageService.downloadFromUrl).mockRejectedValueOnce(
+        new Error('Download failed')
+      );
+
+      await expect(service.runPipeline(mockJob)).rejects.toThrow('Download failed');
+
+      // rm should NOT be called even on error when debug mode is enabled
+      expect(rm).not.toHaveBeenCalled();
     });
   });
 });

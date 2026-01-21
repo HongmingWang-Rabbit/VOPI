@@ -48,8 +48,10 @@ pnpm test:cli             # Test individual pipeline steps
 
 ## Architecture
 
-### Async Job Processing
-Jobs are processed asynchronously through a 7-step pipeline:
+### Pipeline Strategies
+VOPI supports two pipeline strategies, controlled by `pipeline.strategy` global config:
+
+**Classic Strategy** (default):
 1. **Download** - Fetch video from URL
 2. **Extract** - Dense frame extraction at configurable FPS via FFmpeg
 3. **Score** - Calculate sharpness (Laplacian variance) + motion penalty
@@ -58,13 +60,23 @@ Jobs are processed asynchronously through a 7-step pipeline:
 6. **Generate** - Optional commercial image generation (Photoroom)
 7. **Upload** - Store results to S3, persist to database
 
+**Gemini Video Strategy**:
+1. **Download** - Fetch video from URL
+2. **Transcode** - Auto-convert HEVC to H.264 if needed (for iPhone compatibility)
+3. **Analyze** - Upload to Gemini Files API and analyze video directly
+4. **Extract** - Extract only the selected frames at specific timestamps
+5. **Extract Product** - Remove background, rotate, and center product
+6. **Generate** - Optional commercial image generation (Photoroom)
+7. **Upload** - Store results to S3, persist to database
+
 The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) process queued jobs independently. This separation allows horizontal scaling of workers.
 
 ### Key Directories
 - `src/services/` - Core business logic (one service per domain: video, scoring, gemini, photoroom, storage)
+- `src/providers/` - External service integrations (Gemini video analysis with HEVC transcoding)
 - `src/routes/` + `src/controllers/` - HTTP layer
 - `src/workers/` - BullMQ job processors
-- `src/db/schema.ts` - Drizzle ORM schema (api_keys, jobs, videos, frames, commercialImages)
+- `src/db/schema.ts` - Drizzle ORM schema (api_keys, jobs, videos, frames, commercialImages, globalConfig)
 - `src/cli/` - CLI commands (API key management, pipeline testing)
 - `src/templates/` - Gemini prompts and output schemas
 - `src/utils/` - Shared utilities (logging, errors, URL validation, S3 URL parsing)
@@ -130,6 +142,21 @@ Security features:
 - Configurable auth skip paths via `AUTH_SKIP_PATHS`
 - CORS domain whitelist via `CORS_ALLOWED_DOMAINS`
 - Callback URL SSRF protection via `CALLBACK_ALLOWED_DOMAINS`
+- Admin API keys for config management via `ADMIN_API_KEYS`
+
+## Global Configuration
+
+Runtime configuration is stored in PostgreSQL and cached in memory:
+- **Config API**: `GET/PUT/DELETE /api/v1/config` endpoints
+- **Admin-only**: Config modification requires admin API key (`ADMIN_API_KEYS`)
+- **Caching**: 60-second TTL (configurable via `CONFIG_CACHE_TTL_MS`)
+- **Categories**: `pipeline.*`, `ai.*`, `scoring.*`, `commercial.*`, `geminiVideo.*`
+
+Key config values:
+- `pipeline.strategy`: `classic` or `gemini_video`
+- `ai.geminiModel`: Model for frame classification
+- `ai.geminiVideoModel`: Model for video analysis
+- `scoring.motionAlpha`: Motion penalty weight (0-1)
 
 ## Frame Scoring Algorithm
 

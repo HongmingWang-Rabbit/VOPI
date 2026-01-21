@@ -656,6 +656,212 @@ curl -X POST http://localhost:3000/api/v1/jobs \
 
 ---
 
+## Config Endpoints
+
+Endpoints for managing runtime configuration. Write operations require admin API keys.
+
+### GET /api/v1/config
+
+Get all config values with metadata.
+
+**Response** `200 OK`
+```json
+[
+  {
+    "key": "pipeline.strategy",
+    "value": "classic",
+    "type": "string",
+    "category": "pipeline",
+    "description": "Pipeline processing strategy",
+    "isActive": true,
+    "isDefault": true,
+    "updatedAt": null
+  },
+  {
+    "key": "pipeline.fps",
+    "value": 10,
+    "type": "number",
+    "category": "pipeline",
+    "description": "Frame extraction rate",
+    "isActive": true,
+    "isDefault": false,
+    "updatedAt": "2025-01-21T10:00:00.000Z"
+  }
+]
+```
+
+---
+
+### GET /api/v1/config/effective
+
+Get the effective runtime configuration object.
+
+**Response** `200 OK`
+```json
+{
+  "pipelineStrategy": "classic",
+  "fps": 10,
+  "batchSize": 30,
+  "geminiModel": "gemini-2.0-flash",
+  "geminiVideoModel": "gemini-2.0-flash",
+  "temperature": 0.2,
+  "topP": 0.8,
+  "motionAlpha": 0.3,
+  "minTemporalGap": 1.0,
+  "topKPercent": 0.3,
+  "commercialVersions": ["transparent", "solid", "real", "creative"],
+  "aiCleanup": true,
+  "geminiVideoFps": 1,
+  "geminiVideoMaxFrames": 10,
+  "debugEnabled": false
+}
+```
+
+---
+
+### GET /api/v1/config/:key
+
+Get a single config value.
+
+**Response** `200 OK`
+```json
+{
+  "key": "pipeline.fps",
+  "value": 10
+}
+```
+
+**Response** `404 Not Found`
+```json
+{
+  "error": "Config key not found"
+}
+```
+
+---
+
+### PUT /api/v1/config (Admin Only)
+
+Set a single config value.
+
+**Request Body**
+```json
+{
+  "key": "pipeline.fps",
+  "value": 15,
+  "type": "number",
+  "category": "pipeline",
+  "description": "Frame extraction rate"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `key` | string | Yes | Config key |
+| `value` | any | Yes | Config value |
+| `type` | string | No | Value type (string/number/boolean/json) |
+| `category` | string | No | Category for grouping |
+| `description` | string | No | Human-readable description |
+| `isActive` | boolean | No | Whether config is active (default: true) |
+
+**Response** `200 OK`
+```json
+{
+  "success": true,
+  "key": "pipeline.fps"
+}
+```
+
+**Response** `403 Forbidden`
+```json
+{
+  "error": "FORBIDDEN",
+  "message": "Admin access required for this operation"
+}
+```
+
+---
+
+### PUT /api/v1/config/batch (Admin Only)
+
+Set multiple config values in a transaction.
+
+**Request Body**
+```json
+[
+  { "key": "pipeline.fps", "value": 15 },
+  { "key": "ai.temperature", "value": 0.3 }
+]
+```
+
+**Response** `200 OK`
+```json
+{
+  "success": true,
+  "count": 2
+}
+```
+
+---
+
+### DELETE /api/v1/config/:key (Admin Only)
+
+Delete a config value (resets to default).
+
+**Response** `200 OK`
+```json
+{
+  "success": true,
+  "deleted": true
+}
+```
+
+---
+
+### POST /api/v1/config/seed (Admin Only)
+
+Initialize database with default config values.
+
+**Response** `200 OK`
+```json
+{
+  "success": true,
+  "seeded": 14
+}
+```
+
+---
+
+### POST /api/v1/config/invalidate-cache (Admin Only)
+
+Force cache invalidation.
+
+**Response** `200 OK`
+```json
+{
+  "success": true
+}
+```
+
+---
+
+## Admin Authentication
+
+Admin endpoints require an admin API key set via the `ADMIN_API_KEYS` environment variable.
+
+```bash
+# Set admin keys (comma-separated)
+export ADMIN_API_KEYS=admin-key-1,admin-key-2
+
+# Use admin key for config operations
+curl -X PUT http://localhost:3000/api/v1/config \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: admin-key-1" \
+  -d '{"key": "pipeline.strategy", "value": "gemini_video"}'
+```
+
+---
+
 ## CLI Commands
 
 VOPI includes CLI commands for managing API keys.

@@ -118,6 +118,7 @@ class GlobalConfigService {
       aiCleanup: getValue(GlobalConfigKey.COMMERCIAL_AI_CLEANUP, true),
       geminiVideoFps: getValue(GlobalConfigKey.GEMINI_VIDEO_FPS, 1),
       geminiVideoMaxFrames: getValue(GlobalConfigKey.GEMINI_VIDEO_MAX_FRAMES, 10),
+      debugEnabled: getValue(GlobalConfigKey.DEBUG_ENABLED, false),
     };
   }
 

@@ -21,6 +21,7 @@ export const ConfigCategory = {
   SCORING: 'scoring',
   COMMERCIAL: 'commercial',
   SYSTEM: 'system',
+  DEBUG: 'debug',
 } as const;
 
 export type ConfigCategory = (typeof ConfigCategory)[keyof typeof ConfigCategory];
@@ -72,6 +73,9 @@ export const GlobalConfigKey = {
   // Gemini video settings (for gemini_video strategy)
   GEMINI_VIDEO_FPS: 'gemini_video.fps',
   GEMINI_VIDEO_MAX_FRAMES: 'gemini_video.max_frames',
+
+  // Debug settings
+  DEBUG_ENABLED: 'debug.enabled',
 } as const;
 
 export type GlobalConfigKey = (typeof GlobalConfigKey)[keyof typeof GlobalConfigKey];
@@ -91,7 +95,7 @@ export const upsertConfigSchema = z.object({
   key: z.string().min(1).max(100),
   value: z.union([z.string(), z.number(), z.boolean(), z.array(z.unknown()), z.record(z.unknown())]),
   type: z.enum(['string', 'number', 'boolean', 'json']).optional(),
-  category: z.enum(['pipeline', 'ai', 'scoring', 'commercial', 'system']).optional(),
+  category: z.enum(['pipeline', 'ai', 'scoring', 'commercial', 'system', 'debug']).optional(),
   description: z.string().max(500).optional(),
   isActive: z.boolean().optional(),
 });
@@ -193,6 +197,12 @@ export const DEFAULT_CONFIG: Record<string, GlobalConfigValue & { category: Conf
     category: ConfigCategory.PIPELINE,
     description: 'Maximum frames to select via video analysis',
   },
+  [GlobalConfigKey.DEBUG_ENABLED]: {
+    value: false,
+    type: ConfigValueType.BOOLEAN,
+    category: ConfigCategory.DEBUG,
+    description: 'Enable debug mode (preserves temp files and S3 uploads for inspection)',
+  },
 };
 
 /**
@@ -213,4 +223,5 @@ export interface EffectiveConfig {
   aiCleanup: boolean;
   geminiVideoFps: number;
   geminiVideoMaxFrames: number;
+  debugEnabled: boolean;
 }

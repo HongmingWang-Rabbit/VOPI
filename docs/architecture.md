@@ -118,6 +118,7 @@ Core business logic modules:
 | Photoroom | `photoroom.service.ts` | Background removal, commercial image generation |
 | Storage | `storage.service.ts` | S3 upload/download, presigned URLs |
 | Pipeline | `pipeline.service.ts` | Orchestrates the full processing pipeline |
+| Global Config | `global-config.service.ts` | Runtime configuration with database persistence |
 
 ### Database (`src/db/`)
 
@@ -131,7 +132,37 @@ See [Database Documentation](./database.md) for schema details.
 
 ## Processing Pipeline
 
-### Pipeline Steps
+### Pipeline Strategies
+
+VOPI supports two pipeline strategies, controlled by the `pipeline.strategy` global config:
+
+#### Classic Strategy (default)
+The traditional approach that extracts all frames first, then uses AI for classification:
+1. Download video
+2. Extract ALL frames at configured FPS using FFmpeg
+3. Score frames for sharpness and motion
+4. Send top candidates to Gemini for classification
+5. Extract and process selected frames
+6. Generate commercial images
+7. Upload to S3
+
+Best for: Shorter videos, when you need fine-grained frame selection
+
+#### Gemini Video Strategy
+Direct video analysis using Gemini's video understanding capabilities:
+1. Download video
+2. Auto-transcode HEVC → H.264 if needed (for iPhone compatibility)
+3. Upload video to Gemini Files API
+4. Gemini analyzes video directly and selects optimal timestamps
+5. Extract only the selected frames
+6. Generate commercial images
+7. Upload to S3
+
+Best for: Longer videos, when you want faster processing without extracting all frames
+
+**Note**: HEVC (H.265) videos from iPhones are automatically transcoded to H.264 since Gemini doesn't support HEVC.
+
+### Pipeline Steps (Classic Strategy)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -315,3 +346,46 @@ src/
 2. **Photoroom API**: Rate limited, sequential per variant
 3. **FFmpeg**: CPU-intensive, consider dedicated worker nodes
 4. **S3 uploads**: Network bound, parallelized where possible
+
+## Global Configuration System
+
+VOPI includes a database-backed runtime configuration system that allows changing pipeline behavior without redeploying.
+
+### Configuration Flow
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Config API     │────▶│  Global Config  │────▶│  PostgreSQL     │
+│  (Admin only)   │     │    Service      │     │  global_config  │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+                               │
+                               ▼
+                        ┌─────────────────┐
+                        │   In-Memory     │
+                        │     Cache       │
+                        │  (TTL: 60s)     │
+                        └─────────────────┘
+                               │
+                               ▼
+                        ┌─────────────────┐
+                        │  Pipeline &     │
+                        │  Services       │
+                        └─────────────────┘
+```
+
+### Key Configuration Categories
+
+| Category | Keys | Description |
+|----------|------|-------------|
+| Pipeline | `pipeline.strategy`, `pipeline.fps`, `pipeline.batchSize` | Control processing behavior |
+| AI | `ai.geminiModel`, `ai.temperature`, `ai.topP` | Gemini model settings |
+| Scoring | `scoring.motionAlpha`, `scoring.minTemporalGap` | Frame scoring parameters |
+| Commercial | `commercial.versions`, `commercial.aiCleanup` | Commercial image settings |
+| Gemini Video | `geminiVideo.fps`, `geminiVideo.maxFrames` | Video strategy settings |
+
+### Admin Authorization
+
+Config modification endpoints require admin API keys (separate from regular API keys):
+- Set via `ADMIN_API_KEYS` environment variable
+- Endpoints: `PUT /config`, `DELETE /config/:key`, `POST /config/seed`
+- Regular users can only read config via `GET /config/effective`

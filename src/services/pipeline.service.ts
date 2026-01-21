@@ -20,7 +20,7 @@ import { storageService } from './storage.service.js';
 import type { Job, NewVideo, NewFrame, NewCommercialImage } from '../db/schema.js';
 import { jobConfigSchema, type JobStatus, type JobProgress, type JobResult, type JobConfig } from '../types/job.types.js';
 import type { VideoMetadata } from '../types/job.types.js';
-import { PipelineStrategy } from '../types/config.types.js';
+import { PipelineStrategy, type EffectiveConfig } from '../types/config.types.js';
 
 const logger = createChildLogger({ service: 'pipeline' });
 
@@ -58,6 +58,7 @@ interface PipelineContext {
   onProgress?: ProgressCallback;
   timer: PipelineTimer;
   strategy: PipelineStrategy;
+  effectiveConfig: EffectiveConfig;
 }
 
 /**
@@ -96,9 +97,13 @@ export class PipelineService {
       onProgress,
       timer,
       strategy,
+      effectiveConfig,
     };
 
-    logger.info({ jobId, strategy }, 'Starting pipeline with strategy');
+    if (effectiveConfig.debugEnabled) {
+      logger.warn({ jobId }, 'Debug mode active - temp files and S3 uploads will NOT be cleaned up');
+    }
+    logger.info({ jobId, strategy, debugEnabled: effectiveConfig.debugEnabled }, 'Starting pipeline with strategy');
 
     let result: JobResult;
     try {
@@ -114,7 +119,12 @@ export class PipelineService {
       }
 
       // Only cleanup uploaded video on success (not on failure, as job may be retried)
-      await this.cleanupUploadedVideo(ctx.job.videoUrl);
+      // Skip cleanup in debug mode to allow inspection
+      if (effectiveConfig.debugEnabled) {
+        logger.info({ jobId, videoUrl: ctx.job.videoUrl }, 'Debug mode: Skipping S3 video cleanup');
+      } else {
+        await this.cleanupUploadedVideo(ctx.job.videoUrl);
+      }
 
       return result;
     } catch (error) {
@@ -123,7 +133,12 @@ export class PipelineService {
       throw error;
     } finally {
       // Always cleanup temp directory (can be recreated on retry)
-      await rm(workDirs.root, { recursive: true, force: true }).catch(() => {});
+      // Skip cleanup in debug mode to allow inspection
+      if (effectiveConfig.debugEnabled) {
+        logger.info({ jobId, tempDir: workDirs.root }, 'Debug mode: Preserving temp directory for inspection');
+      } else {
+        await rm(workDirs.root, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 

@@ -12,6 +12,7 @@ The `/src/services/` directory contains the core business logic modules. Each se
 | **Photoroom** | `photoroom.service.ts` | Background removal and image generation |
 | **Storage** | `storage.service.ts` | S3/MinIO file operations |
 | **Pipeline** | `pipeline.service.ts` | Orchestrates the full processing pipeline |
+| **Global Config** | `global-config.service.ts` | Runtime configuration with caching |
 
 ---
 
@@ -572,3 +573,192 @@ Full validation combining protocol, private IP, and domain checks.
 
 - `CALLBACK_ALLOWED_DOMAINS`: Comma-separated whitelist of allowed callback domains
 - Private URL blocking is relaxed in development mode
+
+---
+
+## Global Config Service
+
+**File**: `src/services/global-config.service.ts`
+
+Provides database-backed runtime configuration with in-memory caching.
+
+### Purpose
+
+1. **Runtime Configuration**: Change pipeline behavior without redeploying
+2. **Caching**: In-memory cache with configurable TTL (default: 60s)
+3. **Type Safety**: Strongly-typed config values with validation
+4. **Defaults**: Sensible defaults with database override capability
+
+### Methods
+
+#### `getAllConfig(): Promise<Map<string, GlobalConfigValue>>`
+
+Get all config values merged with defaults.
+
+#### `getValue<T>(key: string): Promise<T | undefined>`
+
+Get a single config value by key.
+
+#### `getValueOrDefault<T>(key: string, defaultValue: T): Promise<T>`
+
+Get config value with fallback to provided default.
+
+#### `getEffectiveConfig(): Promise<EffectiveConfig>`
+
+Get the complete effective configuration object with all settings typed:
+
+```typescript
+interface EffectiveConfig {
+  pipelineStrategy: PipelineStrategy;  // 'classic' | 'gemini_video'
+  fps: number;
+  batchSize: number;
+  geminiModel: string;
+  geminiVideoModel: string;
+  temperature: number;
+  topP: number;
+  motionAlpha: number;
+  minTemporalGap: number;
+  topKPercent: number;
+  commercialVersions: string[];
+  aiCleanup: boolean;
+  geminiVideoFps: number;
+  geminiVideoMaxFrames: number;
+}
+```
+
+#### `setValue(request: UpsertConfigRequest): Promise<void>`
+
+Set a single config value (upsert).
+
+#### `setValues(configs: UpsertConfigRequest[]): Promise<void>`
+
+Set multiple config values in a transaction.
+
+#### `deleteValue(key: string): Promise<boolean>`
+
+Delete a config value (resets to default).
+
+#### `seedDefaults(): Promise<number>`
+
+Initialize database with default values. Returns count of seeded values.
+
+#### `invalidateCache(): void`
+
+Clear the in-memory cache.
+
+### Configuration Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pipeline.strategy` | string | `classic` | Pipeline strategy (`classic` or `gemini_video`) |
+| `pipeline.fps` | number | 10 | Frame extraction rate |
+| `pipeline.batchSize` | number | 30 | Frames per Gemini batch |
+| `ai.geminiModel` | string | `gemini-2.0-flash` | Model for classification |
+| `ai.geminiVideoModel` | string | `gemini-2.0-flash` | Model for video analysis |
+| `ai.temperature` | number | 0.2 | AI temperature |
+| `ai.topP` | number | 0.8 | AI top-p |
+| `scoring.motionAlpha` | number | 0.3 | Motion penalty weight |
+| `scoring.minTemporalGap` | number | 1.0 | Min seconds between frames |
+| `scoring.topKPercent` | number | 0.3 | Top percentage for candidates |
+| `commercial.versions` | array | `["transparent","solid","real","creative"]` | Versions to generate |
+| `commercial.aiCleanup` | boolean | true | Enable AI obstruction removal |
+| `geminiVideo.fps` | number | 1 | Video analysis FPS |
+| `geminiVideo.maxFrames` | number | 10 | Max frames to select |
+
+### Database Schema
+
+Config is stored in the `global_config` table:
+
+```sql
+CREATE TABLE global_config (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL,
+  category TEXT NOT NULL,
+  description TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+---
+
+## Gemini Video Analysis Provider
+
+**File**: `src/providers/implementations/gemini-video-analysis.provider.ts`
+
+Direct video analysis using Gemini's video understanding capabilities.
+
+### Purpose
+
+1. **Direct Analysis**: Send video to Gemini without extracting all frames first
+2. **HEVC Support**: Automatic transcoding of iPhone HEVC videos to H.264
+3. **Timestamp Selection**: Gemini analyzes video and returns optimal timestamps
+4. **Cleanup**: Automatic cleanup of Gemini-uploaded files
+
+### Methods
+
+#### `analyzeVideo(videoPath, options): Promise<VideoAnalysisResult>`
+
+Analyze video and get optimal frame timestamps.
+
+**Options**:
+```typescript
+interface VideoAnalysisOptions {
+  model?: string;         // Gemini model (default from config)
+  maxFrames?: number;     // Max frames to select (default: 10)
+  maxRetries?: number;    // Retry attempts (default: 3)
+  retryDelay?: number;    // Retry delay ms
+  temperature?: number;   // AI temperature
+  topP?: number;          // AI top-p
+}
+```
+
+**Returns**:
+```typescript
+interface VideoAnalysisResult {
+  products: Array<{
+    productId: string;
+    description: string;
+    category?: string;
+  }>;
+  selectedFrames: Array<{
+    timestamp: number;           // Seconds
+    selectionReason: string;
+    productId: string;
+    variantId: string;
+    angleEstimate: string;
+    qualityScore: number;        // 0-100
+    rotationAngleDeg: number;    // Degrees to rotate
+    variantDescription?: string;
+    obstructions: {...};
+    backgroundRecommendations: {...};
+  }>;
+  videoDuration: number;
+  framesAnalyzed: number;
+  rawResponse: object;
+}
+```
+
+#### `uploadVideo(videoPath): Promise<string>`
+
+Upload video to Gemini Files API and wait for processing.
+
+#### `deleteVideo(videoUri): Promise<void>`
+
+Delete video from Gemini Files API.
+
+### HEVC Auto-Transcoding
+
+When an HEVC (H.265) video is detected:
+1. `ffprobe` checks codec: `hevc` or `h265`
+2. `ffmpeg` transcodes to H.264: `-c:v libx264 -preset fast -crf 23`
+3. Transcoded file is uploaded to Gemini
+4. Original video is preserved
+5. Transcoded temp file is cleaned up after analysis
+
+### Error Handling
+
+- Video processing failures include detailed error info (file name, size, error code)
+- Automatic retry with exponential backoff
+- Cleanup runs even on errors (finally block)

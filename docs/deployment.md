@@ -161,6 +161,13 @@ Both servers support hot reload via tsx.
 | `CORS_ALLOWED_DOMAINS` | `24rabbit\.com` | Comma-separated allowed CORS domains (regex) |
 | `AUTH_SKIP_PATHS` | `/health,/ready,/docs` | Paths that skip authentication |
 | `CALLBACK_ALLOWED_DOMAINS` | `` | Allowed callback domains (SSRF protection) |
+| `ADMIN_API_KEYS` | `` | Comma-separated admin API keys (for config management) |
+
+### Runtime Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONFIG_CACHE_TTL_MS` | `60000` | Config cache time-to-live in milliseconds |
 
 ### External API Configuration
 
@@ -308,13 +315,14 @@ The API provides health check endpoints:
 ### Security Considerations
 
 1. **API Keys**: Use strong, unique API keys in production
-2. **Network**: Keep database and Redis on private network
-3. **S3**: Use IAM roles instead of access keys when possible
-4. **Secrets**: Use secret management (Vault, AWS Secrets Manager)
-5. **TLS**: Terminate TLS at load balancer
-6. **CORS**: Configure `CORS_ALLOWED_DOMAINS` to restrict origins
-7. **Callback SSRF Protection**: Set `CALLBACK_ALLOWED_DOMAINS` to whitelist webhook destinations
-8. **Timing-Safe Auth**: API key validation uses constant-time comparison to prevent timing attacks
+2. **Admin API Keys**: Configure separate `ADMIN_API_KEYS` for config management endpoints
+3. **Network**: Keep database and Redis on private network
+4. **S3**: Use IAM roles instead of access keys when possible
+5. **Secrets**: Use secret management (Vault, AWS Secrets Manager)
+6. **TLS**: Terminate TLS at load balancer
+7. **CORS**: Configure `CORS_ALLOWED_DOMAINS` to restrict origins
+8. **Callback SSRF Protection**: Set `CALLBACK_ALLOWED_DOMAINS` to whitelist webhook destinations
+9. **Timing-Safe Auth**: API key validation uses constant-time comparison to prevent timing attacks
 
 ### Logging
 
