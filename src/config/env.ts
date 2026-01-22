@@ -39,6 +39,7 @@ export const envSchema = z.object({
   PHOTOROOM_API_KEY: z.string(),
   PHOTOROOM_BASIC_HOST: z.string().default('sdk.photoroom.com'),
   PHOTOROOM_PLUS_HOST: z.string().default('image-api.photoroom.com'),
+  CLAID_API_KEY: z.string().optional(),
 
   // Worker
   WORKER_CONCURRENCY: z.coerce.number().default(2),
@@ -85,7 +86,10 @@ export const envSchema = z.object({
   QUEUE_FAILED_COUNT: z.coerce.number().default(1000),
 
   // Upload settings
-  PRESIGN_EXPIRATION_SECONDS: z.coerce.number().min(60).max(86400).default(3600), // 1 hour default
+  PRESIGN_EXPIRATION_SECONDS: z.coerce.number().min(60).max(86400).default(3600), // 1 hour default for user uploads
+
+  // API presign settings (for external APIs like Photoroom, Claid)
+  API_PRESIGN_EXPIRY_SECONDS: z.coerce.number().min(60).max(3600).default(300), // 5 min default for API calls
 
   // Config cache
   CONFIG_CACHE_TTL_MS: z.coerce.number().default(60000), // 1 minute

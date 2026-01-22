@@ -17,6 +17,7 @@ import { testScore } from './test-score.js';
 import { testClassify } from './test-classify.js';
 import { testGenerate, testPhotoroomOperation } from './test-generate.js';
 import { testUpload, testS3Operations } from './test-upload.js';
+import { testStack, showProcessors, showStacks } from './test-stack.js';
 import { printDivider, printInfo, printError, printRaw } from './utils.js';
 
 /**
@@ -59,18 +60,38 @@ const MENU_CHOICES = [
     disabled: true,
   },
   {
-    name: '7. S3 Operations (list, download, delete, etc.)',
+    name: '7. Run Processor Stack (full pipeline)',
+    value: 'stack',
+    description: 'Run a complete processor stack with configurable options',
+  },
+  {
+    name: '8. Show Registered Processors',
+    value: 'processors',
+    description: 'List all registered processors and their IO types',
+  },
+  {
+    name: '9. Show Stack Templates',
+    value: 'stacks',
+    description: 'List all production and staging stack templates',
+  },
+  {
+    name: '─────────────────────────────────────────────',
+    value: 'separator2',
+    disabled: true,
+  },
+  {
+    name: '10. S3 Operations (list, download, delete, etc.)',
     value: 's3-ops',
     description: 'Additional S3 operations',
   },
   {
-    name: '8. Photoroom Single Operation',
+    name: '11. Photoroom Single Operation',
     value: 'photoroom-single',
     description: 'Test individual Photoroom operations',
   },
   {
     name: '─────────────────────────────────────────────',
-    value: 'separator2',
+    value: 'separator3',
     disabled: true,
   },
   {
@@ -107,11 +128,17 @@ function printBanner(): void {
  */
 function printPipelineOverview(): void {
   printRaw(chalk.gray(`
-Pipeline Steps:
-  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
-  │ Download │ → │ Extract  │ → │  Score   │ → │ Classify │ → │ Generate │ → │  Upload  │
-  │  (S3)    │   │ (FFmpeg) │   │ (Sharp)  │   │ (Gemini) │   │(Photoroom│   │  (S3)    │
-  └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘
+Composable Processor Stack Architecture:
+  ┌─────────────────────────────────────────────────────────────────────────────────┐
+  │  Processors are modular and can be composed into custom pipelines               │
+  │                                                                                 │
+  │  storage/    ffmpeg/      sharp/       gemini/      photoroom/   db/            │
+  │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐        │
+  │  │download│→ │extract │→ │ score  │→ │classify│→ │generate│→ │complete│        │
+  │  │upload  │  │frames  │  │center  │  │video   │  │bg-rem  │  │save-rec│        │
+  │  └────────┘  └────────┘  │rotate  │  └────────┘  │extract │  └────────┘        │
+  │                          └────────┘              └────────┘                     │
+  └─────────────────────────────────────────────────────────────────────────────────┘
 `));
 }
 
@@ -137,6 +164,15 @@ async function runTest(choice: string): Promise<void> {
       break;
     case 'upload':
       await testUpload();
+      break;
+    case 'stack':
+      await testStack();
+      break;
+    case 'processors':
+      await showProcessors();
+      break;
+    case 'stacks':
+      await showStacks();
       break;
     case 's3-ops':
       await testS3Operations();
@@ -168,7 +204,7 @@ async function mainMenu(): Promise<void> {
       process.exit(0);
     }
 
-    if (choice === 'separator' || choice === 'separator2') {
+    if (choice === 'separator' || choice === 'separator2' || choice === 'separator3') {
       continue;
     }
 

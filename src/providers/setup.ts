@@ -8,6 +8,7 @@
 import { providerRegistry } from './provider-registry.js';
 import {
   photoroomBackgroundRemovalProvider,
+  claidBackgroundRemovalProvider,
   geminiClassificationProvider,
   sharpImageTransformProvider,
   photoroomCommercialImageProvider,
@@ -26,6 +27,12 @@ export function setupDefaultProviders(): void {
 
   // Register background removal providers
   providerRegistry.register('backgroundRemoval', photoroomBackgroundRemovalProvider, true);
+
+  // Register Claid provider if available (can be enabled via A/B test or config)
+  if (claidBackgroundRemovalProvider.isAvailable()) {
+    providerRegistry.register('backgroundRemoval', claidBackgroundRemovalProvider);
+    logger.info('Claid background removal provider registered');
+  }
 
   // Register classification providers
   providerRegistry.register('classification', geminiClassificationProvider, true);

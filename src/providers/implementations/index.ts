@@ -5,6 +5,7 @@
  */
 
 export { PhotoroomBackgroundRemovalProvider, photoroomBackgroundRemovalProvider } from './photoroom-background-removal.provider.js';
+export { ClaidBackgroundRemovalProvider, claidBackgroundRemovalProvider } from './claid-background-removal.provider.js';
 export { GeminiClassificationProvider, geminiClassificationProvider } from './gemini-classification.provider.js';
 export { GeminiVideoAnalysisProvider, geminiVideoAnalysisProvider } from './gemini-video-analysis.provider.js';
 export { SharpImageTransformProvider, sharpImageTransformProvider } from './sharp-image-transform.provider.js';

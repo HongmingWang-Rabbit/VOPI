@@ -281,6 +281,104 @@ Video URL
 └─────────────────┘
 ```
 
+## Composable Processor Stack Architecture
+
+VOPI uses a modular processor stack architecture that enables flexible workflow composition through simple IO type contracts.
+
+### Core Concepts
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Stack Template                            │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │
+│  │download │→│extract  │→│ score   │→│classify │→ ...         │
+│  │ →video  │  │video→img│  │img→img │  │img→meta│              │
+│  └─────────┘  └─────────┘  └─────────┘  └─────────┘            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**IO Types**: Processors declare what they require and produce:
+- `video` - Video file path
+- `images` - Array of image paths
+- `text` - Text/JSON data
+- `metadata` - Structured metadata
+
+Any processor that outputs `images` can connect to any processor that requires `images`.
+
+### Processor IO Contracts
+
+| Processor | Requires | Produces | Description |
+|-----------|----------|----------|-------------|
+| download | - | video | Downloads video from URL |
+| extract-frames | video | images | Extracts frames with FFmpeg |
+| gemini-video-analysis | video | images, metadata | Direct video analysis |
+| score-frames | images | images, metadata | Calculates quality scores |
+| gemini-classify | images | metadata | AI classification |
+| filter-by-score | images, metadata | images | Filters by score |
+| photoroom-bg-remove | images | images | Background removal (Photoroom) |
+| claid-bg-remove | images | images | Background removal (Claid) - swappable |
+| center-product | images | images | Centers product in frame |
+| rotate-image | images | images | Rotates images |
+| fill-product-holes | images | images | Fills transparent holes in products |
+| extract-products | images | images | Full product extraction |
+| upload-frames | images | text | Uploads to S3 |
+| generate-commercial | images | images | Commercial image generation |
+| save-frame-records | metadata | - | Persists to database |
+| complete-job | - | - | Finalizes job |
+
+### Stack Configuration
+
+Jobs can customize pipeline behavior via `StackConfig`:
+
+```typescript
+interface StackConfig {
+  stackId?: string;                           // Which template to use
+  processorSwaps?: Record<string, string>;    // Swap processors
+  processorOptions?: Record<string, any>;     // Override processor options
+  insertProcessors?: Array<{
+    after: string;
+    processor: string;
+    options?: Record<string, any>;
+  }>;
+}
+```
+
+**Example: Swap background removal provider**
+```typescript
+{
+  processorSwaps: {
+    'photoroom-bg-remove': 'claid-bg-remove'
+  }
+}
+```
+
+### Pre-defined Stack Templates
+
+| Stack ID | Description |
+|----------|-------------|
+| `classic` | Full pipeline: extract → score → classify → extract-products → generate |
+| `gemini_video` | Direct video analysis with Gemini |
+| `minimal` | Extract and upload without commercial generation |
+| `frames_only` | Extract frames with scoring, no AI classification |
+| `custom_bg_removal` | Configurable background removal provider |
+
+### Stack Validation
+
+The StackRunner validates stacks before execution:
+1. Verifies all processors exist in registry
+2. Checks IO flow (each processor's requirements are satisfied by previous outputs)
+3. Validates processor swaps have compatible IO contracts
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/processors/types.ts` | IOType, Processor, Stack interfaces |
+| `src/processors/registry.ts` | ProcessorRegistry for managing processors |
+| `src/processors/runner.ts` | StackRunner with validation and execution |
+| `src/processors/templates/index.ts` | Pre-defined stack templates |
+| `src/processors/impl/` | Individual processor implementations |
+
 ## Directory Structure
 
 ```
@@ -300,6 +398,14 @@ src/
 ├── middleware/
 │   ├── auth.middleware.ts  # API key authentication
 │   └── error.middleware.ts # Error handling
+├── processors/             # Composable processor stack
+│   ├── types.ts           # IO types and interfaces
+│   ├── registry.ts        # Processor registry
+│   ├── runner.ts          # Stack runner
+│   ├── constants.ts       # Progress constants
+│   ├── setup.ts           # Processor registration
+│   ├── impl/              # Processor implementations
+│   └── templates/         # Pre-defined stacks
 ├── queues/
 │   ├── redis.ts           # Redis connection
 │   └── pipeline.queue.ts  # BullMQ queue definition

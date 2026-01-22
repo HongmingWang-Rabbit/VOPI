@@ -37,7 +37,20 @@ vi.mock('../config/index.js', () => ({
       apiRetryDelayMs: 10,
       apiRateLimitDelayMs: 10,
     },
+    apiPresign: {
+      expirySeconds: 300,
+    },
+    storage: {
+      endpoint: 'http://localhost:9000',
+    },
   })),
+}));
+
+// Mock s3-presign utilities
+vi.mock('../utils/s3-presign.js', () => ({
+  isLocalS3: vi.fn(() => true),  // Default to local mode
+  getPresignedImageUrl: vi.fn(),
+  cleanupTempS3File: vi.fn(),
 }));
 
 // Mock logger
@@ -52,6 +65,7 @@ vi.mock('../utils/logger.js', () => ({
 
 import https from 'https';
 import { writeFile } from 'fs/promises';
+import { isLocalS3, getPresignedImageUrl, cleanupTempS3File } from '../utils/s3-presign.js';
 
 describe('PhotoroomService', () => {
   let service: PhotoroomService;
@@ -59,6 +73,14 @@ describe('PhotoroomService', () => {
   beforeEach(() => {
     service = new PhotoroomService();
     vi.clearAllMocks();
+
+    // Default to local S3 mode
+    vi.mocked(isLocalS3).mockReturnValue(true);
+    vi.mocked(getPresignedImageUrl).mockResolvedValue({
+      url: 'https://s3.example.com/bucket/temp/test.jpg?signature=xxx',
+      tempKey: 'temp/photoroom/uuid-test.jpg',
+    });
+    vi.mocked(cleanupTempS3File).mockResolvedValue(undefined);
   });
 
   const createMockResponse = (isImage: boolean, statusCode = 200) => {
@@ -362,6 +384,105 @@ describe('PhotoroomService', () => {
 
       expect(result.versions.transparent).toBeUndefined();
       expect(result.versions.solid).toBeDefined();
+    });
+  });
+
+  describe('Presigned URL mode (production S3)', () => {
+    it('editImageWithAI should use presigned URL in production mode', async () => {
+      vi.mocked(isLocalS3).mockReturnValue(false);
+
+      const mockResponse = createMockResponse(true);
+      const mockReq = createMockRequest(mockResponse);
+
+      await service.editImageWithAI('/input.png', '/output.png');
+
+      expect(getPresignedImageUrl).toHaveBeenCalledWith('/input.png', 'temp/photoroom');
+      expect(cleanupTempS3File).toHaveBeenCalledWith('temp/photoroom/uuid-test.jpg');
+
+      // Check that imageUrl field was written to request
+      const writeCalls = mockReq.write.mock.calls.map((c) => c[0]).join('');
+      expect(writeCalls).toContain('imageUrl');
+    });
+
+    it('editImageWithAI should use multipart in local mode', async () => {
+      vi.mocked(isLocalS3).mockReturnValue(true);
+
+      const mockResponse = createMockResponse(true);
+      createMockRequest(mockResponse);
+
+      await service.editImageWithAI('/input.png', '/output.png');
+
+      expect(getPresignedImageUrl).not.toHaveBeenCalled();
+      expect(cleanupTempS3File).toHaveBeenCalledWith(undefined);
+    });
+
+    it('editImageWithAI should cleanup temp file even on error', async () => {
+      vi.mocked(isLocalS3).mockReturnValue(false);
+
+      const mockResponse = createMockResponse(false, 500);
+      createMockRequest(mockResponse);
+
+      await expect(service.editImageWithAI('/input.png', '/output.png')).rejects.toThrow();
+
+      expect(cleanupTempS3File).toHaveBeenCalledWith('temp/photoroom/uuid-test.jpg');
+    });
+
+    it('generateWithSolidBackground should use presigned URL in production mode', async () => {
+      vi.mocked(isLocalS3).mockReturnValue(false);
+
+      const mockResponse = createMockResponse(true);
+      const mockReq = createMockRequest(mockResponse);
+
+      await service.generateWithSolidBackground('/input.png', '/output.png', '#FFFFFF');
+
+      expect(getPresignedImageUrl).toHaveBeenCalledWith('/input.png', 'temp/photoroom');
+      expect(cleanupTempS3File).toHaveBeenCalledWith('temp/photoroom/uuid-test.jpg');
+
+      const writeCalls = mockReq.write.mock.calls.map((c) => c[0]).join('');
+      expect(writeCalls).toContain('imageUrl');
+    });
+
+    it('generateWithAIBackground should use presigned URL in production mode', async () => {
+      vi.mocked(isLocalS3).mockReturnValue(false);
+
+      const mockResponse = createMockResponse(true);
+      const mockReq = createMockRequest(mockResponse);
+
+      await service.generateWithAIBackground('/input.png', '/output.png', 'on a table');
+
+      expect(getPresignedImageUrl).toHaveBeenCalledWith('/input.png', 'temp/photoroom');
+      expect(cleanupTempS3File).toHaveBeenCalledWith('temp/photoroom/uuid-test.jpg');
+
+      const writeCalls = mockReq.write.mock.calls.map((c) => c[0]).join('');
+      expect(writeCalls).toContain('imageUrl');
+    });
+
+    it('removeBackground should always use multipart (v1/segment limitation)', async () => {
+      // Even in production mode, removeBackground uses multipart
+      vi.mocked(isLocalS3).mockReturnValue(false);
+
+      const mockResponse = createMockResponse(true);
+      createMockRequest(mockResponse);
+
+      await service.removeBackground('/input.png', '/output.png');
+
+      // v1/segment does not support imageUrl, so presigned URL should not be used
+      expect(getPresignedImageUrl).not.toHaveBeenCalled();
+    });
+
+    it('inpaintHoles should use presigned URL in production mode', async () => {
+      vi.mocked(isLocalS3).mockReturnValue(false);
+
+      const mockResponse = createMockResponse(true);
+      const mockReq = createMockRequest(mockResponse);
+
+      await service.inpaintHoles('/input.png', '/output.png', { prompt: 'Fill holes' });
+
+      expect(getPresignedImageUrl).toHaveBeenCalledWith('/input.png', 'temp/photoroom');
+      expect(cleanupTempS3File).toHaveBeenCalledWith('temp/photoroom/uuid-test.jpg');
+
+      const writeCalls = mockReq.write.mock.calls.map((c) => c[0]).join('');
+      expect(writeCalls).toContain('imageUrl');
     });
   });
 });

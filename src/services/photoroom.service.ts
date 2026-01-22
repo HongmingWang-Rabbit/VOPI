@@ -6,6 +6,7 @@ import https from 'https';
 import { createChildLogger } from '../utils/logger.js';
 import { ExternalApiError } from '../utils/errors.js';
 import { getConfig } from '../config/index.js';
+import { isLocalS3, getPresignedImageUrl, cleanupTempS3File } from '../utils/s3-presign.js';
 import type { RecommendedFrame } from './gemini.service.js';
 import type { FrameObstructions } from '../types/job.types.js';
 
@@ -138,7 +139,7 @@ export class PhotoroomService {
   }
 
   /**
-   * Stream file to multipart request
+   * Stream file to multipart request (for local/dev mode)
    */
   private async streamFile(
     req: ReturnType<typeof https.request>,
@@ -171,6 +172,19 @@ export class PhotoroomService {
   }
 
   /**
+   * Add image URL field and end request (for production mode with presigned URLs)
+   */
+  private addImageUrlAndEnd(
+    req: ReturnType<typeof https.request>,
+    boundary: string,
+    imageUrl: string
+  ): void {
+    this.addField(req, boundary, 'imageUrl', imageUrl);
+    req.write(`--${boundary}--\r\n`);
+    req.end();
+  }
+
+  /**
    * Edit image with AI modifications
    */
   async editImageWithAI(
@@ -180,41 +194,59 @@ export class PhotoroomService {
   ): Promise<ProcessResult> {
     const config = getConfig();
     const { obstructions = null, customPrompt = null } = options;
+    const useUrlMode = !isLocalS3();
+    let tempKey: string | undefined;
 
     const prompt =
       customPrompt ||
       this.buildRemovalPrompt(obstructions) ||
       'Erase any human hands, fingers, or arms from this image. DO NOT modify the product in any way. Replace removed areas with transparent background only.';
 
-    logger.info({ imagePath: path.basename(imagePath) }, 'Editing image with AI');
+    logger.info({ imagePath: path.basename(imagePath), useUrlMode }, 'Editing image with AI');
 
-    const imageBuffer = await this.makeRequest(
-      {
-        hostname: config.apis.photoroomPlusHost,
-        path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
-        method: 'POST',
-        headers: {
-          'x-api-key': config.apis.photoroom,
-        },
-      },
-      async (req, boundary) => {
-        this.addField(req, boundary, 'removeBackground', 'true');
-        this.addField(req, boundary, 'outputFormat', 'png');
-        this.addField(req, boundary, 'describeAnyChange.mode', 'ai.auto');
-        this.addField(req, boundary, 'describeAnyChange.prompt', prompt);
-        await this.streamFile(req, boundary, imagePath);
+    try {
+      // Get presigned URL if in production mode
+      let imageUrl: string | undefined;
+      if (useUrlMode) {
+        const result = await getPresignedImageUrl(imagePath, 'temp/photoroom');
+        imageUrl = result.url;
+        tempKey = result.tempKey;
       }
-    );
 
-    await writeFile(outputPath, imageBuffer);
-    logger.info({ outputPath: path.basename(outputPath) }, 'AI edit saved');
+      const imageBuffer = await this.makeRequest(
+        {
+          hostname: config.apis.photoroomPlusHost,
+          path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
+          method: 'POST',
+          headers: {
+            'x-api-key': config.apis.photoroom,
+          },
+        },
+        async (req, boundary) => {
+          this.addField(req, boundary, 'removeBackground', 'true');
+          this.addField(req, boundary, 'outputFormat', 'png');
+          this.addField(req, boundary, 'describeAnyChange.mode', 'ai.auto');
+          this.addField(req, boundary, 'describeAnyChange.prompt', prompt);
+          if (useUrlMode && imageUrl) {
+            this.addImageUrlAndEnd(req, boundary, imageUrl);
+          } else {
+            await this.streamFile(req, boundary, imagePath);
+          }
+        }
+      );
 
-    return {
-      success: true,
-      outputPath,
-      size: imageBuffer.length,
-      method: 'v2/edit',
-    };
+      await writeFile(outputPath, imageBuffer);
+      logger.info({ outputPath: path.basename(outputPath) }, 'AI edit saved');
+
+      return {
+        success: true,
+        outputPath,
+        size: imageBuffer.length,
+        method: 'v2/edit',
+      };
+    } finally {
+      await cleanupTempS3File(tempKey);
+    }
   }
 
   /**
@@ -226,37 +258,54 @@ export class PhotoroomService {
     bgColor: string
   ): Promise<ProcessResult> {
     const config = getConfig();
+    const useUrlMode = !isLocalS3();
+    let tempKey: string | undefined;
 
-    logger.info({ imagePath: path.basename(imagePath), bgColor }, 'Generating with solid background');
+    logger.info({ imagePath: path.basename(imagePath), bgColor, useUrlMode }, 'Generating with solid background');
 
-    const imageBuffer = await this.makeRequest(
-      {
-        hostname: config.apis.photoroomPlusHost,
-        path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
-        method: 'POST',
-        headers: {
-          'x-api-key': config.apis.photoroom,
-        },
-      },
-      async (req, boundary) => {
-        this.addField(req, boundary, 'removeBackground', 'true');
-        this.addField(req, boundary, 'outputFormat', 'png');
-        this.addField(req, boundary, 'background.color', bgColor);
-        this.addField(req, boundary, 'padding', '0.12');
-        await this.streamFile(req, boundary, imagePath);
+    try {
+      let imageUrl: string | undefined;
+      if (useUrlMode) {
+        const result = await getPresignedImageUrl(imagePath, 'temp/photoroom');
+        imageUrl = result.url;
+        tempKey = result.tempKey;
       }
-    );
 
-    await writeFile(outputPath, imageBuffer);
-    logger.info({ outputPath: path.basename(outputPath) }, 'Solid background saved');
+      const imageBuffer = await this.makeRequest(
+        {
+          hostname: config.apis.photoroomPlusHost,
+          path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
+          method: 'POST',
+          headers: {
+            'x-api-key': config.apis.photoroom,
+          },
+        },
+        async (req, boundary) => {
+          this.addField(req, boundary, 'removeBackground', 'true');
+          this.addField(req, boundary, 'outputFormat', 'png');
+          this.addField(req, boundary, 'background.color', bgColor);
+          this.addField(req, boundary, 'padding', PHOTOROOM_CONSTANTS.DEFAULT_PADDING);
+          if (useUrlMode && imageUrl) {
+            this.addImageUrlAndEnd(req, boundary, imageUrl);
+          } else {
+            await this.streamFile(req, boundary, imagePath);
+          }
+        }
+      );
 
-    return {
-      success: true,
-      outputPath,
-      size: imageBuffer.length,
-      method: 'solid_background',
-      bgColor,
-    };
+      await writeFile(outputPath, imageBuffer);
+      logger.info({ outputPath: path.basename(outputPath) }, 'Solid background saved');
+
+      return {
+        success: true,
+        outputPath,
+        size: imageBuffer.length,
+        method: 'solid_background',
+        bgColor,
+      };
+    } finally {
+      await cleanupTempS3File(tempKey);
+    }
   }
 
   /**
@@ -268,41 +317,59 @@ export class PhotoroomService {
     bgPrompt: string
   ): Promise<ProcessResult> {
     const config = getConfig();
+    const useUrlMode = !isLocalS3();
+    let tempKey: string | undefined;
 
-    logger.info({ imagePath: path.basename(imagePath) }, 'Generating with AI background');
+    logger.info({ imagePath: path.basename(imagePath), useUrlMode }, 'Generating with AI background');
 
-    const imageBuffer = await this.makeRequest(
-      {
-        hostname: config.apis.photoroomPlusHost,
-        path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
-        method: 'POST',
-        headers: {
-          'x-api-key': config.apis.photoroom,
-        },
-      },
-      async (req, boundary) => {
-        this.addField(req, boundary, 'removeBackground', 'true');
-        this.addField(req, boundary, 'outputFormat', 'png');
-        this.addField(req, boundary, 'background.prompt', bgPrompt);
-        this.addField(req, boundary, 'padding', '0.12');
-        await this.streamFile(req, boundary, imagePath);
+    try {
+      let imageUrl: string | undefined;
+      if (useUrlMode) {
+        const result = await getPresignedImageUrl(imagePath, 'temp/photoroom');
+        imageUrl = result.url;
+        tempKey = result.tempKey;
       }
-    );
 
-    await writeFile(outputPath, imageBuffer);
-    logger.info({ outputPath: path.basename(outputPath) }, 'AI background saved');
+      const imageBuffer = await this.makeRequest(
+        {
+          hostname: config.apis.photoroomPlusHost,
+          path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
+          method: 'POST',
+          headers: {
+            'x-api-key': config.apis.photoroom,
+          },
+        },
+        async (req, boundary) => {
+          this.addField(req, boundary, 'removeBackground', 'true');
+          this.addField(req, boundary, 'outputFormat', 'png');
+          this.addField(req, boundary, 'background.prompt', bgPrompt);
+          this.addField(req, boundary, 'padding', PHOTOROOM_CONSTANTS.DEFAULT_PADDING);
+          if (useUrlMode && imageUrl) {
+            this.addImageUrlAndEnd(req, boundary, imageUrl);
+          } else {
+            await this.streamFile(req, boundary, imagePath);
+          }
+        }
+      );
 
-    return {
-      success: true,
-      outputPath,
-      size: imageBuffer.length,
-      method: 'ai_background',
-      bgPrompt,
-    };
+      await writeFile(outputPath, imageBuffer);
+      logger.info({ outputPath: path.basename(outputPath) }, 'AI background saved');
+
+      return {
+        success: true,
+        outputPath,
+        size: imageBuffer.length,
+        method: 'ai_background',
+        bgPrompt,
+      };
+    } finally {
+      await cleanupTempS3File(tempKey);
+    }
   }
 
   /**
    * Remove background (basic v1/segment)
+   * Note: v1/segment does not support URL input, always uses multipart file upload
    */
   async removeBackground(imagePath: string, outputPath: string): Promise<ProcessResult> {
     const config = getConfig();
@@ -351,6 +418,80 @@ export class PhotoroomService {
       outputPath,
       size: imageBuffer.length,
     };
+  }
+
+  /**
+   * Fill transparent holes in an image using AI inpainting
+   *
+   * This uses Photoroom's expand feature with ai.auto mode to intelligently
+   * fill any transparent gaps in the product (e.g., where hands were removed).
+   *
+   * @param imagePath - Path to PNG image with transparent holes
+   * @param outputPath - Path for output image with holes filled
+   * @param options - Inpainting options
+   */
+  async inpaintHoles(
+    imagePath: string,
+    outputPath: string,
+    options: { prompt?: string } = {}
+  ): Promise<ProcessResult> {
+    const config = getConfig();
+    const { prompt } = options;
+    const useUrlMode = !isLocalS3();
+    let tempKey: string | undefined;
+
+    logger.info({ imagePath: path.basename(imagePath), hasPrompt: !!prompt, useUrlMode }, 'Inpainting transparent holes');
+
+    try {
+      let imageUrl: string | undefined;
+      if (useUrlMode) {
+        const result = await getPresignedImageUrl(imagePath, 'temp/photoroom');
+        imageUrl = result.url;
+        tempKey = result.tempKey;
+      }
+
+      const imageBuffer = await this.makeRequest(
+        {
+          hostname: config.apis.photoroomPlusHost,
+          path: PHOTOROOM_CONSTANTS.EDIT_ENDPOINT,
+          method: 'POST',
+          headers: {
+            'x-api-key': config.apis.photoroom,
+          },
+        },
+        async (req, boundary) => {
+          // Don't remove background - we want to keep the existing transparency
+          this.addField(req, boundary, 'removeBackground', 'false');
+          this.addField(req, boundary, 'outputFormat', 'png');
+          // Use AI expand to fill transparent pixels
+          this.addField(req, boundary, 'expand.mode', 'ai.auto');
+
+          // If a prompt is provided, use it to guide the inpainting
+          if (prompt) {
+            this.addField(req, boundary, 'describeAnyChange.mode', 'ai.auto');
+            this.addField(req, boundary, 'describeAnyChange.prompt', prompt);
+          }
+
+          if (useUrlMode && imageUrl) {
+            this.addImageUrlAndEnd(req, boundary, imageUrl);
+          } else {
+            await this.streamFile(req, boundary, imagePath);
+          }
+        }
+      );
+
+      await writeFile(outputPath, imageBuffer);
+      logger.info({ outputPath: path.basename(outputPath) }, 'Holes inpainted');
+
+      return {
+        success: true,
+        outputPath,
+        size: imageBuffer.length,
+        method: 'inpaint',
+      };
+    } finally {
+      await cleanupTempS3File(tempKey);
+    }
   }
 
   /**

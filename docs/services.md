@@ -683,6 +683,151 @@ CREATE TABLE global_config (
 
 ---
 
+## S3 Presign Utilities
+
+**File**: `src/utils/s3-presign.ts`
+
+Shared utilities for S3 presigned URL operations, used by external API integrations (Photoroom, Claid).
+
+### Purpose
+
+1. **Detect Environment**: Determine if S3 is local (MinIO) vs production
+2. **Upload with Presigned URL**: Upload files and get presigned URLs for external APIs
+3. **Cleanup**: Remove temporary files after API calls
+
+### Methods
+
+#### `isLocalS3(): boolean`
+
+Check if S3 endpoint is localhost (MinIO, local development).
+
+```typescript
+// Returns true for:
+// - localhost endpoints
+// - 127.0.0.1 endpoints
+// - ::1 (IPv6 localhost) endpoints
+```
+
+#### `getPresignedImageUrl(imagePath, prefix, expirySeconds?): Promise<PresignedUploadResult>`
+
+Upload file to S3 and get presigned URL for external API access.
+
+**Parameters**:
+- `imagePath`: Local file path to upload
+- `prefix`: S3 key prefix (e.g., `temp/photoroom`, `temp/claid`)
+- `expirySeconds`: Optional expiry time (default: `API_PRESIGN_EXPIRY_SECONDS` config)
+
+**Returns**:
+```typescript
+interface PresignedUploadResult {
+  url: string;      // Presigned URL for external API
+  tempKey: string;  // S3 key for cleanup
+}
+```
+
+#### `cleanupTempS3File(tempKey): Promise<void>`
+
+Delete temporary S3 file. Silently handles errors to avoid disrupting main flow.
+
+### Configuration
+
+- `API_PRESIGN_EXPIRY_SECONDS`: Presigned URL expiry (default: 300 seconds)
+
+### Usage Pattern
+
+```typescript
+import { isLocalS3, getPresignedImageUrl, cleanupTempS3File } from '../utils/s3-presign.js';
+
+let tempKey: string | undefined;
+try {
+  if (!isLocalS3()) {
+    // Production: use presigned URL
+    const result = await getPresignedImageUrl(imagePath, 'temp/myapi');
+    tempKey = result.tempKey;
+    // Call external API with result.url
+  } else {
+    // Local: use multipart upload
+  }
+} finally {
+  await cleanupTempS3File(tempKey);
+}
+```
+
+---
+
+## Claid Background Removal Provider
+
+**File**: `src/providers/implementations/claid-background-removal.provider.ts`
+
+Alternative background removal using Claid.ai API with selective object retention.
+
+### Purpose
+
+1. **Selective Removal**: Keep specific objects using text prompts
+2. **Dual Mode**: Presigned URL (production) or multipart upload (local)
+3. **Swappable**: Same IO contract as Photoroom provider
+
+### Methods
+
+#### `removeBackground(imagePath, outputPath, options): Promise<BackgroundRemovalResult>`
+
+Remove background while keeping specified object.
+
+**Options**:
+```typescript
+interface BackgroundRemovalOptions {
+  customPrompt?: string;  // Object to keep (default: "product")
+  useAIEdit?: boolean;    // Run inpainting to fill holes
+}
+```
+
+**Returns**:
+```typescript
+interface BackgroundRemovalResult {
+  success: boolean;
+  outputPath?: string;
+  size?: number;
+  method?: string;      // 'claid-selective' or 'claid-selective+inpaint'
+  error?: string;
+}
+```
+
+#### `isAvailable(): boolean`
+
+Check if Claid API key is configured.
+
+### API Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `https://api.claid.ai/v1/image/edit` | JSON endpoint (presigned URL input) |
+| `https://api.claid.ai/v1/image/edit/upload` | Multipart endpoint (direct file upload) |
+
+### Configuration
+
+- `CLAID_API_KEY`: Claid API key (required for availability)
+
+### Processor Swapping
+
+Both Photoroom and Claid have the same IO contract:
+```typescript
+io: {
+  requires: ['images', 'frames'],
+  produces: ['images'],
+}
+```
+
+Swap via job config:
+```typescript
+{
+  processorSwaps: {
+    'photoroom-bg-remove': 'claid-bg-remove'
+  }
+}
+```
+
+---
+
 ## Gemini Video Analysis Provider
 
 **File**: `src/providers/implementations/gemini-video-analysis.provider.ts`

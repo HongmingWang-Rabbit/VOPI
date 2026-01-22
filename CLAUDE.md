@@ -71,7 +71,17 @@ VOPI supports two pipeline strategies, controlled by `pipeline.strategy` global 
 
 The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) process queued jobs independently. This separation allows horizontal scaling of workers.
 
+### Composable Processor Stack
+The pipeline is built on a modular processor stack architecture:
+- **Processors** declare IO types (`video`, `images`, `text`, `metadata`)
+- **Stacks** compose processors into pipelines with validated IO flow
+- **Swapping** allows replacing processors with compatible IO contracts (e.g., `photoroom-bg-remove` ↔ `claid-bg-remove`)
+- **Templates** provide pre-defined stacks: `classic`, `gemini_video`, `minimal`, `frames_only`, `custom_bg_removal`
+
+See `src/processors/` for implementation details.
+
 ### Key Directories
+- `src/processors/` - Composable processor stack architecture (registry, runner, implementations)
 - `src/services/` - Core business logic (one service per domain: video, scoring, gemini, photoroom, storage)
 - `src/providers/` - External service integrations (Gemini video analysis with HEVC transcoding)
 - `src/routes/` + `src/controllers/` - HTTP layer
@@ -172,6 +182,7 @@ score = sharpness - (alpha × motion × 255)
 - **FFmpeg** must be installed and in PATH (configurable via `FFMPEG_PATH`, `FFPROBE_PATH`)
 - **Gemini API** for frame classification (configurable model via `GEMINI_MODEL`)
 - **Photoroom API** for background removal (configurable hosts via `PHOTOROOM_*_HOST`)
+- **Claid API** (optional) for alternative background removal (`CLAID_API_KEY`) - swappable with Photoroom
 
 ## Configuration
 

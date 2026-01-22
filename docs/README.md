@@ -56,8 +56,18 @@ Each test prompts for required inputs and uses real services.
 
 ### Processing Pipeline
 
-VOPI processes videos through a 7-step asynchronous pipeline:
+VOPI uses a **composable processor stack architecture** where each processing step is a modular processor with declared IO types. This enables:
+- **Flexible composition** - Mix and match processors
+- **Processor swapping** - Replace processors with compatible alternatives (e.g., Photoroom ↔ Claid for background removal)
+- **Custom stacks** - Create specialized workflows for different use cases
 
+**Pre-defined stacks**:
+- `classic` - Full pipeline with scoring and AI classification
+- `gemini_video` - Direct video analysis (skip frame extraction)
+- `minimal` - Extract and upload only
+- `frames_only` - No AI classification
+
+Standard pipeline steps:
 1. **Download** - Fetch video from URL (HTTP or S3)
 2. **Extract** - Dense frame extraction at configurable FPS using FFmpeg
 3. **Score** - Calculate quality scores (sharpness + motion analysis)

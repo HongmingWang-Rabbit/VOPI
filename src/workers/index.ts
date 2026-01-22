@@ -8,6 +8,7 @@ import { initRedis, closeRedis } from '../queues/redis.js';
 import { startPipelineWorker, stopPipelineWorker } from './pipeline.worker.js';
 import { videoService } from '../services/video.service.js';
 import { setupDefaultProviders } from '../providers/setup.js';
+import { setupProcessors } from '../processors/setup.js';
 
 /**
  * Worker entry point
@@ -21,8 +22,9 @@ async function main(): Promise<void> {
 
   logger.info({ env: config.server.env }, 'Starting VOPI worker');
 
-  // Initialize providers
+  // Initialize providers and processors
   setupDefaultProviders();
+  setupProcessors();
 
   // Check FFmpeg availability
   const ffmpegCheck = await videoService.checkFfmpegInstalled();

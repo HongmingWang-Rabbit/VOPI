@@ -31,6 +31,27 @@ export const CommercialVersion = {
 export type CommercialVersion = (typeof CommercialVersion)[keyof typeof CommercialVersion];
 
 /**
+ * Processor insertion schema
+ */
+export const processorInsertionSchema = z.object({
+  after: z.string(),
+  processor: z.string(),
+  options: z.record(z.unknown()).optional(),
+});
+
+/**
+ * Stack configuration schema
+ */
+export const stackConfigSchema = z.object({
+  stackId: z.string().optional(),
+  processorSwaps: z.record(z.string()).optional(),
+  processorOptions: z.record(z.record(z.unknown())).optional(),
+  insertProcessors: z.array(processorInsertionSchema).optional(),
+});
+
+export type StackConfig = z.infer<typeof stackConfigSchema>;
+
+/**
  * Job configuration schema
  */
 export const jobConfigSchema = z.object({
@@ -41,6 +62,8 @@ export const jobConfigSchema = z.object({
     .default(['transparent', 'solid', 'real', 'creative']),
   aiCleanup: z.boolean().default(true),
   geminiModel: z.string().default('gemini-2.0-flash'),
+  // Stack configuration
+  stack: stackConfigSchema.optional(),
 });
 
 export type JobConfig = z.infer<typeof jobConfigSchema>;

@@ -6,7 +6,6 @@ import type { Job } from '../db/schema.js';
 vi.mock('fs/promises', () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
   rm: vi.fn().mockResolvedValue(undefined),
-  copyFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock database
@@ -37,180 +36,12 @@ vi.mock('../config/index.js', () => ({
     worker: {
       tempDirName: 'vopi-test',
     },
+    storage: {
+      bucket: 'test-bucket',
+      endpoint: 'https://s3.example.com',
+      region: 'us-east-1',
+    },
   })),
-}));
-
-// Mock videoService
-vi.mock('./video.service.js', () => ({
-  videoService: {
-    getMetadata: vi.fn().mockResolvedValue({
-      duration: 10,
-      width: 1920,
-      height: 1080,
-      fps: 30,
-      codec: 'h264',
-      filename: 'test.mp4',
-    }),
-    extractFramesDense: vi.fn().mockResolvedValue([
-      {
-        filename: 'frame_00001.png',
-        path: '/tmp/frame_00001.png',
-        index: 1,
-        timestamp: 0,
-        frameId: 'frame_00001',
-      },
-      {
-        filename: 'frame_00002.png',
-        path: '/tmp/frame_00002.png',
-        index: 2,
-        timestamp: 0.2,
-        frameId: 'frame_00002',
-      },
-    ]),
-  },
-}));
-
-// Mock frameScoringService
-vi.mock('./frame-scoring.service.js', () => ({
-  frameScoringService: {
-    scoreFrames: vi.fn().mockResolvedValue([
-      {
-        filename: 'frame_00001.png',
-        path: '/tmp/frame_00001.png',
-        index: 1,
-        timestamp: 0,
-        frameId: 'frame_00001',
-        sharpness: 50,
-        motion: 0.1,
-        score: 45,
-      },
-    ]),
-    selectBestFramePerSecond: vi.fn().mockReturnValue([
-      {
-        filename: 'frame_00001.png',
-        path: '/tmp/frame_00001.png',
-        index: 1,
-        timestamp: 0,
-        frameId: 'frame_00001',
-        sharpness: 50,
-        motion: 0.1,
-        score: 45,
-      },
-    ]),
-    prepareCandidateMetadata: vi.fn().mockReturnValue([
-      {
-        frame_id: 'frame_00001',
-        timestamp_sec: 0,
-        sequence_position: 1,
-        total_candidates: 1,
-      },
-    ]),
-    toFrameScores: vi.fn().mockReturnValue({
-      sharpness: 50,
-      motion: 0.1,
-      combined: 45,
-    }),
-  },
-}));
-
-// Mock geminiService
-vi.mock('./gemini.service.js', () => ({
-  geminiService: {
-    classifyFrames: vi.fn().mockResolvedValue({
-      frame_evaluation: [
-        {
-          frame_id: 'frame_00001',
-          timestamp_sec: 0,
-          product_id: 'product_1',
-          variant_id: 'front_view',
-          angle_estimate: 'front',
-          quality_score_0_100: 85,
-          similarity_note: 'Clear shot',
-          obstructions: {
-            has_obstruction: false,
-            obstruction_types: [],
-            obstruction_description: null,
-            removable_by_ai: true,
-          },
-        },
-      ],
-      variants_discovered: [
-        {
-          product_id: 'product_1',
-          variant_id: 'front_view',
-          angle_estimate: 'front',
-          description: 'Front view',
-          best_frame_id: 'frame_00001',
-          best_frame_score: 85,
-          all_frame_ids: ['frame_00001'],
-          obstructions: {
-            has_obstruction: false,
-            obstruction_types: [],
-            obstruction_description: null,
-            removable_by_ai: true,
-          },
-          background_recommendations: {
-            solid_color: '#FFFFFF',
-            solid_color_name: 'white',
-            real_life_setting: 'on a table',
-            creative_shot: 'floating',
-          },
-        },
-      ],
-    }),
-    getRecommendedFrames: vi.fn().mockReturnValue([
-      {
-        filename: 'frame_00001.png',
-        path: '/tmp/frame_00001.png',
-        index: 1,
-        timestamp: 0,
-        frameId: 'frame_00001',
-        sharpness: 50,
-        motion: 0.1,
-        score: 45,
-        productId: 'product_1',
-        variantId: 'front_view',
-        angleEstimate: 'front',
-        recommendedType: 'product_1_front_view',
-        geminiScore: 85,
-        rotationAngleDeg: 0,
-        allFrameIds: ['frame_00001'],
-        obstructions: {
-          has_obstruction: false,
-          obstruction_types: [],
-          obstruction_description: null,
-          removable_by_ai: true,
-        },
-        backgroundRecommendations: {
-          solid_color: '#FFFFFF',
-          solid_color_name: 'white',
-          real_life_setting: 'on a table',
-          creative_shot: 'floating',
-        },
-      },
-    ]),
-  },
-}));
-
-// Mock photoroomService
-vi.mock('./photoroom.service.js', () => ({
-  photoroomService: {
-    generateAllVersions: vi.fn().mockResolvedValue({
-      frameId: 'frame_00001',
-      recommendedType: 'product_1_front_view',
-      versions: {
-        transparent: {
-          success: true,
-          outputPath: '/tmp/transparent.png',
-        },
-        solid: {
-          success: true,
-          outputPath: '/tmp/solid.png',
-          bgColor: '#FFFFFF',
-        },
-      },
-    }),
-  },
 }));
 
 // Mock storageService
@@ -246,7 +77,7 @@ const defaultEffectiveConfig = {
   debugEnabled: false,
 };
 
-// Mock globalConfigService - use vi.hoisted to define mock before vi.mock hoisting
+// Mock globalConfigService
 const { mockGetEffectiveConfig } = vi.hoisted(() => ({
   mockGetEffectiveConfig: vi.fn(),
 }));
@@ -261,34 +92,6 @@ vi.mock('./global-config.service.js', () => ({
   },
 }));
 
-// Mock providerRegistry
-const mockProductExtractionProvider = {
-  providerId: 'default',
-  extractProducts: vi.fn().mockResolvedValue(new Map([
-    ['frame_00001', {
-      success: true,
-      outputPath: '/tmp/extracted/frame_00001_extracted.png',
-      rotationApplied: 0,
-    }],
-  ])),
-  extractProduct: vi.fn(),
-  isAvailable: vi.fn().mockReturnValue(true),
-};
-
-vi.mock('../providers/index.js', () => ({
-  providerRegistry: {
-    get: vi.fn((type: string) => {
-      if (type === 'productExtraction') {
-        return {
-          provider: mockProductExtractionProvider,
-          providerId: 'default',
-        };
-      }
-      throw new Error(`Unknown provider type: ${type}`);
-    }),
-  },
-}));
-
 // Mock logger
 vi.mock('../utils/logger.js', () => ({
   createChildLogger: vi.fn(() => ({
@@ -299,10 +102,33 @@ vi.mock('../utils/logger.js', () => ({
   })),
 }));
 
-import { videoService } from './video.service.js';
-import { frameScoringService } from './frame-scoring.service.js';
-import { geminiService } from './gemini.service.js';
-import { photoroomService } from './photoroom.service.js';
+// Mock s3-url util
+vi.mock('../utils/s3-url.js', () => ({
+  extractS3KeyFromUrl: vi.fn((url: string) => {
+    if (url.includes('uploads/')) {
+      return 'uploads/video.mp4';
+    }
+    return null;
+  }),
+}));
+
+// Mock stack runner and templates
+const { mockStackRunnerExecute } = vi.hoisted(() => ({
+  mockStackRunnerExecute: vi.fn(),
+}));
+
+vi.mock('../processors/index.js', () => ({
+  stackRunner: {
+    execute: mockStackRunnerExecute,
+  },
+  getStackTemplate: vi.fn(() => ({
+    id: 'classic',
+    name: 'Classic Pipeline',
+    steps: [{ processor: 'download' }],
+  })),
+  getDefaultStackId: vi.fn(() => 'classic'),
+}));
+
 import { storageService } from './storage.service.js';
 import { mkdir, rm } from 'fs/promises';
 
@@ -335,50 +161,40 @@ describe('PipelineService', () => {
     mockDb.where.mockReturnThis();
     mockDb.update.mockReturnThis();
     mockDb.set.mockReturnThis();
-
-    // Default returning values
     mockDb.returning.mockResolvedValue([{ id: 'video-1' }]);
     mockDb.where.mockResolvedValue(undefined);
 
     // Reset effective config to default
     mockGetEffectiveConfig.mockResolvedValue(defaultEffectiveConfig);
+
+    // Default stack runner response
+    mockStackRunnerExecute.mockResolvedValue({
+      recommendedFrames: [{ frameId: 'frame-1' }],
+      candidateFrames: [{ frameId: 'frame-1' }],
+      uploadedUrls: ['https://s3.example.com/frame.png'],
+      metadata: {
+        commercialImageUrls: { 'product_1_front': { transparent: 'https://s3.example.com/transparent.png' } },
+      },
+    });
   });
 
   describe('runPipeline', () => {
     it('should complete the full pipeline successfully', async () => {
-      // Setup db returns for frame insertion
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }]) // video insert
-        .mockResolvedValueOnce([{ id: 'frame-1' }]); // frame insert
-
       const result = await service.runPipeline(mockJob);
 
       expect(result.variantsDiscovered).toBe(1);
       expect(result.framesAnalyzed).toBe(1);
       expect(result.finalFrames).toHaveLength(1);
-      expect(storageService.downloadFromUrl).toHaveBeenCalled();
-      expect(videoService.getMetadata).toHaveBeenCalled();
-      expect(videoService.extractFramesDense).toHaveBeenCalled();
-      expect(frameScoringService.scoreFrames).toHaveBeenCalled();
-      expect(geminiService.classifyFrames).toHaveBeenCalled();
-      expect(photoroomService.generateAllVersions).toHaveBeenCalled();
+      expect(mockStackRunnerExecute).toHaveBeenCalled();
     });
 
     it('should create working directories', async () => {
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
-
       await service.runPipeline(mockJob);
 
       expect(mkdir).toHaveBeenCalled();
     });
 
     it('should cleanup temp directory on completion', async () => {
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
-
       await service.runPipeline(mockJob);
 
       expect(rm).toHaveBeenCalledWith(expect.any(String), {
@@ -388,43 +204,43 @@ describe('PipelineService', () => {
     });
 
     it('should call progress callback if provided', async () => {
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
-
       const progressCallback = vi.fn().mockResolvedValue(undefined);
 
       await service.runPipeline(mockJob, progressCallback);
 
-      expect(progressCallback).toHaveBeenCalled();
-      expect(progressCallback).toHaveBeenCalledWith(
+      // Progress is called by processors through context.onProgress
+      // The callback is passed to the stack runner context
+      expect(mockStackRunnerExecute).toHaveBeenCalledWith(
+        expect.any(Object),
         expect.objectContaining({
-          status: expect.any(String),
-          percentage: expect.any(Number),
+          onProgress: progressCallback,
+        }),
+        expect.any(Object),
+        // initialData is prepared with job.videoUrl injected into video.sourceUrl
+        expect.objectContaining({
+          video: expect.objectContaining({
+            sourceUrl: mockJob.videoUrl,
+          }),
         })
       );
     });
 
     it('should handle pipeline error and update job status', async () => {
-      vi.mocked(storageService.downloadFromUrl).mockRejectedValueOnce(
-        new Error('Download failed')
-      );
+      mockStackRunnerExecute.mockRejectedValueOnce(new Error('Pipeline failed'));
 
-      await expect(service.runPipeline(mockJob)).rejects.toThrow('Download failed');
+      await expect(service.runPipeline(mockJob)).rejects.toThrow('Pipeline failed');
 
       expect(mockDb.update).toHaveBeenCalled();
       expect(mockDb.set).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'failed',
-          error: 'Download failed',
+          error: 'Pipeline failed',
         })
       );
     });
 
     it('should cleanup temp directory even on error', async () => {
-      vi.mocked(storageService.downloadFromUrl).mockRejectedValueOnce(
-        new Error('Download failed')
-      );
+      mockStackRunnerExecute.mockRejectedValueOnce(new Error('Pipeline failed'));
 
       await expect(service.runPipeline(mockJob)).rejects.toThrow();
 
@@ -434,142 +250,78 @@ describe('PipelineService', () => {
       });
     });
 
-    it('should use config from job', async () => {
+    it('should use stack config from job', async () => {
       const jobWithConfig = {
         ...mockJob,
         config: {
           fps: 10,
           batchSize: 12,
+          stack: {
+            stackId: 'minimal',
+          },
         },
       } as Job;
-
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
 
       await service.runPipeline(jobWithConfig);
 
-      expect(videoService.extractFramesDense).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.any(String),
-        expect.objectContaining({ fps: 10 })
-      );
-    });
-  });
-
-  describe('getStepNumber', () => {
-    it('should return correct step numbers', () => {
-      // We test this indirectly through progress updates
-      const progressCallback = vi.fn().mockResolvedValue(undefined);
-
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
-
-      service.runPipeline(mockJob, progressCallback);
-
-      // Progress callback will be called with step numbers
-      // The first call should be for downloading (step 1)
-    });
-  });
-
-  describe('batch processing', () => {
-    it('should process frames in batches', async () => {
-      const manyFrames = Array.from({ length: 30 }, (_, i) => ({
-        filename: `frame_${String(i + 1).padStart(5, '0')}.png`,
-        path: `/tmp/frame_${String(i + 1).padStart(5, '0')}.png`,
-        index: i + 1,
-        timestamp: i * 0.2,
-        frameId: `frame_${String(i + 1).padStart(5, '0')}`,
-        sharpness: 50,
-        motion: 0.1,
-        score: 45,
-      }));
-
-      vi.mocked(frameScoringService.scoreFrames).mockResolvedValue(manyFrames);
-      vi.mocked(frameScoringService.selectBestFramePerSecond).mockReturnValue(manyFrames);
-
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValue([{ id: 'frame-1' }]);
-
-      await service.runPipeline(mockJob);
-
-      // With 30 frames and default batchSize of 24, should have 2 batches
-      expect(geminiService.classifyFrames).toHaveBeenCalled();
-    });
-  });
-
-  describe('commercial image generation', () => {
-    it('should generate commercial images for recommended frames', async () => {
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
-
-      const result = await service.runPipeline(mockJob);
-
-      expect(photoroomService.generateAllVersions).toHaveBeenCalled();
-      expect(result.commercialImages).toBeDefined();
-    });
-
-    it('should use AI edit when frames have obstructions', async () => {
-      vi.mocked(geminiService.getRecommendedFrames).mockReturnValue([
-        {
-          filename: 'frame_00001.png',
-          path: '/tmp/frame_00001.png',
-          index: 1,
-          timestamp: 0,
-          frameId: 'frame_00001',
-          sharpness: 50,
-          motion: 0.1,
-          score: 45,
-          productId: 'product_1',
-          variantId: 'front_view',
-          angleEstimate: 'front',
-          recommendedType: 'product_1_front_view',
-          geminiScore: 85,
-          rotationAngleDeg: 0,
-          allFrameIds: ['frame_00001'],
-          obstructions: {
-            has_obstruction: true,
-            obstruction_types: ['hand'],
-            obstruction_description: 'Hand visible',
-            removable_by_ai: true,
-          },
-          backgroundRecommendations: {
-            solid_color: '#FFFFFF',
-            solid_color_name: 'white',
-            real_life_setting: 'on a table',
-            creative_shot: 'floating',
-          },
-        },
-      ]);
-
-      const jobWithAICleanup = {
-        ...mockJob,
-        config: { aiCleanup: true },
-      } as Job;
-
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
-
-      await service.runPipeline(jobWithAICleanup);
-
-      // AI edit now happens in the extraction step, not in generateAllVersions
-      expect(mockProductExtractionProvider.extractProducts).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.any(String),
-        expect.objectContaining({ useAIEdit: true })
-      );
-
-      // generateAllVersions should use the pre-extracted product
-      expect(photoroomService.generateAllVersions).toHaveBeenCalledWith(
+      expect(mockStackRunnerExecute).toHaveBeenCalledWith(
         expect.any(Object),
-        expect.any(String),
         expect.objectContaining({
-          skipTransparent: true,
-          transparentSource: '/tmp/extracted/frame_00001_extracted.png',
+          config: expect.objectContaining({
+            fps: 10,
+            batchSize: 12,
+          }),
+        }),
+        expect.objectContaining({
+          stackId: 'minimal',
+        }),
+        // initialData is prepared with job.videoUrl injected into video.sourceUrl
+        expect.objectContaining({
+          video: expect.objectContaining({
+            sourceUrl: mockJob.videoUrl,
+          }),
+        })
+      );
+    });
+
+    it('should pass initialData to stack runner when provided', async () => {
+      const initialData = {
+        video: { path: '/local/video.mp4' },
+      };
+
+      await service.runPipeline(mockJob, undefined, undefined, initialData);
+
+      // When initialData has video.path but no video.sourceUrl, job.videoUrl is merged in
+      expect(mockStackRunnerExecute).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Object),
+        expect.any(Object),
+        expect.objectContaining({
+          video: expect.objectContaining({
+            path: '/local/video.mp4',
+            sourceUrl: mockJob.videoUrl,
+          }),
+        })
+      );
+    });
+
+    it('should not override initialData video.sourceUrl if already provided', async () => {
+      const initialData = {
+        video: { sourceUrl: 'https://custom.url/video.mp4', path: '/local/video.mp4' },
+      };
+
+      await service.runPipeline(mockJob, undefined, undefined, initialData);
+
+      // When initialData already has video.sourceUrl, it should not be overridden
+      expect(mockStackRunnerExecute).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Object),
+        expect.any(Object),
+        expect.objectContaining({
+          video: expect.objectContaining({
+            sourceUrl: 'https://custom.url/video.mp4',
+            path: '/local/video.mp4',
+          }),
         })
       );
     });
@@ -581,10 +333,6 @@ describe('PipelineService', () => {
         ...defaultEffectiveConfig,
         debugEnabled: true,
       });
-
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
 
       await service.runPipeline(mockJob);
 
@@ -603,10 +351,6 @@ describe('PipelineService', () => {
         debugEnabled: true,
       });
 
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
-
       await service.runPipeline(jobWithS3Url);
 
       // deleteFile should NOT be called when debug mode is enabled
@@ -618,10 +362,6 @@ describe('PipelineService', () => {
         ...defaultEffectiveConfig,
         debugEnabled: false,
       });
-
-      mockDb.returning
-        .mockResolvedValueOnce([{ id: 'video-1' }])
-        .mockResolvedValueOnce([{ id: 'frame-1' }]);
 
       await service.runPipeline(mockJob);
 
@@ -638,14 +378,36 @@ describe('PipelineService', () => {
         debugEnabled: true,
       });
 
-      vi.mocked(storageService.downloadFromUrl).mockRejectedValueOnce(
-        new Error('Download failed')
-      );
+      mockStackRunnerExecute.mockRejectedValueOnce(new Error('Pipeline failed'));
 
-      await expect(service.runPipeline(mockJob)).rejects.toThrow('Download failed');
+      await expect(service.runPipeline(mockJob)).rejects.toThrow('Pipeline failed');
 
       // rm should NOT be called even on error when debug mode is enabled
       expect(rm).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('S3 video cleanup', () => {
+    it('should cleanup uploaded video from S3 on success', async () => {
+      const jobWithS3Url = {
+        ...mockJob,
+        videoUrl: 'https://s3.example.com/uploads/video.mp4',
+      } as Job;
+
+      await service.runPipeline(jobWithS3Url);
+
+      expect(storageService.deleteFile).toHaveBeenCalledWith('uploads/video.mp4');
+    });
+
+    it('should not cleanup non-upload S3 URLs', async () => {
+      const jobWithNonUploadUrl = {
+        ...mockJob,
+        videoUrl: 'https://example.com/video.mp4',
+      } as Job;
+
+      await service.runPipeline(jobWithNonUploadUrl);
+
+      expect(storageService.deleteFile).not.toHaveBeenCalled();
     });
   });
 });

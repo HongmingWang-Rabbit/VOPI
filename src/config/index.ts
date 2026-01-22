@@ -45,6 +45,7 @@ export interface AppConfig {
     photoroom: string;
     photoroomBasicHost: string;
     photoroomPlusHost: string;
+    claid?: string;
   };
   worker: {
     concurrency: number;
@@ -72,6 +73,9 @@ export interface AppConfig {
   };
   upload: {
     presignExpirationSeconds: number;
+  };
+  apiPresign: {
+    expirySeconds: number;
   };
   configCache: {
     ttlMs: number;
@@ -122,6 +126,7 @@ export function buildConfig(env: Env): AppConfig {
       photoroom: env.PHOTOROOM_API_KEY,
       photoroomBasicHost: env.PHOTOROOM_BASIC_HOST,
       photoroomPlusHost: env.PHOTOROOM_PLUS_HOST,
+      claid: env.CLAID_API_KEY,
     },
     worker: {
       concurrency: env.WORKER_CONCURRENCY,
@@ -149,6 +154,9 @@ export function buildConfig(env: Env): AppConfig {
     },
     upload: {
       presignExpirationSeconds: env.PRESIGN_EXPIRATION_SECONDS,
+    },
+    apiPresign: {
+      expirySeconds: env.API_PRESIGN_EXPIRY_SECONDS,
     },
     configCache: {
       ttlMs: env.CONFIG_CACHE_TTL_MS,
