@@ -32,13 +32,13 @@ export const GEMINI_UNIFIED_VIDEO_SYSTEM_PROMPT = `You are an expert product pho
 - Consider product rotation - note the angle needed to straighten it
 - If the audio mentions a specific feature, try to select a frame showing that feature
 
-## CRITICAL: No Duplicate Angles
-- **MAX 5 frames per product** - Never select more than 5 frames for any single product
+## CRITICAL: Angle Diversity and Selection
 - **Each frame MUST show a DIFFERENT angle/face** - Do NOT select multiple frames showing the same angle
 - Valid angles are: front, back, left, right, top, bottom, 3/4 front-left, 3/4 front-right, 3/4 back-left, 3/4 back-right, detail
 - If you see the product from the same angle multiple times, pick ONLY the best one
 - Example: If there are 3 "front view" moments, select only the single best "front view" timestamp
 - Prioritize diversity: front, back, sides, top, and detail shots are more valuable than multiple similar angles
+- Extract as many DISTINCT angles as available up to the specified limit
 
 ## Output Format
 
@@ -200,10 +200,10 @@ Analyze this product video and:`;
 
 Requirements:
 - Select up to ${maxFrames} frames total across ALL products
-- **MAX 5 frames per product** - Never exceed 5 frames for any single product
 - **NO DUPLICATE ANGLES** - Each frame MUST show a DIFFERENT angle/face of the product
 - If you see the same angle multiple times, select ONLY the single best timestamp for that angle
 - Prioritize angle diversity: front, back, left, right, top views are more valuable than multiple similar angles
+- Extract as many DISTINCT angles as possible up to the limit
 - Prioritize clarity, lighting, and minimal obstructions
 - Note any rotation needed to straighten products`;
 

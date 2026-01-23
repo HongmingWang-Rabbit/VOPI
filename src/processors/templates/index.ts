@@ -262,6 +262,54 @@ export const unifiedVideoAnalyzerMinimalStack: StackTemplate = {
 };
 
 /**
+ * Full Gemini Stack
+ *
+ * Uses Gemini for BOTH video analysis AND image generation.
+ * This replaces the traditional pipeline of bg-remove, fill-holes, center,
+ * commercial-generate, and upscale with a single Gemini-based approach.
+ *
+ * Flow: Download → Unified Video Analyzer (8 frames) → Gemini Image Generate →
+ *       AI Quality Filter → Upload → Complete
+ *
+ * Benefits:
+ * - Simplest pipeline with fewest processors
+ * - No external APIs required (Claid, Stability)
+ * - Gemini handles background replacement and scene generation
+ * - AI quality filter removes bad images (hands, blurry, wrong product, background artifacts)
+ * - Generates 2 variants per selected angle (white-studio + lifestyle)
+ *
+ * Output: All images that pass quality filter (from 4 angles × 2 variants)
+ *
+ * Requirements:
+ * - GOOGLE_AI_API_KEY with access to gemini-2.0-flash-exp (image generation)
+ */
+export const fullGeminiStack: StackTemplate = {
+  id: 'full_gemini',
+  name: 'Full Gemini Stack',
+  description: 'Uses Gemini for video analysis AND image generation. No external APIs.',
+  steps: [
+    { processor: 'download' },
+    {
+      processor: 'gemini-unified-video-analyzer',
+      options: { maxFrames: 8 },  // Extract up to 8 frames for more angle context
+    },
+    {
+      processor: 'gemini-image-generate',
+      options: { maxAngles: 4 },  // Select 4 best angles, generate 2 variants each
+    },
+    {
+      processor: 'gemini-quality-filter',
+      options: {
+        minQualityScore: 60,  // Minimum quality score to keep
+        allowHands: false,    // Reject images with hands
+      },
+    },
+    { processor: 'upload-frames' },
+    { processor: 'complete-job' },
+  ],
+};
+
+/**
  * All available stack templates
  */
 export const stackTemplates: Record<string, StackTemplate> = {
@@ -275,6 +323,7 @@ export const stackTemplates: Record<string, StackTemplate> = {
   stability_bg_removal: stabilityBgRemovalStack,
   unified_video_analyzer: unifiedVideoAnalyzerStack,
   unified_video_analyzer_minimal: unifiedVideoAnalyzerMinimalStack,
+  full_gemini: fullGeminiStack,
 };
 
 /**

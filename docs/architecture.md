@@ -185,6 +185,16 @@ Single Gemini API call for combined audio + video analysis:
 
 Best for: Maximum efficiency, when you need both audio metadata and frame selection
 
+#### Full Gemini Stack (no external image APIs)
+Uses Gemini for both video analysis AND image generation:
+1. Download video
+2. Unified Gemini analysis (audio transcription + frame selection, extracts up to 8 frames)
+3. Gemini Image Generate (selects 4 best angles, generates 2 variants each: white-studio + lifestyle)
+4. Optional quality filtering (AI-powered filtering for product consistency)
+5. Upload to S3
+
+Best for: When you want to minimize external API dependencies or prefer Gemini's image generation quality
+
 **Note**: HEVC (H.265) videos from iPhones are automatically transcoded to H.264 since Gemini doesn't support HEVC. The transcoding is optimized for speed:
 - Uses `ultrafast` preset and 720p resolution for fast encoding
 - Attempts to copy audio stream (instant), falls back to AAC if incompatible
@@ -382,6 +392,8 @@ Any processor that outputs a data path can connect to any processor that require
 | save-frame-records | frames | frames.dbId | Persists to database |
 | complete-job | - | - | Finalizes job, uploads metadata.json |
 | gemini-unified-video-analyzer | video | images, frames, frames.classifications, transcript, product.metadata | Combined audio + video analysis |
+| gemini-image-generate | images, frames | images, frames.version | Native Gemini image generation (white-studio + lifestyle) |
+| gemini-quality-filter | images, frames | images | AI-powered quality filtering for product consistency |
 
 ### Stack Configuration
 
@@ -423,6 +435,7 @@ interface StackConfig {
 | `stability_bg_removal` | Uses Stability AI for background removal |
 | `full_product_analysis` | Audio-first approach with enhanced frame classification |
 | `audio_metadata_only` | Extract audio and generate metadata only |
+| `full_gemini` | Gemini for video analysis AND image generation (no external image APIs) |
 
 ### Stack Validation
 
@@ -446,6 +459,8 @@ Each processor has a configurable concurrency limit for parallel operations. Def
 | `PHOTOROOM_GENERATE` | 3 | External API, 2-4s per request |
 | `FFMPEG_EXTRACT` | 4 | I/O bound, balanced for disk throughput |
 | `GEMINI_CLASSIFY` | 2 | External API, 30-180s per batch |
+| `GEMINI_IMAGE_GENERATE` | 2 | External API, Gemini native image generation |
+| `GEMINI_QUALITY_FILTER` | 2 | External API, image quality evaluation |
 | `S3_UPLOAD` | 6 | Network I/O, connection reuse via keep-alive |
 
 **Override via processor options**:
@@ -466,6 +481,8 @@ VOPI_CONCURRENCY_S3_UPLOAD=10
 VOPI_CONCURRENCY_CLAID_BG_REMOVE=8
 VOPI_CONCURRENCY_STABILITY_COMMERCIAL=5
 VOPI_CONCURRENCY_STABILITY_UPSCALE=6
+VOPI_CONCURRENCY_GEMINI_IMAGE_GENERATE=3
+VOPI_CONCURRENCY_GEMINI_QUALITY_FILTER=3
 ```
 
 ### Key Files
@@ -585,7 +602,7 @@ VOPI includes a database-backed runtime configuration system that allows changin
 | Category | Keys | Description |
 |----------|------|-------------|
 | Pipeline | `pipeline.strategy`, `pipeline.fps`, `pipeline.batchSize` | Control processing behavior |
-| AI | `ai.geminiModel`, `ai.temperature`, `ai.topP` | Gemini model settings |
+| AI | `ai.geminiModel`, `ai.geminiVideoModel`, `ai.geminiImageModel`, `ai.temperature`, `ai.topP` | Gemini model settings |
 | Scoring | `scoring.motionAlpha`, `scoring.minTemporalGap` | Frame scoring parameters |
 | Commercial | `commercial.versions`, `commercial.aiCleanup` | Commercial image settings |
 | Gemini Video | `geminiVideo.fps`, `geminiVideo.maxFrames` | Video strategy settings |

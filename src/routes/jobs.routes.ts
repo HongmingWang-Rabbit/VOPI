@@ -22,6 +22,30 @@ const downloadPresignQuerySchema = z.object({
   expiresIn: z.coerce.number().int().min(60).max(86400).default(3600), // 1 minute to 24 hours
 });
 
+const updateProductMetadataSchema = z.object({
+  title: z.string().min(1).max(500).optional(),
+  description: z.string().max(10000).optional(),
+  shortDescription: z.string().max(500).optional(),
+  bulletPoints: z.array(z.string().max(500)).max(10).optional(),
+  brand: z.string().max(100).optional(),
+  category: z.string().max(100).optional(),
+  subcategory: z.string().max(100).optional(),
+  materials: z.array(z.string().max(100)).max(20).optional(),
+  color: z.string().max(50).optional(),
+  colors: z.array(z.string().max(50)).max(20).optional(),
+  size: z.string().max(50).optional(),
+  sizes: z.array(z.string().max(50)).max(20).optional(),
+  keywords: z.array(z.string().max(100)).max(50).optional(),
+  tags: z.array(z.string().max(50)).max(50).optional(),
+  price: z.number().min(0).optional(),
+  currency: z.string().length(3).optional(),
+  sku: z.string().max(100).optional(),
+  barcode: z.string().max(50).optional(),
+  condition: z.enum(['new', 'refurbished', 'used', 'open_box']).optional(),
+  careInstructions: z.array(z.string().max(500)).max(10).optional(),
+  warnings: z.array(z.string().max(500)).max(10).optional(),
+});
+
 /**
  * Jobs routes
  */
@@ -396,6 +420,161 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
         commercialImages,
         productMetadata,
       });
+    }
+  );
+
+  /**
+   * Get product metadata for a job
+   */
+  fastify.get(
+    '/jobs/:id/metadata',
+    {
+      schema: {
+        description: 'Get product metadata for a job',
+        tags: ['Jobs'],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              transcript: { type: 'string' },
+              product: { type: 'object' },
+              platforms: {
+                type: 'object',
+                properties: {
+                  shopify: { type: 'object' },
+                  amazon: { type: 'object' },
+                  ebay: { type: 'object' },
+                },
+              },
+              extractedAt: { type: 'string' },
+              audioDuration: { type: 'number' },
+              pipelineVersion: { type: 'string' },
+            },
+          },
+          404: {
+            type: 'object',
+            properties: {
+              error: { type: 'string' },
+              message: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = jobIdParamsSchema.parse(request.params);
+      const metadata = await jobsController.getProductMetadata(id);
+
+      if (!metadata) {
+        return reply.status(404).send({
+          error: 'NOT_FOUND',
+          message: 'Job has no product metadata. Metadata is only available for jobs processed with audio analysis.',
+        });
+      }
+
+      return reply.send(metadata);
+    }
+  );
+
+  /**
+   * Update product metadata for a job
+   * Allows users to edit AI-extracted metadata before e-commerce upload
+   */
+  fastify.patch(
+    '/jobs/:id/metadata',
+    {
+      schema: {
+        description: 'Update product metadata for a job. Users can edit AI-extracted fields before uploading to e-commerce platforms.',
+        tags: ['Jobs'],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+        body: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', minLength: 1, maxLength: 500 },
+            description: { type: 'string', maxLength: 10000 },
+            shortDescription: { type: 'string', maxLength: 500 },
+            bulletPoints: { type: 'array', items: { type: 'string', maxLength: 500 }, maxItems: 10 },
+            brand: { type: 'string', maxLength: 100 },
+            category: { type: 'string', maxLength: 100 },
+            subcategory: { type: 'string', maxLength: 100 },
+            materials: { type: 'array', items: { type: 'string', maxLength: 100 }, maxItems: 20 },
+            color: { type: 'string', maxLength: 50 },
+            colors: { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 20 },
+            size: { type: 'string', maxLength: 50 },
+            sizes: { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 20 },
+            keywords: { type: 'array', items: { type: 'string', maxLength: 100 }, maxItems: 50 },
+            tags: { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 50 },
+            price: { type: 'number', minimum: 0 },
+            currency: { type: 'string', minLength: 3, maxLength: 3 },
+            sku: { type: 'string', maxLength: 100 },
+            barcode: { type: 'string', maxLength: 50 },
+            condition: { type: 'string', enum: ['new', 'refurbished', 'used', 'open_box'] },
+            careInstructions: { type: 'array', items: { type: 'string', maxLength: 500 }, maxItems: 10 },
+            warnings: { type: 'array', items: { type: 'string', maxLength: 500 }, maxItems: 10 },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              transcript: { type: 'string' },
+              product: { type: 'object' },
+              platforms: {
+                type: 'object',
+                properties: {
+                  shopify: { type: 'object' },
+                  amazon: { type: 'object' },
+                  ebay: { type: 'object' },
+                },
+              },
+              extractedAt: { type: 'string' },
+              audioDuration: { type: 'number' },
+              pipelineVersion: { type: 'string' },
+            },
+          },
+          400: {
+            type: 'object',
+            properties: {
+              error: { type: 'string' },
+              message: { type: 'string' },
+            },
+          },
+          404: {
+            type: 'object',
+            properties: {
+              error: { type: 'string' },
+              message: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = jobIdParamsSchema.parse(request.params);
+      const updates = updateProductMetadataSchema.parse(request.body);
+
+      if (Object.keys(updates).length === 0) {
+        return reply.status(400).send({
+          error: 'BAD_REQUEST',
+          message: 'No fields to update. Provide at least one field to update.',
+        });
+      }
+
+      const updatedMetadata = await jobsController.updateProductMetadata(id, updates);
+      return reply.send(updatedMetadata);
     }
   );
 

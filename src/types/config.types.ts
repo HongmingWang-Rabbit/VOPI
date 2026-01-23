@@ -61,6 +61,12 @@ export interface GlobalConfigValue {
 }
 
 /**
+ * Default Gemini model for image generation
+ * Note: This model supports native image generation
+ */
+export const DEFAULT_GEMINI_IMAGE_MODEL = 'gemini-3-pro-image-preview';
+
+/**
  * Default global config keys with their types
  */
 export const GlobalConfigKey = {
@@ -72,6 +78,7 @@ export const GlobalConfigKey = {
   // AI settings
   AI_GEMINI_MODEL: 'ai.gemini_model',
   AI_GEMINI_VIDEO_MODEL: 'ai.gemini_video_model',
+  AI_GEMINI_IMAGE_MODEL: 'ai.gemini_image_model',
   AI_TEMPERATURE: 'ai.temperature',
   AI_TOP_P: 'ai.top_p',
 
@@ -157,6 +164,12 @@ export const DEFAULT_CONFIG: Record<string, GlobalConfigValue & { category: Conf
     category: ConfigCategory.AI,
     description: 'Gemini model for video understanding',
   },
+  [GlobalConfigKey.AI_GEMINI_IMAGE_MODEL]: {
+    value: DEFAULT_GEMINI_IMAGE_MODEL,
+    type: ConfigValueType.STRING,
+    category: ConfigCategory.AI,
+    description: 'Gemini model for image generation (e.g., gemini-3-pro-image-preview)',
+  },
   [GlobalConfigKey.AI_TEMPERATURE]: {
     value: 0.2,
     type: ConfigValueType.NUMBER,
@@ -228,6 +241,7 @@ export interface EffectiveConfig {
   batchSize: number;
   geminiModel: string;
   geminiVideoModel: string;
+  geminiImageModel: string;
   temperature: number;
   topP: number;
   motionAlpha: number;

@@ -108,14 +108,21 @@ Content-Type: video/mp4
 {
   "videoUrl": "https://s3.amazonaws.com/bucket/uploads/uuid.mp4",
   "config": {
-    "fps": 10,
-    "batchSize": 30,
-    "commercialVersions": ["transparent", "solid", "real", "creative"],
-    "aiCleanup": true
+    "stackId": "unified_video_analyzer"
   },
   "callbackUrl": "https://your-server.com/webhook"
 }
 ```
+
+**Available Pipeline Templates (`stackId`):**
+
+| stackId | Description |
+|---------|-------------|
+| `classic` | Extract frames, score, classify, Stability commercial images |
+| `gemini_video` | Gemini video analysis, Stability commercial images |
+| `unified_video_analyzer` | Single Gemini call for audio+video, Stability images (recommended) |
+| `full_gemini` | Gemini for everything including image generation (no external APIs) |
+| `minimal` | Extract and upload frames only, no commercial images |
 
 **Response:**
 ```json
@@ -181,7 +188,49 @@ Get presigned URLs for accessing job assets. Required because S3 bucket is priva
 }
 ```
 
-### 6. Get Full Job Details (Optional)
+### 6. Get Product Metadata
+
+**Endpoint:** `GET /api/v1/jobs/:id/metadata`
+
+Get AI-extracted product information for user review.
+
+**Response:**
+```json
+{
+  "transcript": "This is a beautiful handmade ceramic vase...",
+  "product": {
+    "title": "Handmade Ceramic Vase",
+    "description": "Beautiful handcrafted ceramic vase...",
+    "bulletPoints": ["Handcrafted", "Food-safe glaze"],
+    "confidence": { "overall": 85, "title": 90, "description": 80 }
+  },
+  "platforms": {
+    "shopify": { "title": "...", "descriptionHtml": "..." },
+    "amazon": { "item_name": "...", "bullet_point": [...] },
+    "ebay": { "title": "...", "aspects": {...} }
+  }
+}
+```
+
+### 7. Update Product Metadata
+
+**Endpoint:** `PATCH /api/v1/jobs/:id/metadata`
+
+Update metadata with user edits before e-commerce upload.
+
+**Request:**
+```json
+{
+  "title": "User Edited Title",
+  "description": "User edited description...",
+  "bulletPoints": ["Updated feature 1", "Updated feature 2"],
+  "price": 29.99
+}
+```
+
+**Response:** Returns full updated `productMetadata` with regenerated platform formats.
+
+### 8. Get Full Job Details (Optional)
 
 **Endpoint:** `GET /api/v1/jobs/:id`
 
@@ -206,12 +255,25 @@ Returns full job details including config, progress, and result metadata.
 
 ## Commercial Image Versions
 
+Variants depend on the pipeline used:
+
+### Stability Pipelines (`classic`, `gemini_video`, `unified_video_analyzer`)
+
 | Version | Description |
 |---------|-------------|
 | `transparent` | PNG with transparent background |
 | `solid` | AI-recommended solid color background |
 | `real` | Realistic lifestyle setting |
 | `creative` | Artistic/promotional style |
+
+### Full Gemini Pipeline (`full_gemini`)
+
+| Version | Description |
+|---------|-------------|
+| `white-studio` | Clean white background with professional lighting |
+| `lifestyle` | Natural lifestyle setting (bathroom, vanity, etc.) |
+
+> **Note:** The `full_gemini` pipeline uses AI quality filtering, so fewer images may be returned as low-quality results are automatically removed.
 
 ## Supported Video Formats
 

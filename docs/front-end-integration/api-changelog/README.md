@@ -6,6 +6,7 @@ This folder contains documentation for API updates that affect front-end/mobile 
 
 | Date | Version | Title | Breaking |
 |------|---------|-------|----------|
+| [2025-01-23](./2025-01-23-gemini-image-generation.md) | 1.2.0 | Gemini Image Generation & Product Metadata | No |
 | [2025-01-20](./2025-01-20-private-bucket-presigned-urls.md) | 1.1.0 | Private S3 Bucket & Presigned Download URLs | Yes |
 
 ## How to Use

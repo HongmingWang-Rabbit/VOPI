@@ -10,6 +10,7 @@ import { getConfig } from '../config/index.js';
 import {
   DEFAULT_CONFIG,
   DEFAULT_GEMINI_MODEL,
+  DEFAULT_GEMINI_IMAGE_MODEL,
   GlobalConfigKey,
   PipelineStrategy,
   ConfigCategory,
@@ -111,6 +112,7 @@ class GlobalConfigService {
       batchSize: getValue(GlobalConfigKey.PIPELINE_BATCH_SIZE, 30),
       geminiModel: getValue(GlobalConfigKey.AI_GEMINI_MODEL, DEFAULT_GEMINI_MODEL),
       geminiVideoModel: getValue(GlobalConfigKey.AI_GEMINI_VIDEO_MODEL, DEFAULT_GEMINI_MODEL),
+      geminiImageModel: getValue(GlobalConfigKey.AI_GEMINI_IMAGE_MODEL, DEFAULT_GEMINI_IMAGE_MODEL),
       temperature: getValue(GlobalConfigKey.AI_TEMPERATURE, 0.2),
       topP: getValue(GlobalConfigKey.AI_TOP_P, 0.8),
       motionAlpha: getValue(GlobalConfigKey.SCORING_MOTION_ALPHA, 0.3),

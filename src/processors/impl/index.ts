@@ -33,6 +33,8 @@ export { geminiClassifyProcessor } from './gemini/gemini-classify.js';
 export { geminiVideoAnalysisProcessor } from './gemini/gemini-video-analysis.js';
 export { geminiAudioAnalysisProcessor } from './gemini/gemini-audio-analysis.js';
 export { geminiUnifiedVideoAnalyzerProcessor } from './gemini/gemini-unified-video-analyzer.js';
+export { geminiImageGenerateProcessor } from './gemini/gemini-image-generate.js';
+export { geminiQualityFilterProcessor } from './gemini/gemini-quality-filter.js';
 
 // Photoroom API processors
 export { photoroomBgRemoveProcessor } from './photoroom/photoroom-bg-remove.js';
@@ -69,6 +71,8 @@ import { geminiClassifyProcessor } from './gemini/gemini-classify.js';
 import { geminiVideoAnalysisProcessor } from './gemini/gemini-video-analysis.js';
 import { geminiAudioAnalysisProcessor } from './gemini/gemini-audio-analysis.js';
 import { geminiUnifiedVideoAnalyzerProcessor } from './gemini/gemini-unified-video-analyzer.js';
+import { geminiImageGenerateProcessor } from './gemini/gemini-image-generate.js';
+import { geminiQualityFilterProcessor } from './gemini/gemini-quality-filter.js';
 import { photoroomBgRemoveProcessor } from './photoroom/photoroom-bg-remove.js';
 import { extractProductsProcessor } from './photoroom/extract-products.js';
 import { generateCommercialProcessor } from './photoroom/generate-commercial.js';
@@ -101,6 +105,8 @@ export const allProcessors: Processor[] = [
   geminiVideoAnalysisProcessor,
   geminiAudioAnalysisProcessor,
   geminiUnifiedVideoAnalyzerProcessor,
+  geminiImageGenerateProcessor,
+  geminiQualityFilterProcessor,
   // Photoroom
   photoroomBgRemoveProcessor,
   extractProductsProcessor,

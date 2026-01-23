@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VOPI (Video Object Processing Infrastructure) is a TypeScript backend service that extracts high-quality product photography frames from videos using frame scoring algorithms and AI classification (Gemini 2.0). It includes commercial image generation via Stability AI (with Photoroom as fallback).
+VOPI (Video Object Processing Infrastructure) is a TypeScript backend service that extracts high-quality product photography frames from videos using frame scoring algorithms and AI classification (Gemini 2.0). It includes commercial image generation via Stability AI, Gemini native image generation, or Photoroom (fallback).
 
 ## Tech Stack
 
@@ -85,6 +85,18 @@ VOPI supports two pipeline strategies, controlled by `pipeline.strategy` global 
 7. **Generate** - Commercial image generation via Stability AI
 8. **Upload** - Store results to S3, persist to database
 
+**Full Gemini Stack** (no external image APIs):
+1. **Download** - Fetch video from URL
+2. **Unified Analysis** - Single Gemini call for audio transcription + video frame selection (extracts up to 8 frames)
+3. **Gemini Image Generate** - Uses Gemini native image generation for background removal + commercial variants
+   - Selects 4 best angles from extracted frames
+   - Generates 2 variants per angle: `white-studio` (clean background) and `lifestyle` (contextual scene)
+   - Uses product metadata from audio analysis for lifestyle scene generation
+4. **Quality Filter** (optional) - AI-powered filtering to remove images that don't match the original product
+5. **Upload** - Store results to S3, persist to database
+
+This strategy eliminates dependency on Stability AI, Claid.ai, and Photoroom APIs by using Gemini's native image generation capabilities.
+
 The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) process queued jobs independently. This separation allows horizontal scaling of workers.
 
 ### Audio Analysis Pipeline (Optional)
@@ -105,7 +117,7 @@ The pipeline is built on a modular processor stack architecture using a unified 
 - **Processors** declare their IO contracts using these paths
 - **Stacks** compose processors into pipelines with validated data flow
 - **Swapping** allows replacing processors with compatible IO contracts (e.g., `photoroom-bg-remove` ↔ `claid-bg-remove`)
-- **Templates** provide pre-defined stacks: `classic`, `gemini_video`, `minimal`, `frames_only`, `custom_bg_removal`, `unified_video_analyzer`, `stability_bg_removal`
+- **Templates** provide pre-defined stacks: `classic`, `gemini_video`, `minimal`, `frames_only`, `custom_bg_removal`, `unified_video_analyzer`, `stability_bg_removal`, `full_gemini`
 - **Concurrency** is centralized in `src/processors/concurrency.ts` with documented defaults per processor type, overridable via `VOPI_CONCURRENCY_*` env vars
 
 See `src/processors/` for implementation details.
@@ -113,7 +125,7 @@ See `src/processors/` for implementation details.
 ### Key Directories
 - `src/processors/` - Composable processor stack architecture (registry, runner, implementations)
 - `src/services/` - Core business logic (one service per domain: video, scoring, gemini, photoroom, storage)
-- `src/providers/` - External service integrations (Gemini video analysis, Stability AI, Claid.ai)
+- `src/providers/` - External service integrations (Gemini video/image, Stability AI, Claid.ai)
 - `src/providers/utils/` - Shared provider utilities (Stability API, Gemini utils)
 - `src/routes/` + `src/controllers/` - HTTP layer
 - `src/workers/` - BullMQ job processors
@@ -121,7 +133,7 @@ See `src/processors/` for implementation details.
 - `src/cli/` - CLI commands (API key management, pipeline testing)
 - `src/templates/` - Gemini prompts and output schemas
 - `src/types/` - Type definitions including `product-metadata.types.ts` for e-commerce metadata
-- `src/utils/` - Shared utilities (logging, errors, URL validation, S3 URL parsing, MIME types, parallel processing)
+- `src/utils/` - Shared utilities (logging, errors, URL validation, S3 URL parsing, MIME types, parallel processing, image utils, frame selection)
 - `src/smartFrameExtractor/` - Standalone CLI tool (JavaScript)
 
 ### Database Relationships
@@ -195,9 +207,10 @@ Runtime configuration is stored in PostgreSQL and cached in memory:
 - **Categories**: `pipeline.*`, `ai.*`, `scoring.*`, `commercial.*`, `geminiVideo.*`
 
 Key config values:
-- `pipeline.strategy`: `classic` or `gemini_video`
+- `pipeline.strategy`: `classic`, `gemini_video`, `unified_video_analyzer`, or `full_gemini`
 - `ai.geminiModel`: Model for frame classification
 - `ai.geminiVideoModel`: Model for video analysis
+- `ai.geminiImageModel`: Model for native image generation (default: `gemini-3-pro-image-preview`)
 - `scoring.motionAlpha`: Motion penalty weight (0-1)
 
 ## Frame Scoring Algorithm

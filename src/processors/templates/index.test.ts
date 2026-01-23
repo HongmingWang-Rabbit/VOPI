@@ -220,7 +220,8 @@ describe('Stack Templates', () => {
       expect(ids).toContain('stability_bg_removal');
       expect(ids).toContain('unified_video_analyzer');
       expect(ids).toContain('unified_video_analyzer_minimal');
-      expect(ids).toHaveLength(10);
+      expect(ids).toContain('full_gemini');
+      expect(ids).toHaveLength(11);
     });
   });
 

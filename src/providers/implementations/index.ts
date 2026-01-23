@@ -17,3 +17,5 @@ export { FFmpegVideoExtractionProvider, ffmpegVideoExtractionProvider } from './
 export { StabilityBackgroundRemovalProvider, stabilityBackgroundRemovalProvider } from './stability-background-removal.provider.js';
 export { StabilityUpscaleProvider, stabilityUpscaleProvider } from './stability-upscale.provider.js';
 export { StabilityCommercialProvider, stabilityCommercialProvider } from './stability-commercial.provider.js';
+export { GeminiImageGenerateProviderImpl, geminiImageGenerateProvider } from './gemini-image-generate.provider.js';
+export { GeminiQualityFilterProviderImpl, geminiQualityFilterProvider } from './gemini-quality-filter.provider.js';

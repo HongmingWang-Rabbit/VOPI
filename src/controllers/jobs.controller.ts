@@ -12,6 +12,7 @@ import {
   type JobProgress,
 } from '../types/job.types.js';
 import type { Job, NewJob, ApiKey } from '../db/schema.js';
+import type { MetadataFileOutput, ProductMetadata } from '../types/product-metadata.types.js';
 
 const logger = createChildLogger({ service: 'jobs-controller' });
 
@@ -230,6 +231,94 @@ export class JobsController {
     await db.delete(schema.jobs).where(eq(schema.jobs.id, jobId));
 
     logger.info({ jobId }, 'Job deleted');
+  }
+
+  /**
+   * Update product metadata for a completed job
+   * Allows users to edit AI-extracted metadata before e-commerce upload
+   */
+  async updateProductMetadata(
+    jobId: string,
+    updates: Partial<ProductMetadata>
+  ): Promise<MetadataFileOutput> {
+    const db = getDatabase();
+
+    // Get existing job
+    const [job] = await db
+      .select()
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      throw new NotFoundError(`Job ${jobId} not found`);
+    }
+
+    if (!job.productMetadata) {
+      throw new BadRequestError(
+        'Job has no product metadata. Metadata is only available for jobs processed with audio analysis.'
+      );
+    }
+
+    // Merge updates into existing product metadata
+    const existingMetadata = job.productMetadata as MetadataFileOutput;
+    const updatedProduct: ProductMetadata = {
+      ...existingMetadata.product,
+      ...updates,
+      // Preserve confidence but mark as user-edited
+      confidence: {
+        ...existingMetadata.product.confidence,
+        // If user edited, we can assume high confidence
+        overall: 100,
+        title: updates.title ? 100 : existingMetadata.product.confidence.title,
+        description: updates.description ? 100 : existingMetadata.product.confidence.description,
+      },
+    };
+
+    // Re-format for platforms with updated data
+    const { formatForShopify, formatForAmazon, formatForEbay } = await import('../types/product-metadata.types.js');
+
+    const updatedMetadata: MetadataFileOutput = {
+      ...existingMetadata,
+      product: updatedProduct,
+      platforms: {
+        shopify: formatForShopify(updatedProduct),
+        amazon: formatForAmazon(updatedProduct),
+        ebay: formatForEbay(updatedProduct),
+      },
+    };
+
+    // Update in database
+    await db
+      .update(schema.jobs)
+      .set({
+        productMetadata: updatedMetadata,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.jobs.id, jobId));
+
+    logger.info({ jobId, updatedFields: Object.keys(updates) }, 'Product metadata updated');
+
+    return updatedMetadata;
+  }
+
+  /**
+   * Get product metadata for a job
+   */
+  async getProductMetadata(jobId: string): Promise<MetadataFileOutput | null> {
+    const db = getDatabase();
+
+    const [job] = await db
+      .select({ productMetadata: schema.jobs.productMetadata })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      throw new NotFoundError(`Job ${jobId} not found`);
+    }
+
+    return job.productMetadata;
   }
 }
 

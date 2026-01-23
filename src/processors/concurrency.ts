@@ -14,6 +14,7 @@
  * - VOPI_CONCURRENCY_PHOTOROOM_GENERATE
  * - VOPI_CONCURRENCY_FFMPEG_EXTRACT
  * - VOPI_CONCURRENCY_GEMINI_CLASSIFY
+ * - VOPI_CONCURRENCY_GEMINI_IMAGE_GENERATE
  * - VOPI_CONCURRENCY_S3_UPLOAD
  */
 
@@ -105,6 +106,14 @@ export const PROCESSOR_CONCURRENCY = {
    * - Low concurrency to avoid quota exhaustion
    */
   GEMINI_CLASSIFY: getEnvConcurrency('GEMINI_CLASSIFY', 2),
+
+  /**
+   * Gemini API image generation
+   * - External API with rate limits
+   * - Each image generation takes 10-30 seconds
+   * - Conservative concurrency for API limits
+   */
+  GEMINI_IMAGE_GENERATE: getEnvConcurrency('GEMINI_IMAGE_GENERATE', 2),
 
   /**
    * S3 file uploads

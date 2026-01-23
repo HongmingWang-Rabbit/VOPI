@@ -10,6 +10,8 @@ The `/src/services/` directory contains the core business logic modules. Each se
 | **Frame Scoring** | `frame-scoring.service.ts` | Quality analysis and candidate selection |
 | **Gemini** | `gemini.service.ts` | AI classification via Google Gemini |
 | **Gemini Audio** | `gemini-audio-analysis.provider.ts` | Audio transcription and metadata extraction |
+| **Gemini Image** | `gemini-image-generate.provider.ts` | Native Gemini image generation |
+| **Gemini Quality Filter** | `gemini-quality-filter.provider.ts` | AI-powered image quality filtering |
 | **Photoroom** | `photoroom.service.ts` | Background removal and image generation |
 | **Stability** | `stability.service.ts` | AI inpainting, upscaling, and commercial image generation |
 | **Storage** | `storage.service.ts` | S3/MinIO file operations |
@@ -794,11 +796,12 @@ Get the complete effective configuration object with all settings typed:
 
 ```typescript
 interface EffectiveConfig {
-  pipelineStrategy: PipelineStrategy;  // 'classic' | 'gemini_video'
+  pipelineStrategy: PipelineStrategy;  // 'classic' | 'gemini_video' | 'unified_video_analyzer' | 'full_gemini'
   fps: number;
   batchSize: number;
   geminiModel: string;
   geminiVideoModel: string;
+  geminiImageModel: string;       // Model for native image generation
   temperature: number;
   topP: number;
   motionAlpha: number;
@@ -808,6 +811,7 @@ interface EffectiveConfig {
   aiCleanup: boolean;
   geminiVideoFps: number;
   geminiVideoMaxFrames: number;
+  debugEnabled: boolean;
 }
 ```
 
@@ -840,6 +844,7 @@ Clear the in-memory cache.
 | `pipeline.batchSize` | number | 30 | Frames per Gemini batch |
 | `ai.geminiModel` | string | `gemini-2.0-flash` | Model for classification |
 | `ai.geminiVideoModel` | string | `gemini-2.0-flash` | Model for video analysis |
+| `ai.geminiImageModel` | string | `gemini-3-pro-image-preview` | Model for image generation |
 | `ai.temperature` | number | 0.2 | AI temperature |
 | `ai.topP` | number | 0.8 | AI top-p |
 | `scoring.motionAlpha` | number | 0.3 | Motion penalty weight |
@@ -1437,3 +1442,239 @@ With a single unified step that:
 ### Configuration
 
 Uses the same Gemini configuration as other video analysis providers.
+
+---
+
+## Gemini Image Generation Provider
+
+**File**: `src/providers/implementations/gemini-image-generate.provider.ts`
+
+Uses Gemini's native image generation capabilities to create commercial product images directly from raw video frames.
+
+### Purpose
+
+1. **Background Replacement**: Generate clean backgrounds without external APIs
+2. **Variant Generation**: Create white-studio and lifestyle variants
+3. **Product Context**: Use audio metadata to inform lifestyle scene generation
+4. **Reference Frames**: Use other frames as product reference for consistency
+
+### Methods
+
+#### `generateVariant(imagePath, outputPath, options): Promise<GeminiImageGenerateResult>`
+
+Generate a single image variant using Gemini native image generation.
+
+**Options**:
+```typescript
+interface GeminiImageGenerateOptions {
+  variant: 'white-studio' | 'lifestyle';
+  productTitle?: string;
+  productDescription?: string;
+  productCategory?: string;
+  referenceFramePaths?: string[];  // Other frames for product context
+}
+```
+
+**Returns**:
+```typescript
+interface GeminiImageGenerateResult {
+  success: boolean;
+  variant: GeminiImageVariant;
+  outputPath?: string;
+  size?: number;
+  error?: string;
+}
+```
+
+#### `generateAllVariants(imagePath, outputDir, frameId, options): Promise<GeminiImageGenerateAllResult>`
+
+Generate all variants for a single frame.
+
+**Returns**:
+```typescript
+interface GeminiImageGenerateAllResult {
+  frameId: string;
+  variants: Record<GeminiImageVariant, GeminiImageGenerateResult>;
+  successCount: number;
+  errorCount: number;
+}
+```
+
+### Variant Types
+
+| Variant | Description | Prompt Focus |
+|---------|-------------|--------------|
+| `white-studio` | Clean white background | Professional e-commerce lighting, soft shadows |
+| `lifestyle` | Contextual scene | Natural environment matching product category |
+
+### Reference Frames
+
+When `referenceFramePaths` is provided:
+- Up to 4 reference frames are sent (MAX_REFERENCE_FRAMES limit)
+- Frames are sent before the target frame for product context
+- Helps Gemini understand what the product should look like
+
+### Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `ai.geminiImageModel` | `gemini-3-pro-image-preview` | Model for image generation |
+
+### Processor
+
+**File**: `src/processors/impl/gemini/gemini-image-generate.ts`
+
+The processor:
+1. Selects 4 best angles from available frames (based on quality scores)
+2. Groups frames by angle to avoid duplicates
+3. Generates 2 variants per angle (white-studio + lifestyle)
+4. Processes in parallel with concurrency limits
+5. Returns up to 8 commercial images (4 angles × 2 variants)
+
+**IO Contract**:
+```typescript
+io: {
+  requires: ['images', 'frames'],
+  produces: ['images', 'frames.version'],
+}
+```
+
+---
+
+## Gemini Quality Filter Provider
+
+**File**: `src/providers/implementations/gemini-quality-filter.provider.ts`
+
+AI-powered quality filtering to remove generated images that don't match the original product.
+
+### Purpose
+
+1. **Product Consistency**: Filter out images where AI changed the product
+2. **Reference Comparison**: Compare generated images against original frames
+3. **Batch Processing**: Evaluate multiple images efficiently
+
+### Methods
+
+#### `evaluateImages(images, options): Promise<QualityFilterResult>`
+
+Evaluate a batch of images for product consistency.
+
+**Parameters**:
+```typescript
+interface QualityFilterImage {
+  imageId: string;     // Unique ID (frameId::version format)
+  imagePath: string;   // Path to generated image
+}
+
+interface QualityFilterOptions {
+  referenceImagePaths?: string[];  // Original product frames for comparison
+}
+```
+
+**Returns**:
+```typescript
+interface QualityFilterResult {
+  evaluations: Array<{
+    imageId: string;
+    keep: boolean;         // Whether to keep the image
+    confidence: number;    // 0-100 confidence score
+    reason: string;        // Explanation
+    issues?: string[];     // Detected problems
+  }>;
+  keptCount: number;
+  filteredCount: number;
+  averageConfidence: number;
+}
+```
+
+### Evaluation Criteria
+
+The filter checks for:
+- **Product shape/proportions**: Does the product match the original?
+- **Color accuracy**: Are colors consistent?
+- **Key features**: Are distinguishing features preserved?
+- **Missing elements**: Were parts of the product removed?
+- **Added elements**: Were things added that shouldn't be there?
+
+### Processor
+
+**File**: `src/processors/impl/gemini/gemini-quality-filter.ts`
+
+The processor:
+1. Loads generated commercial images from data
+2. Groups images by frameId for efficient evaluation
+3. Calls Gemini to evaluate each batch
+4. Updates database records with S3 URLs for kept images
+5. Moves filtered images to `agent-filtered/` folder
+
+**IO Contract**:
+```typescript
+io: {
+  requires: ['images', 'frames'],
+  produces: ['images'],
+}
+```
+
+### Configuration
+
+| Setting | Description |
+|---------|-------------|
+| `VOPI_CONCURRENCY_GEMINI_QUALITY_FILTER` | Parallel evaluation limit (default: 2) |
+
+---
+
+## Shared Image Utilities
+
+**File**: `src/utils/image-utils.ts`
+
+Shared utilities for image processing across providers.
+
+### Functions
+
+#### `getImageMimeType(filePath): ImageMimeType`
+
+Get MIME type from file extension.
+
+```typescript
+type ImageMimeType = 'image/png' | 'image/jpeg' | 'image/webp';
+```
+
+#### `limitReferenceFrames(paths, max): string[]`
+
+Limit reference frames to avoid API token limits.
+
+```typescript
+const MAX_REFERENCE_FRAMES = 4;
+
+// Example
+const limited = limitReferenceFrames(allFrames, MAX_REFERENCE_FRAMES);
+// Returns first 4 frames
+```
+
+---
+
+## Frame Selection Utilities
+
+**File**: `src/utils/frame-selection.ts`
+
+Utilities for selecting optimal frames from a set.
+
+### Functions
+
+#### `selectBestAngles(frames, maxAngles): FrameMetadata[]`
+
+Select the best frames representing distinct angles.
+
+**Algorithm**:
+1. Group frames by `angleEstimate` field
+2. Sort each group by quality score (descending)
+3. Select best frame from each angle
+4. Return up to `maxAngles` frames
+
+#### `getFrameScore(frame): number`
+
+Get the quality score for a frame, handling missing scores.
+
+#### `groupFramesByAngle(frames): Map<string, FrameMetadata[]>`
+
+Group frames by their angle estimate for analysis.
