@@ -96,6 +96,14 @@ export const geminiClassifyProcessor: Processor = {
           { batchIdx, batchSize: batch.length }
         );
 
+        // Extract product category from first detected product (for downstream processors)
+        const detectedCategory = batchResult.products_detected?.[0]?.product_category;
+        if (detectedCategory && !data.productType) {
+          // Store for use by downstream processors like claid-bg-remove
+          (data as Record<string, unknown>).productType = detectedCategory;
+          logger.info({ productCategory: detectedCategory }, 'Product category detected by Gemini');
+        }
+
         const batchWinners = geminiService.getRecommendedFrames(batchResult, scoredBatch);
 
         for (const winner of batchWinners) {
@@ -158,15 +166,26 @@ export const geminiClassifyProcessor: Processor = {
       };
     }
 
-    logger.info({ jobId, variantsFound: recommendedFrames.length, failedBatches }, 'Classification complete');
+    // Get product type (either from Gemini detection or existing data)
+    const productType = (data as Record<string, unknown>).productType as string | undefined;
+
+    logger.info({
+      jobId,
+      variantsFound: recommendedFrames.length,
+      failedBatches,
+      productType: productType || '(not detected)',
+    }, 'Classification complete');
 
     return {
       success: true,
       data: {
         recommendedFrames,
+        // Pass productType to downstream processors (e.g., claid-bg-remove)
+        productType,
         metadata: {
           ...data.metadata,
           variantsDiscovered: recommendedFrames.length,
+          productType,
         },
       },
     };

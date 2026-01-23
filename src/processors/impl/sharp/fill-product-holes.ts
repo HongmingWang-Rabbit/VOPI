@@ -2,42 +2,206 @@
  * Fill Product Holes Processor
  *
  * Detects and fills transparent holes/gaps in product images after background removal.
- * Uses flood-fill algorithm to distinguish between intentional transparent background
+ * Uses convex hull algorithm to distinguish between intentional transparent background
  * and holes left by obstruction removal (e.g., hands covering the product).
  *
  * Algorithm:
  * 1. Extract alpha channel from PNG image
- * 2. Flood-fill from image edges to mark all "background" transparent pixels
- * 3. Any remaining transparent pixels are "holes" inside/along the product
- * 4. Use Photoroom's inpainting to fill detected holes
+ * 2. Compute convex hull of the product boundary
+ * 3. Any transparent pixels INSIDE the convex hull are "holes"
+ * 4. Use Stability AI's inpainting model to fill the holes
+ *
+ * Optimizations:
+ * - Scanline algorithm for efficient convex polygon filling
+ * - Boundary point sampling for large images
  */
 
 import path from 'path';
 import sharp from 'sharp';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
-import { photoroomService } from '../../../services/photoroom.service.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
+import { stabilityService } from '../../../services/stability.service.js';
+import { safeUnlink } from '../../../utils/fs.js';
 
 const logger = createChildLogger({ service: 'processor:fill-product-holes' });
 
+// =============================================================================
+// Constants
+// =============================================================================
+
+/** Target number of boundary points to sample (controls computation vs accuracy tradeoff) */
+const BOUNDARY_SAMPLE_TARGET = 500;
+
+// =============================================================================
+// Geometry Helpers (exported for testing)
+// =============================================================================
+
 /**
- * Detect holes in an image using flood-fill from edges
+ * Point type for convex hull computation
+ */
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/**
+ * Compute cross product of vectors OA and OB where O is origin
+ * Returns positive if counter-clockwise, negative if clockwise, 0 if collinear
+ */
+export function crossProduct(o: Point, a: Point, b: Point): number {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+/**
+ * Compute convex hull using Andrew's monotone chain algorithm
+ * Returns points in counter-clockwise order
  *
+ * Note: This function does NOT mutate the input array
+ */
+export function computeConvexHull(points: Point[]): Point[] {
+  if (points.length < 3) return [...points];
+
+  // Clone and sort points by x, then by y (avoid mutating input)
+  const sorted = [...points].sort((a, b) => a.x === b.x ? a.y - b.y : a.x - b.x);
+
+  // Build lower hull
+  const lower: Point[] = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && crossProduct(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+
+  // Build upper hull
+  const upper: Point[] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i];
+    while (upper.length >= 2 && crossProduct(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+
+  // Remove last point of each half because it's repeated
+  lower.pop();
+  upper.pop();
+
+  return lower.concat(upper);
+}
+
+/**
+ * Compute X intersections of a horizontal scanline with convex hull edges
+ * Returns sorted array of X coordinates where scanline crosses hull edges
+ */
+export function getHullScanlineIntersections(hull: Point[], y: number): number[] {
+  const intersections: number[] = [];
+
+  for (let i = 0; i < hull.length; i++) {
+    const p1 = hull[i];
+    const p2 = hull[(i + 1) % hull.length];
+
+    // Check if this edge crosses the scanline
+    const minY = Math.min(p1.y, p2.y);
+    const maxY = Math.max(p1.y, p2.y);
+
+    if (y >= minY && y < maxY) {
+      // Calculate X intersection using linear interpolation
+      if (p2.y !== p1.y) {
+        const t = (y - p1.y) / (p2.y - p1.y);
+        const x = p1.x + t * (p2.x - p1.x);
+        intersections.push(x);
+      }
+    }
+  }
+
+  // Sort intersections for scanline filling
+  intersections.sort((a, b) => a - b);
+  return intersections;
+}
+
+/**
+ * Fill convex hull interior using scanline algorithm
+ * Much more efficient than point-by-point testing: O(height * edges) vs O(pixels * edges)
+ *
+ * @param hull - Convex hull vertices
  * @param width - Image width
  * @param height - Image height
- * @param alphaData - Alpha channel data (0-255 per pixel)
- * @param alphaThreshold - Threshold below which pixels are considered transparent
- * @returns Array of hole pixel indices and total hole count
+ * @returns Uint8Array where 255 = inside hull, 0 = outside
  */
-function detectHoles(
-  width: number,
-  height: number,
-  alphaData: Uint8Array,
+export function fillConvexHullScanline(hull: Point[], width: number, height: number): Uint8Array {
+  const filled = new Uint8Array(width * height);
+
+  if (hull.length < 3) return filled;
+
+  // Find bounding box
+  let minY = Infinity, maxY = -Infinity;
+  for (const p of hull) {
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+
+  // Process each scanline
+  for (let y = Math.max(0, Math.floor(minY)); y <= Math.min(height - 1, Math.ceil(maxY)); y++) {
+    const intersections = getHullScanlineIntersections(hull, y);
+
+    // Fill between pairs of intersections
+    for (let i = 0; i < intersections.length - 1; i += 2) {
+      const xStart = Math.max(0, Math.ceil(intersections[i]));
+      const xEnd = Math.min(width - 1, Math.floor(intersections[i + 1]));
+
+      for (let x = xStart; x <= xEnd; x++) {
+        filled[y * width + x] = 255;
+      }
+    }
+  }
+
+  return filled;
+}
+
+/**
+ * Detect holes in an image using convex hull approach
+ *
+ * Algorithm:
+ * 1. Extract alpha channel from PNG image
+ * 2. Sample boundary points of the opaque region
+ * 3. Compute convex hull of the product
+ * 4. Any transparent pixel INSIDE the convex hull is a hole
+ *
+ * This correctly detects edge gaps (like hand cutouts) as holes because
+ * they fall inside the convex hull of the product.
+ *
+ * @param imagePath - Path to the PNG image
+ * @param alphaThreshold - Threshold below which pixels are considered transparent
+ * @returns Hole statistics and a mask buffer (255 = hole, 0 = not hole)
+ */
+async function detectHoles(
+  imagePath: string,
   alphaThreshold: number
-): { holeCount: number; totalPixels: number; opaquePixels: number } {
+): Promise<{ holeCount: number; totalPixels: number; opaquePixels: number; holeMask: Uint8Array; width: number; height: number }> {
+  // Load image
+  const image = sharp(imagePath);
+  const metadata = await image.metadata();
+  const { width, height } = metadata;
+
+  if (!width || !height) {
+    throw new Error('Could not get image dimensions');
+  }
+
   const totalPixels = width * height;
-  const visited = new Uint8Array(totalPixels);
+
+  // Extract alpha channel as raw data
+  const { data: rawData } = await image
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  // Extract alpha channel
+  const alphaData = new Uint8Array(totalPixels);
+  for (let i = 0; i < totalPixels; i++) {
+    alphaData[i] = rawData[i * 4 + 3];
+  }
 
   // Helper to check if pixel is transparent
   const isTransparent = (idx: number): boolean => alphaData[idx] <= alphaThreshold;
@@ -45,78 +209,96 @@ function detectHoles(
   // Helper to get pixel index
   const getIdx = (y: number, x: number): number => y * width + x;
 
-  // BFS queue for flood-fill
-  const queue: number[] = [];
+  // Sample boundary points (pixels that are opaque and adjacent to transparent)
+  // Sample every Nth pixel to reduce computation for large images
+  const boundaryPoints: Point[] = [];
+  const sampleRate = Math.max(1, Math.floor(Math.min(width, height) / BOUNDARY_SAMPLE_TARGET));
 
-  // Start flood-fill from all transparent edge pixels
-  // Top and bottom edges
-  for (let x = 0; x < width; x++) {
-    const topIdx = getIdx(0, x);
-    const bottomIdx = getIdx(height - 1, x);
-    if (isTransparent(topIdx) && !visited[topIdx]) {
-      queue.push(topIdx);
-      visited[topIdx] = 1;
-    }
-    if (isTransparent(bottomIdx) && !visited[bottomIdx]) {
-      queue.push(bottomIdx);
-      visited[bottomIdx] = 1;
-    }
-  }
+  for (let y = 0; y < height; y += sampleRate) {
+    for (let x = 0; x < width; x += sampleRate) {
+      const idx = getIdx(y, x);
+      if (!isTransparent(idx)) {
+        // Check if this is a boundary pixel (adjacent to transparent)
+        let isBoundary = false;
+        for (const [dy, dx] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const ny = y + dy;
+          const nx = x + dx;
+          if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+            if (isTransparent(getIdx(ny, nx))) {
+              isBoundary = true;
+              break;
+            }
+          } else {
+            // Edge of image counts as boundary
+            isBoundary = true;
+            break;
+          }
+        }
 
-  // Left and right edges
-  for (let y = 0; y < height; y++) {
-    const leftIdx = getIdx(y, 0);
-    const rightIdx = getIdx(y, width - 1);
-    if (isTransparent(leftIdx) && !visited[leftIdx]) {
-      queue.push(leftIdx);
-      visited[leftIdx] = 1;
-    }
-    if (isTransparent(rightIdx) && !visited[rightIdx]) {
-      queue.push(rightIdx);
-      visited[rightIdx] = 1;
-    }
-  }
-
-  // BFS flood-fill to mark all background pixels (connected to edges)
-  const directions = [
-    [-1, 0], [1, 0], [0, -1], [0, 1], // 4-connectivity
-    [-1, -1], [-1, 1], [1, -1], [1, 1], // 8-connectivity for better detection
-  ];
-
-  while (queue.length > 0) {
-    const idx = queue.shift()!;
-    const y = Math.floor(idx / width);
-    const x = idx % width;
-
-    for (const [dy, dx] of directions) {
-      const ny = y + dy;
-      const nx = x + dx;
-
-      if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
-        const neighborIdx = getIdx(ny, nx);
-        if (!visited[neighborIdx] && isTransparent(neighborIdx)) {
-          visited[neighborIdx] = 1;
-          queue.push(neighborIdx);
+        if (isBoundary) {
+          boundaryPoints.push({ x, y });
         }
       }
     }
   }
 
-  // Count holes: transparent pixels NOT marked as background
-  let holeCount = 0;
+  // Count opaque pixels accurately (full scan, not sampled)
   let opaquePixels = 0;
-
   for (let i = 0; i < totalPixels; i++) {
     if (!isTransparent(i)) {
       opaquePixels++;
-    } else if (!visited[i]) {
-      // Transparent but not connected to edges = hole
+    }
+  }
+
+  // Validate we have a meaningful product
+  if (opaquePixels === 0) {
+    logger.warn('No opaque pixels found - image may be fully transparent');
+    return {
+      holeCount: 0,
+      totalPixels,
+      opaquePixels: 0,
+      holeMask: new Uint8Array(totalPixels),
+      width,
+      height,
+    };
+  }
+
+  logger.info({ boundaryPoints: boundaryPoints.length, sampleRate, opaquePixels }, 'Collected boundary points for convex hull');
+
+  // Compute convex hull
+  const hull = computeConvexHull(boundaryPoints);
+  logger.info({ hullPoints: hull.length }, 'Computed convex hull');
+
+  if (hull.length < 3) {
+    // No valid hull, return empty mask
+    return {
+      holeCount: 0,
+      totalPixels,
+      opaquePixels,
+      holeMask: new Uint8Array(totalPixels),
+      width,
+      height,
+    };
+  }
+
+  // Use scanline algorithm to efficiently fill the convex hull interior
+  const hullInterior = fillConvexHullScanline(hull, width, height);
+
+  // Create hole mask: holes are transparent pixels INSIDE the convex hull
+  const holeMask = new Uint8Array(totalPixels);
+  let holeCount = 0;
+
+  for (let i = 0; i < totalPixels; i++) {
+    // Pixel is a hole if: transparent AND inside convex hull
+    if (isTransparent(i) && hullInterior[i] === 255) {
+      holeMask[i] = 255;
       holeCount++;
     }
   }
 
-  return { holeCount, totalPixels, opaquePixels };
+  return { holeCount, totalPixels, opaquePixels, holeMask, width, height };
 }
+
 
 export const fillProductHolesProcessor: Processor = {
   id: 'fill-product-holes',
@@ -169,32 +351,10 @@ export const fillProductHolesProcessor: Processor = {
       });
 
       try {
-        // Load image and extract alpha channel
-        const image = sharp(frame.path);
-        const { width, height } = await image.metadata();
-
-        if (!width || !height) {
-          logger.warn({ frameId: frame.frameId }, 'Could not get image dimensions, skipping hole detection');
-          updatedFrames.push(frame);
-          continue;
-        }
-
-        // Extract raw RGBA data
-        const { data: rawData } = await image
-          .raw()
-          .ensureAlpha()
-          .toBuffer({ resolveWithObject: true });
-
-        // Extract alpha channel (every 4th byte starting from index 3)
-        const alphaData = new Uint8Array(width * height);
-        for (let j = 0; j < width * height; j++) {
-          alphaData[j] = rawData[j * 4 + 3];
-        }
-
-        // Detect holes using flood-fill
-        const { holeCount, opaquePixels } = await timer.timeOperation(
+        // Detect holes using convex hull algorithm
+        const { holeCount, opaquePixels, holeMask, width, height } = await timer.timeOperation(
           'detect_holes',
-          () => Promise.resolve(detectHoles(width, height, alphaData, alphaThreshold)),
+          () => detectHoles(frame.path, alphaThreshold),
           { frameId: frame.frameId }
         );
 
@@ -222,25 +382,61 @@ export const fillProductHolesProcessor: Processor = {
             holeCount,
             holePercentage: holePercentage.toFixed(4) + '%',
             reason: holePercentage >= minHolePercentage ? 'percentage' : 'absolute_count',
-          }, 'Filling product holes with Photoroom');
+          }, 'Filling product holes with Stability AI inpainting');
+
+          // Create mask image (white = inpaint, black = preserve)
+          // Stability AI expects: white pixels = areas to fill, black = preserve
+          const maskPath = path.join(workDirs.extracted, `${frame.frameId}_mask.png`);
+          await sharp(Buffer.from(holeMask), {
+            raw: { width, height, channels: 1 },
+          })
+            .png()
+            .toFile(maskPath);
+
+          logger.debug({ frameId: frame.frameId, maskPath }, 'Hole mask created for inpainting');
 
           const outputPath = path.join(workDirs.extracted, `${frame.frameId}_filled.png`);
+          const inpaintPrompt = (options?.inpaintPrompt as string) ??
+            'Seamlessly fill in the missing parts of this product. Reconstruct the product to look complete, natural, and photorealistic. Match the exact texture, color, material, and style of the surrounding product areas.';
+          const debugMode = (options?.debug as boolean) ?? false;
 
-          const inpaintResult = await timer.timeOperation(
-            'inpaint_holes',
-            () => photoroomService.inpaintHoles(frame.path, outputPath, {
-              prompt: 'Fill in any missing or transparent parts of the product to make it complete and whole. Maintain the product texture and appearance.',
-            }),
-            { frameId: frame.frameId }
-          );
+          try {
+            const inpaintResult = await timer.timeOperation(
+              'inpaint_holes',
+              () => stabilityService.inpaintHoles(frame.path, maskPath, outputPath, {
+                prompt: inpaintPrompt,
+                debug: debugMode,
+                cleanup: !debugMode,
+              }),
+              { frameId: frame.frameId }
+            );
 
-          if (inpaintResult.success) {
-            logger.info({ frameId: frame.frameId, outputPath }, 'Holes filled successfully');
-            updatedFrames.push({ ...frame, path: outputPath });
-            totalHolesFilled++;
-          } else {
-            logger.warn({ frameId: frame.frameId, error: inpaintResult.error }, 'Hole filling failed, keeping original');
+            if (inpaintResult.success) {
+              logger.info({ frameId: frame.frameId, outputPath }, 'Holes filled successfully');
+              updatedFrames.push({ ...frame, path: outputPath });
+              totalHolesFilled++;
+
+              // Clean up the mask file (unless in debug mode)
+              if (!debugMode) {
+                await safeUnlink(maskPath);
+              }
+            } else {
+              logger.warn({ frameId: frame.frameId, error: inpaintResult.error }, 'Hole filling failed, keeping original');
+              updatedFrames.push(frame);
+
+              // Clean up mask on failure too
+              if (!debugMode) {
+                await safeUnlink(maskPath);
+              }
+            }
+          } catch (inpaintError) {
+            logger.warn({ frameId: frame.frameId, error: (inpaintError as Error).message }, 'Hole filling failed, keeping original');
             updatedFrames.push(frame);
+
+            // Clean up mask on error
+            if (!debugMode) {
+              await safeUnlink(maskPath);
+            }
           }
         } else {
           // No significant holes, keep original

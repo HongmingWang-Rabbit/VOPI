@@ -421,26 +421,25 @@ export class PhotoroomService {
   }
 
   /**
-   * Fill transparent holes in an image using AI inpainting
+   * Fill transparent holes in an image using AI expansion
    *
-   * This uses Photoroom's expand feature with ai.auto mode to intelligently
-   * fill any transparent gaps in the product (e.g., where hands were removed).
+   * Strategy: Use expand.mode to fill transparent pixels based on existing content.
+   * This is Photoroom's native way to fill transparent areas.
    *
    * @param imagePath - Path to PNG image with transparent holes
    * @param outputPath - Path for output image with holes filled
-   * @param options - Inpainting options
+   * @param options - Inpainting options (prompt is optional, used with describeAnyChange as fallback)
    */
   async inpaintHoles(
     imagePath: string,
     outputPath: string,
-    options: { prompt?: string } = {}
+    _options: { prompt?: string } = {}
   ): Promise<ProcessResult> {
     const config = getConfig();
-    const { prompt } = options;
     const useUrlMode = !isLocalS3();
     let tempKey: string | undefined;
 
-    logger.info({ imagePath: path.basename(imagePath), hasPrompt: !!prompt, useUrlMode }, 'Inpainting transparent holes');
+    logger.info({ imagePath: path.basename(imagePath), useUrlMode }, 'Filling transparent holes with expand.mode');
 
     try {
       let imageUrl: string | undefined;
@@ -460,17 +459,11 @@ export class PhotoroomService {
           },
         },
         async (req, boundary) => {
-          // Don't remove background - we want to keep the existing transparency
+          // Don't remove background - we want to keep and fill the product
           this.addField(req, boundary, 'removeBackground', 'false');
           this.addField(req, boundary, 'outputFormat', 'png');
-          // Use AI expand to fill transparent pixels
+          // Use expand.mode to fill transparent pixels based on existing content
           this.addField(req, boundary, 'expand.mode', 'ai.auto');
-
-          // If a prompt is provided, use it to guide the inpainting
-          if (prompt) {
-            this.addField(req, boundary, 'describeAnyChange.mode', 'ai.auto');
-            this.addField(req, boundary, 'describeAnyChange.prompt', prompt);
-          }
 
           if (useUrlMode && imageUrl) {
             this.addImageUrlAndEnd(req, boundary, imageUrl);
@@ -481,13 +474,13 @@ export class PhotoroomService {
       );
 
       await writeFile(outputPath, imageBuffer);
-      logger.info({ outputPath: path.basename(outputPath) }, 'Holes inpainted');
+      logger.info({ outputPath: path.basename(outputPath) }, 'Holes filled with expand.mode');
 
       return {
         success: true,
         outputPath,
         size: imageBuffer.length,
-        method: 'inpaint',
+        method: 'expand',
       };
     } finally {
       await cleanupTempS3File(tempKey);

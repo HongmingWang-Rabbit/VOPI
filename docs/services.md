@@ -10,6 +10,7 @@ The `/src/services/` directory contains the core business logic modules. Each se
 | **Frame Scoring** | `frame-scoring.service.ts` | Quality analysis and candidate selection |
 | **Gemini** | `gemini.service.ts` | AI classification via Google Gemini |
 | **Photoroom** | `photoroom.service.ts` | Background removal and image generation |
+| **Stability** | `stability.service.ts` | AI inpainting for hole filling |
 | **Storage** | `storage.service.ts` | S3/MinIO file operations |
 | **Pipeline** | `pipeline.service.ts` | Orchestrates the full processing pipeline |
 | **Global Config** | `global-config.service.ts` | Runtime configuration with caching |
@@ -347,6 +348,73 @@ API calls are rate-limited with configurable delays:
 
 ---
 
+## Stability Service
+
+**File**: `src/services/stability.service.ts`
+
+Provides AI inpainting capabilities for filling transparent holes in product images using Stability AI's v2beta API.
+
+### Use Case
+
+When background removal also removes obstructions (like hands holding a product), it can leave transparent "holes" inside the product. This service fills those holes with AI-generated content that seamlessly matches the surrounding product.
+
+### Methods
+
+#### `inpaintHoles(imagePath, maskPath, outputPath, options): Promise<InpaintResult>`
+
+Fill transparent holes in an image using AI inpainting.
+
+**Parameters**:
+- `imagePath`: Source image with holes
+- `maskPath`: Mask image (white = fill, black = preserve)
+- `outputPath`: Output path for result
+- `options`: Inpainting options
+
+**Options**:
+```typescript
+interface InpaintOptions {
+  prompt?: string;         // Inpainting prompt
+  negativePrompt?: string; // Things to avoid
+  debug?: boolean;         // Save debug files
+  cleanup?: boolean;       // Clean up intermediate files
+}
+```
+
+**Returns**:
+```typescript
+interface InpaintResult {
+  success: boolean;
+  outputPath?: string;
+  size?: number;
+  error?: string;
+}
+```
+
+### Algorithm
+
+1. **Prepare Image**: Resize to max 4MP, align to 64px multiples (required by Stable Diffusion)
+2. **Prepare Mask**: Dilate mask to expand fill area, blur edges for smooth transitions
+3. **Inpaint**: Send to Stability AI v2beta API with grow_mask for additional blending
+4. **Restore Alpha**: Apply original alpha channel to preserve transparency
+5. **Upscale**: Resize back to original dimensions
+
+### Features
+
+- Automatic image resizing and alignment
+- Mask dilation (3px radius) for edge coverage
+- Gaussian blur (σ=4) for feathered mask edges
+- Alpha channel restoration after inpainting
+- Retry logic with exponential backoff (max 3 attempts)
+- Debug mode for inspecting intermediate files
+
+### Configuration
+
+```bash
+STABILITY_API_KEY=your-stability-api-key
+```
+
+---
+
 ## Storage Service
 
 **File**: `src/services/storage.service.ts`
@@ -422,7 +490,7 @@ Orchestrates the complete processing pipeline, coordinating all other services.
 2. **Extract** (10-15%) - Get metadata and extract frames
 3. **Score** (30-45%) - Calculate quality scores
 4. **Classify** (50-60%) - AI variant discovery
-5. **Extract Product** (60-70%) - Remove background, rotate, center
+5. **Extract Product** (60-70%) - Claid bg-remove → fill holes → center
 6. **Generate** (70-95%) - Commercial image creation
 7. **Complete** (100%) - Finalize and cleanup
 

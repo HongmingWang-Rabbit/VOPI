@@ -283,6 +283,27 @@ export const claidBgRemovalTestStack: StackTemplate = {
 };
 
 /**
+ * Hole detection debug stack - visualize detected holes
+ *
+ * Outputs multiple mask images for debugging:
+ * - {frameId}_holes.png: White = detected holes
+ * - {frameId}_background.png: White = background (reachable from edges)
+ * - {frameId}_dilated.png: White = dilated product region
+ * - {frameId}_visual.png: Red=holes, Green=product, Blue=background
+ *
+ * Use with initialData: { images: ['/path/to/transparent.png'] }
+ */
+export const holeDetectionDebugStack: StackTemplate = {
+  id: 'hole_detection_debug',
+  name: 'Hole Detection Debug Pipeline',
+  description: 'Debug hole detection - outputs mask visualizations',
+  steps: [
+    { processor: 'detect-holes-debug' },
+    { processor: 'complete-job' },
+  ],
+};
+
+/**
  * All staging/test stack templates
  */
 export const stagingStackTemplates: Record<string, StackTemplate> = {
@@ -296,6 +317,7 @@ export const stagingStackTemplates: Record<string, StackTemplate> = {
   full_staging: fullStagingStack,
   no_upload: noUploadStack,
   claid_bg_removal_test: claidBgRemovalTestStack,
+  hole_detection_debug: holeDetectionDebugStack,
 };
 
 /**

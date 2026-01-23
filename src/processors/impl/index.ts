@@ -22,6 +22,7 @@ export { extractFramesProcessor } from './ffmpeg/extract-frames.js';
 
 // Sharp (image processing) processors
 export { centerProductProcessor } from './sharp/center-product.js';
+export { detectHolesDebugProcessor } from './sharp/detect-holes-debug.js';
 export { fillProductHolesProcessor } from './sharp/fill-product-holes.js';
 export { rotateImageProcessor } from './sharp/rotate-image.js';
 export { scoreFramesProcessor } from './sharp/score-frames.js';
@@ -51,6 +52,7 @@ import { downloadProcessor } from './storage/download.js';
 import { uploadFramesProcessor } from './storage/upload-frames.js';
 import { extractFramesProcessor } from './ffmpeg/extract-frames.js';
 import { centerProductProcessor } from './sharp/center-product.js';
+import { detectHolesDebugProcessor } from './sharp/detect-holes-debug.js';
 import { fillProductHolesProcessor } from './sharp/fill-product-holes.js';
 import { rotateImageProcessor } from './sharp/rotate-image.js';
 import { scoreFramesProcessor } from './sharp/score-frames.js';
@@ -75,6 +77,7 @@ export const allProcessors: Processor[] = [
   extractFramesProcessor,
   // Sharp
   centerProductProcessor,
+  detectHolesDebugProcessor,
   fillProductHolesProcessor,
   rotateImageProcessor,
   scoreFramesProcessor,

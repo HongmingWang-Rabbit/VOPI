@@ -24,7 +24,7 @@ export const claidBgRemoveProcessor: Processor = {
   async execute(
     context: ProcessorContext,
     data: PipelineData,
-    _options?: Record<string, unknown>
+    options?: Record<string, unknown>
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
@@ -42,7 +42,17 @@ export const claidBgRemoveProcessor: Processor = {
       };
     }
 
-    logger.info({ jobId, frameCount: frames.length }, 'Removing backgrounds with Claid');
+    // Determine product type from options or pipeline data
+    // Priority: processor options > pipeline data (metadata)
+    const customPrompt = (options?.customPrompt as string) ||
+                         (data.productType as string | undefined) ||
+                         undefined;
+
+    logger.info({
+      jobId,
+      frameCount: frames.length,
+      customPrompt: customPrompt || '(default: product)',
+    }, 'Removing backgrounds with Claid');
 
     await onProgress?.({
       status: JobStatus.EXTRACTING_PRODUCT,
@@ -51,6 +61,9 @@ export const claidBgRemoveProcessor: Processor = {
     });
 
     const results = new Map<string, { success: boolean; outputPath?: string; rotationApplied: number; error?: string }>();
+
+    // Build provider options
+    const providerOptions = customPrompt ? { customPrompt } : {};
 
     for (let i = 0; i < frames.length; i++) {
       const frame = frames[i];
@@ -70,7 +83,7 @@ export const claidBgRemoveProcessor: Processor = {
           () => claidBackgroundRemovalProvider.removeBackground(
             frame.path,
             outputPath,
-            {}
+            providerOptions
           ),
           { frameId: frame.frameId }
         );

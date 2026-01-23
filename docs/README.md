@@ -72,9 +72,11 @@ Standard pipeline steps:
 2. **Extract** - Dense frame extraction at configurable FPS using FFmpeg
 3. **Score** - Calculate quality scores (sharpness + motion analysis)
 4. **Classify** - AI-powered variant discovery using Google Gemini 2.0
-5. **Extract Product** - Remove background, rotate, and center the product
-6. **Generate** - Commercial image generation via Photoroom API
-7. **Upload** - Store results to S3 and persist to database
+5. **Extract Product** - Remove background with Claid.ai (selective object retention)
+6. **Fill Holes** - AI inpainting via Stability AI to fill obstruction artifacts
+7. **Center** - Center and pad product in frame
+8. **Generate** - Commercial image generation via Photoroom API
+9. **Upload** - Store results to S3 and persist to database
 
 ### Frame Selection Algorithm
 
@@ -109,7 +111,7 @@ Four background versions are generated for each selected frame:
 - **Database**: PostgreSQL 16 with Drizzle ORM
 - **Queue**: Redis 7 + BullMQ for async job processing
 - **Storage**: AWS S3 / MinIO (local development)
-- **AI Services**: Google Gemini 2.0 Flash, Photoroom API
+- **AI Services**: Google Gemini 2.0 Flash, Claid.ai, Stability AI, Photoroom API
 - **Video Processing**: FFmpeg (external binary)
 
 ## Getting Started

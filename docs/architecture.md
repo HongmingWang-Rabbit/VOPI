@@ -41,10 +41,14 @@ VOPI follows a distributed architecture with separate API and worker processes, 
                             ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         External Services                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                       │
-│  │   FFmpeg     │  │ Google Gemini│  │  Photoroom   │                       │
-│  │ (local bin)  │  │    API       │  │     API      │                       │
-│  └──────────────┘  └──────────────┘  └──────────────┘                       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│  │   FFmpeg     │  │ Google Gemini│  │   Claid.ai   │  │ Stability AI │    │
+│  │ (local bin)  │  │    API       │  │     API      │  │     API      │    │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
+│                                       ┌──────────────┐                       │
+│                                       │  Photoroom   │                       │
+│                                       │     API      │                       │
+│                                       └──────────────┘                       │
 └─────────────────────────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -142,9 +146,11 @@ The traditional approach that extracts all frames first, then uses AI for classi
 2. Extract ALL frames at configured FPS using FFmpeg
 3. Score frames for sharpness and motion
 4. Send top candidates to Gemini for classification
-5. Extract and process selected frames
-6. Generate commercial images
-7. Upload to S3
+5. Remove background with Claid.ai (selective object retention)
+6. Fill holes with Stability AI inpainting (for obstruction removal artifacts)
+7. Center product in frame
+8. Generate commercial images
+9. Upload to S3
 
 Best for: Shorter videos, when you need fine-grained frame selection
 
@@ -155,8 +161,11 @@ Direct video analysis using Gemini's video understanding capabilities:
 3. Upload video to Gemini Files API
 4. Gemini analyzes video directly and selects optimal timestamps
 5. Extract only the selected frames
-6. Generate commercial images
-7. Upload to S3
+6. Remove background with Claid.ai (selective object retention)
+7. Fill holes with Stability AI inpainting (for obstruction removal artifacts)
+8. Center product in frame
+9. Generate commercial images
+10. Upload to S3
 
 Best for: Longer videos, when you want faster processing without extracting all frames
 
@@ -189,8 +198,8 @@ Best for: Longer videos, when you want faster processing without extracting all 
 │     └─ Get background recommendations                                   │
 │                                                                          │
 │  5. EXTRACT PRODUCT (60-70%)                                             │
-│     ├─ Remove background via Photoroom                                  │
-│     ├─ Rotate product based on Gemini-detected angle                    │
+│     ├─ Remove background via Claid.ai (selective object retention)      │
+│     ├─ Fill transparent holes via Stability AI inpainting               │
 │     └─ Center product in frame with padding                             │
 │                                                                          │
 │  6. GENERATE (70-95%)                                                    │
@@ -257,9 +266,9 @@ Video URL
     │
     ▼
 ┌─────────────────┐
-│Extract product  │───────▶ /tmp/vopi/{jobId}/extracted/
-│  (bg removal,   │         hero_extracted.png (transparent, rotated, centered)
-│   rotate, crop) │
+│ Claid bg-remove │───────▶ /tmp/vopi/{jobId}/extracted/
+│ + hole filling  │         hero_transparent.png (background removed)
+│ + centering     │         hero_filled.png (holes filled, centered)
 └─────────────────┘
     │
     ▼

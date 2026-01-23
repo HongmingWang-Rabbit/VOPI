@@ -23,6 +23,8 @@ cp .env.example .env
 
 # Add your API keys to .env
 # GOOGLE_AI_API_KEY=your_key
+# CLAID_API_KEY=your_key
+# STABILITY_API_KEY=your_key
 # PHOTOROOM_API_KEY=your_key
 
 # Start all services
@@ -61,8 +63,14 @@ cp .env.example .env
 Edit `.env` and add your API keys:
 
 ```env
-# Required
+# Required for AI classification
 GOOGLE_AI_API_KEY=your_google_ai_key
+
+# Required for background removal
+CLAID_API_KEY=your_claid_key
+
+# Required for hole filling (inpainting)
+STABILITY_API_KEY=your_stability_key
 
 # Optional (for commercial image generation)
 PHOTOROOM_API_KEY=your_photoroom_key
@@ -104,6 +112,8 @@ Both servers support hot reload via tsx.
 | `S3_ACCESS_KEY_ID` | S3 access key | `minioadmin` |
 | `S3_SECRET_ACCESS_KEY` | S3 secret key | `minioadmin` |
 | `GOOGLE_AI_API_KEY` | Google AI API key | `AIza...` |
+| `CLAID_API_KEY` | Claid.ai API key | `ca_...` |
+| `STABILITY_API_KEY` | Stability AI API key | `sk-...` |
 | `PHOTOROOM_API_KEY` | Photoroom API key | `pk_...` |
 
 ### Optional Variables

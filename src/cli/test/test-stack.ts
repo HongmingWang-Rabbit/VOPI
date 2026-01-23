@@ -138,8 +138,49 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
   let imagePaths: string[] | undefined;
   let framesMetadata: FrameMetadata[] | undefined;
   let textData: string | undefined;
+  let productType: string | undefined;
 
-  // Prompt for each required IO type
+  // Check if we need metadata (frames/scores/classifications) - if so, ask for it first
+  // since metadata file can contain images too
+  const needsMetadata = requiredIO.some((io) => ['frames', 'scores', 'classifications'].includes(io));
+
+  if (needsMetadata) {
+    // Ask for metadata file first
+    const metadataPath = await input({
+      message: 'Enter path to metadata JSON file (see input/sample-frames-metadata.json):',
+      validate: (value) => {
+        if (!value.trim()) return 'Metadata file path is required';
+        return true;
+      },
+    });
+    try {
+      // Strip surrounding quotes if present (user may copy-paste with quotes)
+      const cleanPath = metadataPath.trim().replace(/^['"]|['"]$/g, '');
+      const metadataContent = await readFile(cleanPath, 'utf-8');
+      const metadata = JSON.parse(metadataContent);
+      framesMetadata = metadata.frames;
+      // Also extract images if present in metadata
+      if (metadata.images) {
+        imagePaths = metadata.images;
+      }
+      // Extract productType if present (used by claid-bg-remove)
+      if (metadata.productType) {
+        productType = metadata.productType;
+      }
+      printSuccess(`Loaded ${framesMetadata?.length || 0} frames from metadata file`);
+      if (imagePaths?.length) {
+        printInfo(`Images: ${imagePaths.length} from metadata`);
+      }
+      if (productType) {
+        printInfo(`Product type: ${productType}`);
+      }
+    } catch (error) {
+      printError(`Failed to load metadata: ${(error as Error).message}`);
+      return;
+    }
+  }
+
+  // Prompt for remaining required IO types (skip ones already loaded from metadata)
   for (const ioType of requiredIO) {
     switch (ioType) {
       case 'video': {
@@ -156,6 +197,10 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
       }
 
       case 'images': {
+        // Skip if already loaded from metadata
+        if (imagePaths?.length) {
+          break;
+        }
         const imagesInput = await input({
           message: 'Enter image paths (comma-separated):',
           validate: (value) => {
@@ -171,29 +216,7 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
       case 'frames':
       case 'scores':
       case 'classifications': {
-        // These require a metadata JSON file
-        const metadataPath = await input({
-          message: `Enter path to ${ioType} metadata JSON file (see input/sample-frames-metadata.json):`,
-          validate: (value) => {
-            if (!value.trim()) return 'Metadata file path is required';
-            return true;
-          },
-        });
-        try {
-          // Strip surrounding quotes if present (user may copy-paste with quotes)
-          const cleanPath = metadataPath.trim().replace(/^['"]|['"]$/g, '');
-          const metadataContent = await readFile(cleanPath, 'utf-8');
-          const metadata = JSON.parse(metadataContent);
-          framesMetadata = metadata.frames;
-          // Also extract images if present in metadata
-          if (metadata.images && !imagePaths) {
-            imagePaths = metadata.images;
-          }
-          printSuccess(`Loaded ${framesMetadata?.length || 0} frames from metadata file`);
-        } catch (error) {
-          printError(`Failed to load metadata: ${(error as Error).message}`);
-          return;
-        }
+        // Already loaded from metadata above
         break;
       }
 
@@ -336,6 +359,9 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
     }
     if (textData) {
       initialData.text = textData;
+    }
+    if (productType) {
+      initialData.productType = productType;
     }
 
     // Run the stack

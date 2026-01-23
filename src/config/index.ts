@@ -46,6 +46,7 @@ export interface AppConfig {
     photoroomBasicHost: string;
     photoroomPlusHost: string;
     claid?: string;
+    stability?: string;
   };
   worker: {
     concurrency: number;
@@ -127,6 +128,7 @@ export function buildConfig(env: Env): AppConfig {
       photoroomBasicHost: env.PHOTOROOM_BASIC_HOST,
       photoroomPlusHost: env.PHOTOROOM_PLUS_HOST,
       claid: env.CLAID_API_KEY,
+      stability: env.STABILITY_API_KEY,
     },
     worker: {
       concurrency: env.WORKER_CONCURRENCY,

@@ -13,7 +13,7 @@ VOPI (Video Object Processing Infrastructure) is a TypeScript backend service th
 - **Database**: PostgreSQL 16 with Drizzle ORM
 - **Queue**: Redis 7 + BullMQ for async job processing
 - **Storage**: AWS S3 / MinIO (local dev)
-- **AI Services**: Google Gemini 2.0 Flash, Photoroom API
+- **AI Services**: Google Gemini 2.0 Flash, Claid.ai, Stability AI, Photoroom API
 - **Video Processing**: FFmpeg (external binary required)
 
 ## Common Commands
@@ -56,18 +56,22 @@ VOPI supports two pipeline strategies, controlled by `pipeline.strategy` global 
 2. **Extract** - Dense frame extraction at configurable FPS via FFmpeg
 3. **Score** - Calculate sharpness (Laplacian variance) + motion penalty
 4. **Classify** - Send top-K candidates to Gemini for classification
-5. **Extract Product** - Remove background, rotate, and center product
-6. **Generate** - Optional commercial image generation (Photoroom)
-7. **Upload** - Store results to S3, persist to database
+5. **Extract Product** - Claid.ai background removal with selective object retention
+6. **Fill Holes** - Stability AI inpainting to fill gaps from obstruction removal
+7. **Center** - Center and pad product in frame
+8. **Generate** - Optional commercial image generation (Photoroom)
+9. **Upload** - Store results to S3, persist to database
 
 **Gemini Video Strategy**:
 1. **Download** - Fetch video from URL
 2. **Transcode** - Auto-convert HEVC to H.264 if needed (for iPhone compatibility)
 3. **Analyze** - Upload to Gemini Files API and analyze video directly
 4. **Extract** - Extract only the selected frames at specific timestamps
-5. **Extract Product** - Remove background, rotate, and center product
-6. **Generate** - Optional commercial image generation (Photoroom)
-7. **Upload** - Store results to S3, persist to database
+5. **Extract Product** - Claid.ai background removal with selective object retention
+6. **Fill Holes** - Stability AI inpainting to fill gaps from obstruction removal
+7. **Center** - Center and pad product in frame
+8. **Generate** - Optional commercial image generation (Photoroom)
+9. **Upload** - Store results to S3, persist to database
 
 The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) process queued jobs independently. This separation allows horizontal scaling of workers.
 

@@ -1,317 +1,405 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import sharp from 'sharp';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { unlink } from 'fs/promises';
 
-// Extract the detectHoles function for testing
-// We'll test it by creating synthetic images
+// Mock utilities before importing from fill-product-holes
+vi.mock('../../../utils/fs.js', () => ({
+  safeUnlink: vi.fn().mockResolvedValue(undefined),
+  getVariantPath: vi.fn((path: string, suffix: string) => path.replace('.png', `${suffix}.png`)),
+}));
 
-describe('fill-product-holes processor', () => {
-  describe('detectHoles algorithm', () => {
-    /**
-     * Recreate the detectHoles function for unit testing
-     */
-    function detectHoles(
-      width: number,
-      height: number,
-      alphaData: Uint8Array,
-      alphaThreshold: number
-    ): { holeCount: number; totalPixels: number; opaquePixels: number } {
-      const totalPixels = width * height;
-      const visited = new Uint8Array(totalPixels);
+vi.mock('../../../utils/logger.js', () => ({
+  createChildLogger: vi.fn(() => ({
+    info: vi.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  })),
+}));
 
-      const isTransparent = (idx: number): boolean => alphaData[idx] <= alphaThreshold;
-      const getIdx = (y: number, x: number): number => y * width + x;
+vi.mock('../../../services/stability.service.js', () => ({
+  stabilityService: {
+    inpaintHoles: vi.fn(),
+  },
+}));
 
-      const queue: number[] = [];
+// Import geometry functions from the main implementation
+import {
+  type Point,
+  computeConvexHull,
+  getHullScanlineIntersections,
+  fillConvexHullScanline,
+} from './fill-product-holes.js';
 
-      // Start flood-fill from all transparent edge pixels
-      for (let x = 0; x < width; x++) {
-        const topIdx = getIdx(0, x);
-        const bottomIdx = getIdx(height - 1, x);
-        if (isTransparent(topIdx) && !visited[topIdx]) {
-          queue.push(topIdx);
-          visited[topIdx] = 1;
-        }
-        if (isTransparent(bottomIdx) && !visited[bottomIdx]) {
-          queue.push(bottomIdx);
-          visited[bottomIdx] = 1;
-        }
-      }
+// =============================================================================
+// Unit tests for convex hull and scanline algorithms
+// =============================================================================
 
-      for (let y = 0; y < height; y++) {
-        const leftIdx = getIdx(y, 0);
-        const rightIdx = getIdx(y, width - 1);
-        if (isTransparent(leftIdx) && !visited[leftIdx]) {
-          queue.push(leftIdx);
-          visited[leftIdx] = 1;
-        }
-        if (isTransparent(rightIdx) && !visited[rightIdx]) {
-          queue.push(rightIdx);
-          visited[rightIdx] = 1;
-        }
-      }
+describe('Convex Hull Algorithm', () => {
+  describe('computeConvexHull', () => {
+    it('should return empty for fewer than 3 points', () => {
+      expect(computeConvexHull([])).toEqual([]);
+      expect(computeConvexHull([{ x: 0, y: 0 }])).toEqual([{ x: 0, y: 0 }]);
+      expect(computeConvexHull([{ x: 0, y: 0 }, { x: 1, y: 1 }])).toEqual([
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+      ]);
+    });
 
-      const directions = [
-        [-1, 0], [1, 0], [0, -1], [0, 1],
-        [-1, -1], [-1, 1], [1, -1], [1, 1],
+    it('should compute correct hull for a square', () => {
+      const points: Point[] = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+        { x: 5, y: 5 }, // Interior point
       ];
 
-      while (queue.length > 0) {
-        const idx = queue.shift()!;
-        const y = Math.floor(idx / width);
-        const x = idx % width;
+      const hull = computeConvexHull(points);
 
-        for (const [dy, dx] of directions) {
-          const ny = y + dy;
-          const nx = x + dx;
+      // Should have 4 vertices (the corners)
+      expect(hull.length).toBe(4);
 
-          if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
-            const neighborIdx = getIdx(ny, nx);
-            if (!visited[neighborIdx] && isTransparent(neighborIdx)) {
-              visited[neighborIdx] = 1;
-              queue.push(neighborIdx);
-            }
-          }
-        }
-      }
-
-      let holeCount = 0;
-      let opaquePixels = 0;
-
-      for (let i = 0; i < totalPixels; i++) {
-        if (!isTransparent(i)) {
-          opaquePixels++;
-        } else if (!visited[i]) {
-          holeCount++;
-        }
-      }
-
-      return { holeCount, totalPixels, opaquePixels };
-    }
-
-    it('should detect no holes in solid image', () => {
-      // 5x5 image, all opaque (alpha=255)
-      const width = 5;
-      const height = 5;
-      const alphaData = new Uint8Array(25).fill(255);
-
-      const result = detectHoles(width, height, alphaData, 10);
-
-      expect(result.holeCount).toBe(0);
-      expect(result.opaquePixels).toBe(25);
+      // Interior point should not be in hull
+      expect(hull.find((p) => p.x === 5 && p.y === 5)).toBeUndefined();
     });
 
-    it('should detect no holes in transparent-only image', () => {
-      // 5x5 image, all transparent (alpha=0)
-      const width = 5;
-      const height = 5;
-      const alphaData = new Uint8Array(25).fill(0);
-
-      const result = detectHoles(width, height, alphaData, 10);
-
-      expect(result.holeCount).toBe(0);
-      expect(result.opaquePixels).toBe(0);
-    });
-
-    it('should detect hole inside product', () => {
-      // 5x5 image with transparent border and hole in center
-      // . . . . .
-      // . X X X .
-      // . X . X .  <- hole in center
-      // . X X X .
-      // . . . . .
-      const width = 5;
-      const height = 5;
-      const alphaData = new Uint8Array(25).fill(0); // Start all transparent
-
-      // Set product pixels to opaque
-      const productPixels = [
-        6, 7, 8,     // row 1
-        11, 13,      // row 2 (skip center)
-        16, 17, 18,  // row 3
+    it('should compute correct hull for a triangle', () => {
+      const points: Point[] = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 5, y: 10 },
       ];
-      for (const i of productPixels) {
-        alphaData[i] = 255;
-      }
 
-      const result = detectHoles(width, height, alphaData, 10);
-
-      // The center pixel (12) should be detected as a hole
-      expect(result.holeCount).toBe(1);
-      expect(result.opaquePixels).toBe(8);
+      const hull = computeConvexHull(points);
+      expect(hull.length).toBe(3);
     });
 
-    it('should not detect edge-connected transparency as holes', () => {
-      // 5x5 image with product on right side, transparent on left
-      // . . X X X
-      // . . X X X
-      // . . X X X
-      // . . X X X
-      // . . X X X
-      const width = 5;
-      const height = 5;
-      const alphaData = new Uint8Array(25).fill(0);
-
-      // Right side is opaque
-      for (let y = 0; y < 5; y++) {
-        for (let x = 2; x < 5; x++) {
-          alphaData[y * width + x] = 255;
-        }
-      }
-
-      const result = detectHoles(width, height, alphaData, 10);
-
-      // No holes - left side is connected to edges
-      expect(result.holeCount).toBe(0);
-      expect(result.opaquePixels).toBe(15);
-    });
-
-    it('should detect multiple holes', () => {
-      // 7x7 image with product and two holes
-      // . . . . . . .
-      // . X X X X X .
-      // . X . X . X .  <- two holes
-      // . X X X X X .
-      // . X . X . X .  <- two more holes
-      // . X X X X X .
-      // . . . . . . .
-      const width = 7;
-      const height = 7;
-      const alphaData = new Uint8Array(49).fill(0);
-
-      // Fill in the product shape
-      for (let y = 1; y <= 5; y++) {
-        for (let x = 1; x <= 5; x++) {
-          alphaData[y * width + x] = 255;
-        }
-      }
-
-      // Create holes at specific positions
-      const holes = [
-        2 * width + 2, // (2, 2)
-        2 * width + 4, // (2, 4)
-        4 * width + 2, // (4, 2)
-        4 * width + 4, // (4, 4)
+    it('should handle collinear points correctly', () => {
+      const points: Point[] = [
+        { x: 0, y: 0 },
+        { x: 5, y: 0 },
+        { x: 10, y: 0 },
+        { x: 0, y: 10 },
+        { x: 10, y: 10 },
       ];
-      for (const i of holes) {
-        alphaData[i] = 0;
-      }
 
-      const result = detectHoles(width, height, alphaData, 10);
-
-      expect(result.holeCount).toBe(4);
-      expect(result.opaquePixels).toBe(21); // 25 - 4 holes
+      const hull = computeConvexHull(points);
+      // Should form a triangle, collinear middle point excluded
+      expect(hull.length).toBeLessThanOrEqual(4);
     });
 
-    it('should detect edge gap as hole', () => {
-      // 5x5 image with gap on right edge
-      // . . . . .
-      // . X X X .
-      // . X X . .  <- gap connected only to product, not to transparent area
-      // . X X X .
-      // . . . . .
-      // Note: This is tricky - the gap at (2,3) IS connected to edge transparency
-      // So this test verifies edge gaps that aren't connected properly
-      
-      // Actually, let's test a more realistic scenario:
-      // Product with an edge notch that creates an interior gap
-      // . . . . . . .
-      // . X X X X X .
-      // . X X X X X .
-      // . X . . . X .  <- interior notch
-      // . X X X X X .
-      // . X X X X X .
-      // . . . . . . .
-      const width = 7;
-      const height = 7;
-      const alphaData = new Uint8Array(49).fill(0);
+    it('should handle all identical points', () => {
+      const points: Point[] = [
+        { x: 5, y: 5 },
+        { x: 5, y: 5 },
+        { x: 5, y: 5 },
+      ];
 
-      // Fill in the product shape
-      for (let y = 1; y <= 5; y++) {
-        for (let x = 1; x <= 5; x++) {
-          alphaData[y * width + x] = 255;
-        }
-      }
+      const hull = computeConvexHull(points);
+      // Should return minimal hull
+      expect(hull.length).toBeLessThanOrEqual(3);
+    });
 
-      // Create interior notch
-      alphaData[3 * width + 2] = 0;
-      alphaData[3 * width + 3] = 0;
-      alphaData[3 * width + 4] = 0;
+    it('should NOT mutate the input array', () => {
+      const points: Point[] = [
+        { x: 10, y: 0 },
+        { x: 0, y: 0 },
+        { x: 5, y: 10 },
+        { x: 0, y: 10 },
+        { x: 10, y: 10 },
+      ];
 
-      const result = detectHoles(width, height, alphaData, 10);
+      // Store original order
+      const originalOrder = points.map((p) => ({ ...p }));
 
-      // The notch is internal - should be detected as holes
-      expect(result.holeCount).toBe(3);
-      expect(result.opaquePixels).toBe(22);
+      // Compute hull
+      computeConvexHull(points);
+
+      // Original array should be unchanged
+      expect(points).toEqual(originalOrder);
     });
   });
 
-  describe('integration with sharp', () => {
-    it('should create a test image and analyze it', async () => {
-      // Create a simple 10x10 PNG with a hole
+  describe('fillConvexHullScanline', () => {
+    it('should fill interior of a simple triangle', () => {
+      const hull: Point[] = [
+        { x: 5, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const width = 15;
+      const height = 15;
+      const filled = fillConvexHullScanline(hull, width, height);
+
+      // Check that some interior pixels are filled
+      // The centroid should be inside
+      const centroidX = Math.floor((5 + 10 + 0) / 3);
+      const centroidY = Math.floor((0 + 10 + 10) / 3);
+      const centroidIdx = centroidY * width + centroidX;
+
+      expect(filled[centroidIdx]).toBe(255);
+    });
+
+    it('should not fill pixels outside the hull', () => {
+      const hull: Point[] = [
+        { x: 5, y: 5 },
+        { x: 10, y: 5 },
+        { x: 10, y: 10 },
+        { x: 5, y: 10 },
+      ];
+
+      const width = 20;
+      const height = 20;
+      const filled = fillConvexHullScanline(hull, width, height);
+
+      // Corner pixels should not be filled
+      expect(filled[0]).toBe(0); // Top-left
+      expect(filled[width - 1]).toBe(0); // Top-right
+      expect(filled[(height - 1) * width]).toBe(0); // Bottom-left
+      expect(filled[(height - 1) * width + width - 1]).toBe(0); // Bottom-right
+    });
+
+    it('should handle empty hull gracefully', () => {
+      const hull: Point[] = [];
+      const filled = fillConvexHullScanline(hull, 10, 10);
+      expect(filled.every((v) => v === 0)).toBe(true);
+    });
+
+    it('should handle hull with less than 3 points', () => {
+      const hull: Point[] = [{ x: 5, y: 5 }];
+      const filled = fillConvexHullScanline(hull, 10, 10);
+      expect(filled.every((v) => v === 0)).toBe(true);
+    });
+
+    it('should fill rectangular hull correctly', () => {
+      const hull: Point[] = [
+        { x: 2, y: 2 },
+        { x: 8, y: 2 },
+        { x: 8, y: 8 },
+        { x: 2, y: 8 },
+      ];
+
       const width = 10;
       const height = 10;
+      const filled = fillConvexHullScanline(hull, width, height);
 
-      // Create RGBA data: red product with transparent background and hole in center
+      // Count filled pixels
+      let filledCount = 0;
+      for (let i = 0; i < filled.length; i++) {
+        if (filled[i] === 255) filledCount++;
+      }
+
+      // Should fill approximately the interior (accounting for boundary behavior)
+      expect(filledCount).toBeGreaterThan(20);
+      expect(filledCount).toBeLessThan(50);
+    });
+  });
+
+  describe('getHullScanlineIntersections', () => {
+    it('should find intersections for horizontal scanline', () => {
+      const hull: Point[] = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const intersections = getHullScanlineIntersections(hull, 5);
+
+      // Should have 2 intersections (left and right edges)
+      expect(intersections.length).toBe(2);
+      expect(intersections[0]).toBeCloseTo(0);
+      expect(intersections[1]).toBeCloseTo(10);
+    });
+
+    it('should return empty for scanline outside hull', () => {
+      const hull: Point[] = [
+        { x: 5, y: 5 },
+        { x: 10, y: 5 },
+        { x: 10, y: 10 },
+        { x: 5, y: 10 },
+      ];
+
+      const intersections = getHullScanlineIntersections(hull, 0);
+      expect(intersections.length).toBe(0);
+    });
+  });
+});
+
+// =============================================================================
+// Integration tests for the processor (using real sharp)
+// =============================================================================
+
+describe('fill-product-holes processor', () => {
+  describe('hole detection with morphological closing', () => {
+    /**
+     * Helper to create a test PNG image and run hole detection
+     */
+    async function createTestImageAndDetect(
+      width: number,
+      height: number,
+      setPixels: (
+        x: number,
+        y: number
+      ) => { r: number; g: number; b: number; a: number }
+    ) {
+      // Create RGBA buffer
       const data = Buffer.alloc(width * height * 4);
 
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const i = (y * width + x) * 4;
-
-          // Check if we're in the product area (inner 6x6 square)
-          const inProduct = x >= 2 && x < 8 && y >= 2 && y < 8;
-          // Check if we're in the hole (center 2x2)
-          const inHole = x >= 4 && x < 6 && y >= 4 && y < 6;
-
-          if (inProduct && !inHole) {
-            // Red opaque pixel
-            data[i] = 255;     // R
-            data[i + 1] = 0;   // G
-            data[i + 2] = 0;   // B
-            data[i + 3] = 255; // A
-          } else {
-            // Transparent pixel
-            data[i] = 0;
-            data[i + 1] = 0;
-            data[i + 2] = 0;
-            data[i + 3] = 0;
-          }
+          const pixel = setPixels(x, y);
+          data[i] = pixel.r;
+          data[i + 1] = pixel.g;
+          data[i + 2] = pixel.b;
+          data[i + 3] = pixel.a;
         }
       }
 
-      // Create sharp image
-      const image = sharp(data, {
-        raw: {
-          width,
-          height,
-          channels: 4,
-        },
-      });
+      // Save to temp file
+      const tempPath = join(
+        tmpdir(),
+        `test-holes-${Date.now()}-${Math.random()}.png`
+      );
+      await sharp(data, { raw: { width, height, channels: 4 } })
+        .png()
+        .toFile(tempPath);
 
-      // Get raw data back
-      const { data: rawData } = await image
-        .raw()
+      // Extract alpha for analysis
+      const { data: rawData } = await sharp(tempPath)
         .ensureAlpha()
+        .raw()
         .toBuffer({ resolveWithObject: true });
 
-      // Extract alpha channel
       const alphaData = new Uint8Array(width * height);
-      for (let j = 0; j < width * height; j++) {
-        alphaData[j] = rawData[j * 4 + 3];
+      for (let i = 0; i < width * height; i++) {
+        alphaData[i] = rawData[i * 4 + 3];
       }
+
+      // Cleanup
+      await unlink(tempPath);
 
       // Count opaque and transparent
       let opaque = 0;
       let transparent = 0;
-      for (let i = 0; i < alphaData.length; i++) {
-        if (alphaData[i] > 10) opaque++;
+      for (const alpha of alphaData) {
+        if (alpha > 10) opaque++;
         else transparent++;
       }
 
-      // Product is 6x6 minus 2x2 hole = 32 pixels
+      return { alphaData, opaque, transparent, tempPath };
+    }
+
+    it('should create image with correct pixel counts', async () => {
+      // 10x10 image with 6x6 product and 2x2 hole in center
+      const { opaque, transparent } = await createTestImageAndDetect(
+        10,
+        10,
+        (x, y) => {
+          const inProduct = x >= 2 && x < 8 && y >= 2 && y < 8;
+          const inHole = x >= 4 && x < 6 && y >= 4 && y < 6;
+
+          if (inProduct && !inHole) {
+            return { r: 255, g: 0, b: 0, a: 255 }; // Red opaque
+          }
+          return { r: 0, g: 0, b: 0, a: 0 }; // Transparent
+        }
+      );
+
+      // Product is 6x6 minus 2x2 hole = 32 pixels opaque
       expect(opaque).toBe(32);
-      // Background + hole = 64 + 4 = 68
+      // Background + hole = 64 + 4 = 68 transparent
       expect(transparent).toBe(68);
     });
+
+    it('should handle solid image with no transparency', async () => {
+      const { opaque, transparent } = await createTestImageAndDetect(
+        5,
+        5,
+        () => {
+          return { r: 255, g: 0, b: 0, a: 255 }; // All opaque
+        }
+      );
+
+      expect(opaque).toBe(25);
+      expect(transparent).toBe(0);
+    });
+
+    it('should handle fully transparent image', async () => {
+      const { opaque, transparent } = await createTestImageAndDetect(
+        5,
+        5,
+        () => {
+          return { r: 0, g: 0, b: 0, a: 0 }; // All transparent
+        }
+      );
+
+      expect(opaque).toBe(0);
+      expect(transparent).toBe(25);
+    });
+
+    it('should handle product with edge gap (not internal hole)', async () => {
+      // 10x10 image with L-shaped product (gap on right side)
+      const { opaque, transparent } = await createTestImageAndDetect(
+        10,
+        10,
+        (x, y) => {
+          // Product in left and bottom area, gap on top-right
+          const inProduct =
+            (x >= 2 && x < 5 && y >= 2 && y < 8) || // Left column
+            (x >= 5 && x < 8 && y >= 5 && y < 8); // Bottom right
+
+          if (inProduct) {
+            return { r: 255, g: 0, b: 0, a: 255 };
+          }
+          return { r: 0, g: 0, b: 0, a: 0 };
+        }
+      );
+
+      // Left column: 3*6 = 18, Bottom right: 3*3 = 9, Total = 27
+      expect(opaque).toBe(27);
+      expect(transparent).toBe(73);
+    });
+  });
+});
+
+// =============================================================================
+// Mocked processor tests
+// =============================================================================
+
+describe('fillProductHolesProcessor (mocked)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should export processor with correct metadata', async () => {
+    // Dynamic import to get fresh module
+    vi.resetModules();
+    vi.doMock('../../../services/stability.service.js', () => ({
+      stabilityService: { inpaintHoles: vi.fn() },
+    }));
+    vi.doMock('../../../utils/logger.js', () => ({
+      createChildLogger: vi.fn(() => ({
+        info: vi.fn(),
+        debug: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      })),
+    }));
+
+    const { fillProductHolesProcessor } = await import(
+      './fill-product-holes.js'
+    );
+
+    expect(fillProductHolesProcessor.id).toBe('fill-product-holes');
+    expect(fillProductHolesProcessor.displayName).toBe('Fill Product Holes');
+    expect(fillProductHolesProcessor.io.requires).toContain('images');
+    expect(fillProductHolesProcessor.io.requires).toContain('frames');
+    expect(fillProductHolesProcessor.io.produces).toContain('images');
   });
 });

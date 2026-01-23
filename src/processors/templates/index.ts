@@ -18,19 +18,24 @@ export * from './stagingTemplates.js';
 /**
  * Classic strategy stack
  *
- * Flow: Download → Extract Frames → Score → Classify → Extract Products → Generate Commercial → Complete
+ * Flow: Download → Extract Frames → Score → Classify → Claid BG Remove → Fill Holes → Center → Generate Commercial → Complete
+ *
+ * Uses Claid.ai for background removal with selective object retention,
+ * followed by hole filling (for obstruction removal artifacts) and centering.
  */
 export const classicStack: StackTemplate = {
   id: 'classic',
   name: 'Classic Pipeline',
-  description: 'Extract all frames, score them, classify with Gemini, extract products, generate commercial images',
+  description: 'Extract all frames, score them, classify with Gemini, extract products with Claid, generate commercial images',
   steps: [
     { processor: 'download' },
     { processor: 'extract-frames' },
     { processor: 'score-frames' },
     { processor: 'gemini-classify' },
     { processor: 'save-frame-records' },
-    { processor: 'extract-products' },
+    { processor: 'claid-bg-remove' },
+    { processor: 'fill-product-holes' },
+    { processor: 'center-product' },
     { processor: 'upload-frames' },
     { processor: 'generate-commercial' },
     { processor: 'complete-job' },
@@ -40,17 +45,22 @@ export const classicStack: StackTemplate = {
 /**
  * Gemini Video strategy stack
  *
- * Flow: Download → Gemini Video Analysis → Extract Selected Frames → Extract Products → Generate Commercial → Complete
+ * Flow: Download → Gemini Video Analysis → Claid BG Remove → Fill Holes → Center → Generate Commercial → Complete
+ *
+ * Uses Gemini for video analysis and frame selection, then Claid.ai for
+ * background removal with hole filling and centering.
  */
 export const geminiVideoStack: StackTemplate = {
   id: 'gemini_video',
   name: 'Gemini Video Pipeline',
-  description: 'Upload video to Gemini for AI analysis, extract only selected frames',
+  description: 'Upload video to Gemini for AI analysis, extract products with Claid',
   steps: [
     { processor: 'download' },
     { processor: 'gemini-video-analysis' },
     { processor: 'save-frame-records' },
-    { processor: 'extract-products' },
+    { processor: 'claid-bg-remove' },
+    { processor: 'fill-product-holes' },
+    { processor: 'center-product' },
     { processor: 'upload-frames' },
     { processor: 'generate-commercial' },
     { processor: 'complete-job' },
