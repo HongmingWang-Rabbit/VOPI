@@ -5,11 +5,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isScored, isClassified, hasClassifications } from './types.js';
+import { hasScores, hasClassificationData, hasClassifications } from './types.js';
 import type { FrameMetadata } from './types.js';
 
 describe('Type Guards', () => {
-  describe('isScored', () => {
+  describe('hasScores', () => {
     it('should return true for frames with complete score data', () => {
       const frame: FrameMetadata = {
         frameId: 'frame-1',
@@ -22,7 +22,7 @@ describe('Type Guards', () => {
         score: 145.5,
       };
 
-      expect(isScored(frame)).toBe(true);
+      expect(hasScores(frame)).toBe(true);
     });
 
     it('should return false for frames missing sharpness', () => {
@@ -36,7 +36,7 @@ describe('Type Guards', () => {
         score: 145.5,
       };
 
-      expect(isScored(frame)).toBe(false);
+      expect(hasScores(frame)).toBe(false);
     });
 
     it('should return false for frames missing motion', () => {
@@ -50,7 +50,7 @@ describe('Type Guards', () => {
         score: 145.5,
       };
 
-      expect(isScored(frame)).toBe(false);
+      expect(hasScores(frame)).toBe(false);
     });
 
     it('should return false for frames missing score', () => {
@@ -64,7 +64,7 @@ describe('Type Guards', () => {
         motion: 0.02,
       };
 
-      expect(isScored(frame)).toBe(false);
+      expect(hasScores(frame)).toBe(false);
     });
 
     it('should return false for base frames without any score data', () => {
@@ -76,7 +76,7 @@ describe('Type Guards', () => {
         index: 0,
       };
 
-      expect(isScored(frame)).toBe(false);
+      expect(hasScores(frame)).toBe(false);
     });
 
     it('should handle zero values correctly', () => {
@@ -91,30 +91,11 @@ describe('Type Guards', () => {
         score: 0,
       };
 
-      expect(isScored(frame)).toBe(true);
-    });
-
-    it('should allow type narrowing in TypeScript', () => {
-      const frame: FrameMetadata = {
-        frameId: 'frame-1',
-        filename: 'frame-001.jpg',
-        path: '/tmp/frame-001.jpg',
-        timestamp: 1.5,
-        index: 0,
-        sharpness: 150.5,
-        motion: 0.02,
-        score: 145.5,
-      };
-
-      if (isScored(frame)) {
-        // TypeScript should now know these are numbers, not undefined
-        const total: number = frame.sharpness + frame.motion + frame.score;
-        expect(total).toBeGreaterThan(0);
-      }
+      expect(hasScores(frame)).toBe(true);
     });
   });
 
-  describe('isClassified', () => {
+  describe('hasClassificationData', () => {
     it('should return true for frames with complete classification data', () => {
       const frame: FrameMetadata = {
         frameId: 'frame-1',
@@ -126,7 +107,7 @@ describe('Type Guards', () => {
         variantId: 'variant-456',
       };
 
-      expect(isClassified(frame)).toBe(true);
+      expect(hasClassificationData(frame)).toBe(true);
     });
 
     it('should return true for frames with full classification data', () => {
@@ -144,7 +125,7 @@ describe('Type Guards', () => {
         geminiScore: 0.95,
       };
 
-      expect(isClassified(frame)).toBe(true);
+      expect(hasClassificationData(frame)).toBe(true);
     });
 
     it('should return false for frames missing productId', () => {
@@ -157,7 +138,7 @@ describe('Type Guards', () => {
         variantId: 'variant-456',
       };
 
-      expect(isClassified(frame)).toBe(false);
+      expect(hasClassificationData(frame)).toBe(false);
     });
 
     it('should return false for frames missing variantId', () => {
@@ -170,7 +151,7 @@ describe('Type Guards', () => {
         productId: 'product-123',
       };
 
-      expect(isClassified(frame)).toBe(false);
+      expect(hasClassificationData(frame)).toBe(false);
     });
 
     it('should return false for base frames without classification data', () => {
@@ -182,7 +163,7 @@ describe('Type Guards', () => {
         index: 0,
       };
 
-      expect(isClassified(frame)).toBe(false);
+      expect(hasClassificationData(frame)).toBe(false);
     });
 
     it('should handle empty string values correctly', () => {
@@ -197,29 +178,11 @@ describe('Type Guards', () => {
       };
 
       // Empty strings are still strings, so this should be true
-      expect(isClassified(frame)).toBe(true);
-    });
-
-    it('should allow type narrowing in TypeScript', () => {
-      const frame: FrameMetadata = {
-        frameId: 'frame-1',
-        filename: 'frame-001.jpg',
-        path: '/tmp/frame-001.jpg',
-        timestamp: 1.5,
-        index: 0,
-        productId: 'product-123',
-        variantId: 'variant-456',
-      };
-
-      if (isClassified(frame)) {
-        // TypeScript should now know these are strings, not undefined
-        const combined: string = `${frame.productId}-${frame.variantId}`;
-        expect(combined).toBe('product-123-variant-456');
-      }
+      expect(hasClassificationData(frame)).toBe(true);
     });
   });
 
-  describe('combined type guards', () => {
+  describe('combined checks', () => {
     it('should identify frames with both scores and classifications', () => {
       const frame: FrameMetadata = {
         frameId: 'frame-1',
@@ -234,8 +197,8 @@ describe('Type Guards', () => {
         variantId: 'variant-456',
       };
 
-      expect(isScored(frame)).toBe(true);
-      expect(isClassified(frame)).toBe(true);
+      expect(hasScores(frame)).toBe(true);
+      expect(hasClassificationData(frame)).toBe(true);
     });
 
     it('should correctly identify scored but not classified frames', () => {
@@ -250,8 +213,8 @@ describe('Type Guards', () => {
         score: 145.5,
       };
 
-      expect(isScored(frame)).toBe(true);
-      expect(isClassified(frame)).toBe(false);
+      expect(hasScores(frame)).toBe(true);
+      expect(hasClassificationData(frame)).toBe(false);
     });
 
     it('should correctly identify classified but not scored frames', () => {
@@ -265,8 +228,8 @@ describe('Type Guards', () => {
         variantId: 'variant-456',
       };
 
-      expect(isScored(frame)).toBe(false);
-      expect(isClassified(frame)).toBe(true);
+      expect(hasScores(frame)).toBe(false);
+      expect(hasClassificationData(frame)).toBe(true);
     });
   });
 

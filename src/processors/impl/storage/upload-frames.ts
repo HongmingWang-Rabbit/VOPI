@@ -8,6 +8,7 @@ import { copyFile } from 'fs/promises';
 import path from 'path';
 import { eq } from 'drizzle-orm';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
+import { getFrameDbIdMap } from '../../types.js';
 import { storageService } from '../../../services/storage.service.js';
 import { getDatabase, schema } from '../../../db/index.js';
 import { JobStatus } from '../../../types/job.types.js';
@@ -38,16 +39,8 @@ export const uploadFramesProcessor: Processor = {
       return { success: false, error: 'No frames to upload' };
     }
 
-    // Get frameRecords from metadata.frames dbIds or legacy field
-    const frameRecords = data.frameRecords || new Map();
-    // Build frameRecords from metadata.frames if not present
-    if (frameRecords.size === 0 && data.metadata?.frames) {
-      for (const frame of data.metadata.frames) {
-        if (frame.dbId) {
-          frameRecords.set(frame.frameId, frame.dbId);
-        }
-      }
-    }
+    // Get frameId -> dbId mapping (handles both legacy and new formats)
+    const frameRecords = getFrameDbIdMap(data);
 
     logger.info({ jobId, frameCount: inputFrames.length }, 'Uploading frames');
 

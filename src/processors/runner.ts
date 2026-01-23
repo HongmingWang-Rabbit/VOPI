@@ -364,26 +364,6 @@ export class StackRunner {
   }
 
   /**
-   * Infer IO types from pipeline data (core types only)
-   * @deprecated Use inferDataPaths instead - this method only returns core data types (video, images, text).
-   * Scheduled for removal in v3.0. Migrate to inferDataPaths() for full data path detection.
-   * @param data - Pipeline data to inspect
-   * @returns Array of core data paths only
-   */
-  inferIOTypes(data?: PipelineData): DataPath[] {
-    if (!data) return [];
-
-    const types: DataPath[] = [];
-
-    // Core types only for backwards compatibility
-    if (data.video?.path || data.video?.sourceUrl) types.push('video');
-    if (data.images && data.images.length > 0) types.push('images');
-    if (data.text) types.push('text');
-
-    return types;
-  }
-
-  /**
    * Create a custom stack from steps
    * @param id - Stack ID
    * @param name - Stack name

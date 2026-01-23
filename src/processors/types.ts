@@ -33,6 +33,10 @@ export type DataPath =
   | 'video'                 // Video file data (path, metadata, sourceUrl)
   | 'images'                // Array of image file paths
   | 'text'                  // Text/string data
+  // Audio data types
+  | 'audio'                 // Audio file data (path, format, duration)
+  | 'transcript'            // Transcribed text from audio
+  | 'product.metadata'      // Structured product metadata for e-commerce
   // Frame metadata paths
   | 'frames'                // Base frame metadata exists
   | 'frames.scores'         // Frames have score fields (sharpness, motion, score)
@@ -40,18 +44,6 @@ export type DataPath =
   | 'frames.dbId'           // Frames have database IDs
   | 'frames.s3Url'          // Frames have S3 URLs
   | 'frames.version';       // Frames have commercial version field
-
-/**
- * @deprecated Use DataPath instead - IOType has been unified into DataPath
- * Scheduled for removal in v3.0. Migrate to DataPath.
- */
-export type IOType = 'video' | 'images' | 'text';
-
-/**
- * @deprecated Use DataPath instead - MetadataPath has been unified into DataPath
- * Scheduled for removal in v3.0. Migrate to DataPath.
- */
-export type MetadataPath = DataPath;
 
 /**
  * Processor IO declaration
@@ -170,8 +162,57 @@ export interface PipelineMetadata {
   /** Final job result */
   result?: unknown;
 
+  // ============================================================================
+  // Audio & E-commerce Metadata (added by audio analysis pipeline)
+  // ============================================================================
+
+  /** Transcribed text from audio track */
+  transcript?: string;
+
+  /** Audio duration in seconds (if audio was extracted) */
+  audioDuration?: number;
+
+  /** Structured product metadata for e-commerce platforms */
+  productMetadata?: ProductMetadataOutput;
+
+  /** S3 URL to the uploaded metadata.json file */
+  metadataS3Url?: string;
+
   /** Custom extension data - use this instead of adding arbitrary keys */
   extensions?: Record<string, unknown>;
+}
+
+/**
+ * Product metadata output from audio/video analysis
+ * Defined here to avoid circular imports - full type in product-metadata.types.ts
+ */
+export interface ProductMetadataOutput {
+  /** Product title */
+  title: string;
+  /** Full description */
+  description: string;
+  /** Short description for previews */
+  shortDescription?: string;
+  /** Key features as bullet points */
+  bulletPoints: string[];
+  /** Primary brand */
+  brand?: string;
+  /** Product category */
+  category?: string;
+  /** Search keywords */
+  keywords?: string[];
+  /** Tags */
+  tags?: string[];
+  /** Primary color */
+  color?: string;
+  /** Primary materials */
+  materials?: string[];
+  /** Overall confidence score 0-100 */
+  confidence: number;
+  /** Whether metadata was extracted from audio */
+  extractedFromAudio: boolean;
+  /** Relevant excerpts from transcript */
+  transcriptExcerpts?: string[];
 }
 
 /**
@@ -181,11 +222,6 @@ export interface DataValidationResult {
   valid: boolean;
   missing: DataPath[];
 }
-
-/**
- * @deprecated Use DataValidationResult instead
- */
-export type MetadataValidationResult = DataValidationResult;
 
 /**
  * Validate that required data paths are present
@@ -223,6 +259,19 @@ export function validateDataRequirements(
 
       case 'text':
         satisfied = typeof data.text === 'string' && data.text.length > 0;
+        break;
+
+      // Audio data types
+      case 'audio':
+        satisfied = !!(data.audio?.path && data.audio?.hasAudio);
+        break;
+
+      case 'transcript':
+        satisfied = typeof data.metadata?.transcript === 'string' && data.metadata.transcript.length > 0;
+        break;
+
+      case 'product.metadata':
+        satisfied = !!(data.metadata?.productMetadata?.title);
         break;
 
       // Frame metadata paths
@@ -264,18 +313,6 @@ export function validateDataRequirements(
 }
 
 /**
- * @deprecated Use validateDataRequirements instead
- */
-export function validateMetadataRequirements(
-  metadata: PipelineMetadata | undefined,
-  requirements: DataPath[] | undefined
-): DataValidationResult {
-  // Create a minimal PipelineData wrapper for the new function
-  const data = metadata ? { metadata } as PipelineData : undefined;
-  return validateDataRequirements(data, requirements);
-}
-
-/**
  * Check if a frame has score data
  */
 export function hasScores(frame: FrameMetadata): boolean {
@@ -313,65 +350,24 @@ export function syncImagesWithFrames(metadata: PipelineMetadata | undefined): st
   return metadata.frames.map(f => f.path);
 }
 
-// ============================================================================
-// Legacy type guards - kept for backwards compatibility
-// ============================================================================
-
 /**
- * Base frame metadata from extraction
- * @deprecated Use FrameMetadata directly - all fields are optional
+ * Get frameId -> dbId mapping from pipeline data
+ * Checks frameRecords field first, then builds from metadata.frames[].dbId
  */
-export interface BaseFrameMetadata {
-  frameId: string;
-  filename: string;
-  path: string;
-  timestamp: number;
-  index: number;
-}
+export function getFrameDbIdMap(data: PipelineData): Map<string, string> {
+  if (data.frameRecords && data.frameRecords.size > 0) {
+    return data.frameRecords;
+  }
 
-/**
- * Frame metadata with quality scores
- * @deprecated Use FrameMetadata with hasScores() check
- */
-export interface ScoredFrameMetadata extends BaseFrameMetadata {
-  sharpness: number;
-  motion: number;
-  score: number;
-  isBestPerSecond?: boolean;
-}
-
-/**
- * Frame metadata with AI classification
- * @deprecated Use FrameMetadata with hasClassificationData() check
- */
-export interface ClassifiedFrameMetadata extends BaseFrameMetadata {
-  productId: string;
-  variantId: string;
-  angleEstimate?: string;
-  recommendedType?: string;
-  variantDescription?: string;
-  geminiScore?: number;
-  rotationAngleDeg?: number;
-  allFrameIds?: string[];
-  obstructions?: FrameObstructions;
-  backgroundRecommendations?: BackgroundRecommendations;
-  isFinalSelection?: boolean;
-}
-
-/**
- * Type guard to check if frame has score data
- * @deprecated Use hasScores() instead
- */
-export function isScored(frame: FrameMetadata): frame is FrameMetadata & ScoredFrameMetadata {
-  return hasScores(frame);
-}
-
-/**
- * Type guard to check if frame has AI classification data
- * @deprecated Use hasClassificationData() instead
- */
-export function isClassified(frame: FrameMetadata): frame is FrameMetadata & ClassifiedFrameMetadata {
-  return hasClassificationData(frame);
+  const map = new Map<string, string>();
+  if (data.metadata?.frames) {
+    for (const frame of data.metadata.frames) {
+      if (frame.dbId) {
+        map.set(frame.frameId, frame.dbId);
+      }
+    }
+  }
+  return map;
 }
 
 // ============================================================================
@@ -393,6 +389,24 @@ export interface VideoData {
   dbId?: string;
   /** Source URL to download from */
   sourceUrl?: string;
+}
+
+/**
+ * Audio data extracted from video
+ */
+export interface AudioData {
+  /** Local file path to the extracted audio file */
+  path: string;
+  /** Audio format (e.g., 'mp3', 'wav') */
+  format: string;
+  /** Duration in seconds */
+  duration?: number;
+  /** Sample rate in Hz */
+  sampleRate?: number;
+  /** Number of audio channels (1 = mono, 2 = stereo) */
+  channels?: number;
+  /** Whether the source video had an audio track */
+  hasAudio: boolean;
 }
 
 /**
@@ -422,37 +436,24 @@ export interface ProductExtractionResultData {
 /**
  * Unified pipeline data that flows between processors
  *
- * The simplified structure:
- * - video, images, text: Core IO types
- * - metadata: Persistent container for all frame data and auxiliary info
- *
- * Legacy fields (frames, scoredFrames, etc.) are maintained for backwards
- * compatibility but should be migrated to use metadata.frames
+ * Structure:
+ * - video, images, text, audio: Core data types
+ * - metadata: Persistent container for frame data and auxiliary info
  */
 export interface PipelineData {
-  // Core data by type
+  // Core data types
   video?: VideoData;
   images?: string[];
   text?: string;
+  audio?: AudioData;
 
-  /**
-   * Unified metadata container - always present, enriched by processors
-   * This is the primary location for frame data and auxiliary information
-   */
+  /** Unified metadata container - enriched by processors */
   metadata: PipelineMetadata;
 
-  // ============================================================================
-  // Legacy fields - maintained for backwards compatibility during migration
-  // New code should use metadata.frames instead
-  // ============================================================================
-
-  /** @deprecated Use metadata.frames */
+  // Frame data (also available via metadata.frames)
   frames?: FrameMetadata[];
-  /** @deprecated Use metadata.frames with hasScores() filter */
   scoredFrames?: FrameMetadata[];
-  /** @deprecated Use metadata.frames */
   candidateFrames?: FrameMetadata[];
-  /** @deprecated Use metadata.frames */
   recommendedFrames?: FrameMetadata[];
 
   // Commercial images
@@ -462,7 +463,6 @@ export interface PipelineData {
   uploadedUrls?: string[];
 
   // Frame DB records mapping (frameId -> dbId)
-  /** @deprecated Frame dbIds are now stored in metadata.frames[].dbId */
   frameRecords?: Map<string, string>;
 
   // Product extraction results
@@ -471,11 +471,10 @@ export interface PipelineData {
   // Product type detected by Gemini
   productType?: string;
 
-  // Custom extension data - preferred for new code
+  // Custom extension data
   extensions?: Record<string, unknown>;
 
-  // Allow arbitrary keys for backwards compatibility and processor flexibility
-  // Note: Prefer using 'extensions' field for new custom data
+  // Allow arbitrary keys for processor flexibility
   [key: string]: unknown;
 }
 

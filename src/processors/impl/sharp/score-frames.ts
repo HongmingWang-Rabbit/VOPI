@@ -78,27 +78,10 @@ export const scoreFramesProcessor: Processor = {
       )
     );
 
-    // Build enriched metadata with scores, marking which are best per second
+    // Build set of candidate frameIds for efficient lookup
     const candidateSet = new Set(candidateFrames.map(c => c.frameId));
 
-    // IMPORTANT: We filter frames here to reduce context - only keep candidates
-    // This is a key simplification from the plan
-    const enrichedFrames: FrameMetadata[] = candidateFrames.map((cf) => {
-      const original = inputFrames.find((f) => f.frameId === cf.frameId);
-      return {
-        ...original,
-        frameId: cf.frameId,
-        filename: cf.filename,
-        path: cf.path,
-        timestamp: cf.timestamp,
-        index: original?.index ?? 0,
-        sharpness: cf.sharpness,
-        motion: cf.motion,
-        score: cf.score,
-        isBestPerSecond: true,
-      };
-    });
-
+    // Single pass: map all scored frames with enriched metadata
     // Keep all scored frames for legacy compatibility (save-frame-records needs them)
     const allScoredFrames: FrameMetadata[] = scoredFrames.map((sf) => {
       const original = inputFrames.find((f) => f.frameId === sf.frameId);
@@ -115,6 +98,9 @@ export const scoreFramesProcessor: Processor = {
         isBestPerSecond: candidateSet.has(sf.frameId),
       };
     });
+
+    // Filter to candidates only - these are the frames that continue through pipeline
+    const enrichedFrames = allScoredFrames.filter(f => f.isBestPerSecond);
 
     logger.info({
       jobId,

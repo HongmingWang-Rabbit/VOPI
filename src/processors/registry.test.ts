@@ -15,14 +15,14 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 import { ProcessorRegistry } from './registry.js';
-import type { Processor, ProcessorContext, PipelineData, ProcessorResult, IOType } from './types.js';
+import type { Processor, ProcessorContext, PipelineData, ProcessorResult, DataPath } from './types.js';
 import { JobStatus } from '../types/job.types.js';
 
 // Helper to create mock processors
 function createMockProcessor(
   id: string,
-  requires: IOType[],
-  produces: IOType[]
+  requires: DataPath[],
+  produces: DataPath[]
 ): Processor {
   return {
     id,

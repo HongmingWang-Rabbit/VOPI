@@ -23,7 +23,7 @@ import type {
   ProcessorResult,
   StackTemplate,
   StackConfig,
-  IOType,
+  DataPath,
 } from './types.js';
 import { JobStatus } from '../types/job.types.js';
 import type { Job } from '../db/schema.js';
@@ -32,8 +32,8 @@ import type { PipelineTimer } from '../utils/timer.js';
 // Helper to create mock processors
 function createMockProcessor(
   id: string,
-  requires: IOType[],
-  produces: IOType[],
+  requires: DataPath[],
+  produces: DataPath[],
   executeFn?: (context: ProcessorContext, data: PipelineData) => Promise<ProcessorResult>
 ): Processor {
   return {
@@ -223,54 +223,6 @@ describe('StackRunner', () => {
       // With both required initial data
       const result = runner.validate(stack, { metadata: {}, images: ['img.jpg'], text: 'test' });
       expect(result.valid).toBe(true);
-    });
-  });
-
-  describe('inferIOTypes', () => {
-    // Note: IOType is now simplified to just 3 types: 'video', 'images', 'text'
-    // Frame metadata is tracked separately via metadata paths, not as IO types
-
-    it('should return empty array for undefined data', () => {
-      const result = runner.inferIOTypes(undefined);
-      expect(result).toEqual([]);
-    });
-
-    it('should return empty array for empty data', () => {
-      const result = runner.inferIOTypes({ metadata: {} });
-      expect(result).toEqual([]);
-    });
-
-    it('should detect video IO type', () => {
-      const result = runner.inferIOTypes({ metadata: {}, video: { path: '/path/to/video.mp4' } });
-      expect(result).toContain('video');
-    });
-
-    it('should detect images IO type', () => {
-      const result = runner.inferIOTypes({ metadata: {}, images: ['/path/to/img1.jpg', '/path/to/img2.jpg'] });
-      expect(result).toContain('images');
-    });
-
-    it('should not detect images for empty array', () => {
-      const result = runner.inferIOTypes({ metadata: {}, images: [] });
-      expect(result).not.toContain('images');
-    });
-
-    it('should detect text IO type', () => {
-      const result = runner.inferIOTypes({ metadata: {}, text: 'some text' });
-      expect(result).toContain('text');
-    });
-
-    it('should detect multiple IO types', () => {
-      const result = runner.inferIOTypes({
-        metadata: {},
-        video: { path: '/path/to/video.mp4' },
-        images: ['/path/to/img.jpg'],
-        text: 'some text',
-      });
-      expect(result).toContain('video');
-      expect(result).toContain('images');
-      expect(result).toContain('text');
-      expect(result).toHaveLength(3);
     });
   });
 

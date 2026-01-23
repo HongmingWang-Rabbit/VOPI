@@ -6,6 +6,7 @@
 
 import path from 'path';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, CommercialImageData, FrameMetadata } from '../../types.js';
+import { getFrameDbIdMap } from '../../types.js';
 import { photoroomService } from '../../../services/photoroom.service.js';
 import { storageService } from '../../../services/storage.service.js';
 import { getDatabase, schema } from '../../../db/index.js';
@@ -227,16 +228,8 @@ export const generateCommercialProcessor: Processor = {
       return { success: false, error: 'No frames for commercial generation' };
     }
 
-    // Get frameRecords from metadata.frames dbIds or legacy field
-    const frameRecords = data.frameRecords || new Map();
-    // Build frameRecords from metadata.frames if not present
-    if (frameRecords.size === 0 && data.metadata?.frames) {
-      for (const frame of data.metadata.frames) {
-        if (frame.dbId) {
-          frameRecords.set(frame.frameId, frame.dbId);
-        }
-      }
-    }
+    // Get frameId -> dbId mapping (handles both legacy and new formats)
+    const frameRecords = getFrameDbIdMap(data);
 
     const extractionResults = data.extractionResults || new Map();
     const versions = (options?.versions as string[]) ?? config.commercialVersions;
