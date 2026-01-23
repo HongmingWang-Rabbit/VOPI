@@ -284,9 +284,10 @@ describe('Stack Templates', () => {
     });
 
     it('all production stacks should validate with video input', () => {
+      const videoData = { metadata: {}, video: { sourceUrl: 'test://video.mp4' } };
       for (const stack of Object.values(stackTemplates)) {
         // All production stacks start with download which requires video
-        const result = stackRunner.validate(stack, ['video']);
+        const result = stackRunner.validate(stack, videoData);
         expect(result.valid).toBe(true);
       }
     });
@@ -297,28 +298,31 @@ describe('Stack Templates', () => {
       expect(inputs).toContain('video');
     });
 
+    // Note: IOType is now simplified to 3 types: video, images, text
+    // Frame metadata (frames, scores, classifications) are tracked via metadataProduces
+
     it('should dynamically compute producedOutputs from all processors', () => {
       const outputs = stackRunner.getProducedOutputs(classicStack);
       expect(outputs).toContain('video');
       expect(outputs).toContain('images');
-      expect(outputs).toContain('frames');
-      expect(outputs).toContain('scores');
-      expect(outputs).toContain('classifications');
+      expect(outputs).toContain('text');
+      // 'frames', 'scores', 'classifications' are now metadata paths, not IO types
     });
 
-    it('framesOnlyStack should NOT produce classifications (no AI)', () => {
+    it('framesOnlyStack should produce text (from upload-frames)', () => {
       const outputs = stackRunner.getProducedOutputs(framesOnlyStack);
-      expect(outputs).not.toContain('classifications');
+      // frames_only stack has upload-frames which produces text
+      expect(outputs).toContain('text');
     });
 
-    it('classicStack should produce classifications (uses gemini-classify)', () => {
+    it('classicStack should produce text (from upload-frames)', () => {
       const outputs = stackRunner.getProducedOutputs(classicStack);
-      expect(outputs).toContain('classifications');
+      expect(outputs).toContain('text');
     });
 
-    it('geminiVideoStack should produce classifications (uses gemini-video-analysis)', () => {
+    it('geminiVideoStack should produce text (from upload-frames)', () => {
       const outputs = stackRunner.getProducedOutputs(geminiVideoStack);
-      expect(outputs).toContain('classifications');
+      expect(outputs).toContain('text');
     });
 
     it('getStackIOSummary should return computed IO', () => {
@@ -326,7 +330,7 @@ describe('Stack Templates', () => {
       expect(summary.id).toBe('classic');
       expect(summary.name).toBe('Classic Pipeline');
       expect(summary.requiredInputs).toContain('video');
-      expect(summary.producedOutputs).toContain('classifications');
+      expect(summary.producedOutputs).toContain('text');
     });
   });
 });

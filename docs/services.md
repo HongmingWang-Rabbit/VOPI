@@ -411,6 +411,7 @@ interface InpaintResult {
 
 ```bash
 STABILITY_API_KEY=your-stability-api-key
+STABILITY_API_BASE=https://api.stability.ai  # Optional, defaults to official API
 ```
 
 ---

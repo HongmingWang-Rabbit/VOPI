@@ -5,7 +5,7 @@
  * Allows runtime registration and lookup of processors by ID.
  */
 
-import type { Processor, ProcessorIO, IOType } from './types.js';
+import type { Processor, ProcessorIO, DataPath } from './types.js';
 import { createChildLogger } from '../utils/logger.js';
 
 const logger = createChildLogger({ service: 'processor-registry' });
@@ -84,19 +84,19 @@ export class ProcessorRegistry {
   }
 
   /**
-   * Get processors that produce a specific IO type
-   * @param type - IO type to look for
+   * Get processors that produce a specific data path
+   * @param path - Data path to look for
    */
-  getProducers(type: IOType): Processor[] {
-    return this.getAll().filter((p) => p.io.produces.includes(type));
+  getProducers(path: DataPath): Processor[] {
+    return this.getAll().filter((p) => p.io.produces.includes(path));
   }
 
   /**
-   * Get processors that require a specific IO type
-   * @param type - IO type to look for
+   * Get processors that require a specific data path
+   * @param path - Data path to look for
    */
-  getConsumers(type: IOType): Processor[] {
-    return this.getAll().filter((p) => p.io.requires.includes(type));
+  getConsumers(path: DataPath): Processor[] {
+    return this.getAll().filter((p) => p.io.requires.includes(path));
   }
 
   /**
@@ -116,6 +116,7 @@ export class ProcessorRegistry {
 
   /**
    * Check if two IO declarations are equal
+   * Compares requires and produces arrays
    */
   private ioEquals(a: ProcessorIO, b: ProcessorIO): boolean {
     const reqA = [...a.requires].sort();
@@ -141,7 +142,12 @@ export class ProcessorRegistry {
   /**
    * Get a summary of registered processors
    */
-  summary(): Array<{ id: string; displayName: string; requires: string[]; produces: string[] }> {
+  summary(): Array<{
+    id: string;
+    displayName: string;
+    requires: DataPath[];
+    produces: DataPath[];
+  }> {
     return this.getAll().map((p) => ({
       id: p.id,
       displayName: p.displayName,

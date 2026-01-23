@@ -22,9 +22,6 @@ const logger = createChildLogger({ service: 'stability' });
 // Constants
 // =============================================================================
 
-/** Stability AI API base URL */
-const STABILITY_API_BASE = 'https://api.stability.ai';
-
 /** v2beta stable-image edit API endpoint for inpainting */
 const INPAINT_ENDPOINT = '/v2beta/stable-image/edit/inpaint';
 
@@ -34,7 +31,7 @@ const MAX_PIXELS = 4_000_000;
 /** Minimum dimension required by Stable Diffusion */
 const MIN_DIMENSION = 64;
 
-/** Dilation radius for expanding mask edges (pixels) */
+/** Dilation radius for expanding mask edges (pixels). Keep small (1-5) for performance. */
 const DILATION_RADIUS = 3;
 
 /** Gaussian blur sigma for mask edge feathering */
@@ -327,7 +324,7 @@ export class StabilityService {
       formData.append('output_format', 'png');
 
       // Make API request to v2beta endpoint
-      const endpoint = `${STABILITY_API_BASE}${INPAINT_ENDPOINT}`;
+      const endpoint = `${config.apis.stabilityBase}${INPAINT_ENDPOINT}`;
 
       logger.info({ endpoint }, 'Calling Stability AI v2beta inpaint API');
 

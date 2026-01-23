@@ -76,9 +76,10 @@ VOPI supports two pipeline strategies, controlled by `pipeline.strategy` global 
 The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) process queued jobs independently. This separation allows horizontal scaling of workers.
 
 ### Composable Processor Stack
-The pipeline is built on a modular processor stack architecture:
-- **Processors** declare IO types (`video`, `images`, `text`, `metadata`)
-- **Stacks** compose processors into pipelines with validated IO flow
+The pipeline is built on a modular processor stack architecture using a unified `DataPath` type system:
+- **DataPaths** define what data processors require/produce: `video`, `images`, `text`, `frames`, `frames.scores`, `frames.classifications`, `frames.dbId`, `frames.s3Url`, `frames.version`
+- **Processors** declare their IO contracts using these paths
+- **Stacks** compose processors into pipelines with validated data flow
 - **Swapping** allows replacing processors with compatible IO contracts (e.g., `photoroom-bg-remove` ↔ `claid-bg-remove`)
 - **Templates** provide pre-defined stacks: `classic`, `gemini_video`, `minimal`, `frames_only`, `custom_bg_removal`
 
@@ -185,8 +186,9 @@ score = sharpness - (alpha × motion × 255)
 
 - **FFmpeg** must be installed and in PATH (configurable via `FFMPEG_PATH`, `FFPROBE_PATH`)
 - **Gemini API** for frame classification (configurable model via `GEMINI_MODEL`)
-- **Photoroom API** for background removal (configurable hosts via `PHOTOROOM_*_HOST`)
-- **Claid API** (optional) for alternative background removal (`CLAID_API_KEY`) - swappable with Photoroom
+- **Photoroom API** for commercial image generation (configurable hosts via `PHOTOROOM_*_HOST`)
+- **Claid API** (optional) for background removal (`CLAID_API_KEY`) - primary provider in classic stack
+- **Stability AI** (optional) for hole inpainting (`STABILITY_API_KEY`, `STABILITY_API_BASE`)
 
 ## Configuration
 

@@ -103,9 +103,10 @@ export class PipelineService {
     if (effectiveConfig.debugEnabled) {
       logger.warn({ jobId }, 'Debug mode active - temp files and S3 uploads will NOT be cleaned up');
     }
-    // Prepare initial data - inject job.videoUrl if not already provided
+    // Prepare initial data - ensure metadata is initialized, inject job.videoUrl if not already provided
     const preparedInitialData: PipelineData = {
       ...initialData,
+      metadata: initialData?.metadata ?? {},
     };
 
     // If job has a videoUrl and initialData doesn't have video.sourceUrl, inject it

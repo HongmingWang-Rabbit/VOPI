@@ -21,7 +21,7 @@ export const geminiVideoAnalysisProcessor: Processor = {
   statusKey: JobStatus.CLASSIFYING,
   io: {
     requires: ['video'],
-    produces: ['images', 'frames', 'classifications'],
+    produces: ['images', 'frames', 'frames.classifications'],
   },
 
   async execute(
@@ -137,6 +137,7 @@ export const geminiVideoAnalysisProcessor: Processor = {
     }
 
     const imagePaths = recommendedFrames.map((f) => f.path);
+    const productType = analysisResult.products?.[0]?.category;
 
     logger.info({ jobId, frameCount: recommendedFrames.length }, 'Selected frames extracted');
 
@@ -149,13 +150,27 @@ export const geminiVideoAnalysisProcessor: Processor = {
           dbId: video.id,
         },
         images: imagePaths,
+        // Legacy fields for backwards compatibility
         frames: recommendedFrames,
         recommendedFrames,
+        productType,
+        // New unified metadata
         metadata: {
-          videoMetadata: metadata,
+          ...data.metadata,
+          frames: recommendedFrames,
+          video: {
+            duration: metadata.duration,
+            width: metadata.width,
+            height: metadata.height,
+            fps: metadata.fps,
+            codec: metadata.codec,
+            filename: metadata.filename,
+          },
           analysisResult: analysisResult.rawResponse,
           products: analysisResult.products,
           framesAnalyzed: analysisResult.framesAnalyzed,
+          variantsDiscovered: recommendedFrames.length,
+          productType,
         },
       },
     };

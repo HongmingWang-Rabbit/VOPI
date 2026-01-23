@@ -167,7 +167,7 @@ describe('StackRunner', () => {
     it('should accumulate outputs through the stack', () => {
       processorRegistry.register(createMockProcessor('step1', [], ['video']));
       processorRegistry.register(createMockProcessor('step2', ['video'], ['images']));
-      processorRegistry.register(createMockProcessor('step3', ['video', 'images'], ['classifications']));
+      processorRegistry.register(createMockProcessor('step3', ['video', 'images'], ['text']));
 
       const stack: StackTemplate = {
         id: 'test',
@@ -198,21 +198,21 @@ describe('StackRunner', () => {
         ],
       };
 
-      // Without initial IO, validation should fail
+      // Without initial data, validation should fail
       const resultWithoutInitial = runner.validate(stack);
       expect(resultWithoutInitial.valid).toBe(false);
       expect(resultWithoutInitial.error).toContain("requires 'video' but it's not available");
 
-      // With initial video IO, validation should pass
-      const resultWithInitial = runner.validate(stack, ['video']);
+      // With initial video data, validation should pass
+      const resultWithInitial = runner.validate(stack, { metadata: {}, video: { sourceUrl: 'test' } });
       expect(resultWithInitial.valid).toBe(true);
       expect(resultWithInitial.availableOutputs).toContain('video');
       expect(resultWithInitial.availableOutputs).toContain('images');
       expect(resultWithInitial.availableOutputs).toContain('text');
     });
 
-    it('should validate stack with multiple initial IO types', () => {
-      processorRegistry.register(createMockProcessor('process', ['images', 'classifications'], ['images']));
+    it('should validate stack with multiple initial data paths', () => {
+      processorRegistry.register(createMockProcessor('process', ['images', 'text'], ['images']));
 
       const stack: StackTemplate = {
         id: 'test',
@@ -220,97 +220,57 @@ describe('StackRunner', () => {
         steps: [{ processor: 'process' }],
       };
 
-      // With both required initial IO types
-      const result = runner.validate(stack, ['images', 'classifications']);
+      // With both required initial data
+      const result = runner.validate(stack, { metadata: {}, images: ['img.jpg'], text: 'test' });
       expect(result.valid).toBe(true);
     });
   });
 
   describe('inferIOTypes', () => {
+    // Note: IOType is now simplified to just 3 types: 'video', 'images', 'text'
+    // Frame metadata is tracked separately via metadata paths, not as IO types
+
     it('should return empty array for undefined data', () => {
       const result = runner.inferIOTypes(undefined);
       expect(result).toEqual([]);
     });
 
     it('should return empty array for empty data', () => {
-      const result = runner.inferIOTypes({});
+      const result = runner.inferIOTypes({ metadata: {} });
       expect(result).toEqual([]);
     });
 
     it('should detect video IO type', () => {
-      const result = runner.inferIOTypes({ video: { path: '/path/to/video.mp4' } });
+      const result = runner.inferIOTypes({ metadata: {}, video: { path: '/path/to/video.mp4' } });
       expect(result).toContain('video');
     });
 
     it('should detect images IO type', () => {
-      const result = runner.inferIOTypes({ images: ['/path/to/img1.jpg', '/path/to/img2.jpg'] });
+      const result = runner.inferIOTypes({ metadata: {}, images: ['/path/to/img1.jpg', '/path/to/img2.jpg'] });
       expect(result).toContain('images');
     });
 
     it('should not detect images for empty array', () => {
-      const result = runner.inferIOTypes({ images: [] });
+      const result = runner.inferIOTypes({ metadata: {}, images: [] });
       expect(result).not.toContain('images');
     });
 
     it('should detect text IO type', () => {
-      const result = runner.inferIOTypes({ text: 'some text' });
+      const result = runner.inferIOTypes({ metadata: {}, text: 'some text' });
       expect(result).toContain('text');
-    });
-
-    it('should detect frames IO type', () => {
-      const result = runner.inferIOTypes({
-        frames: [{ frameId: 'f1', filename: 'f1.jpg', path: '/f1.jpg', timestamp: 0, index: 0 }],
-      });
-      expect(result).toContain('frames');
-    });
-
-    it('should detect scores IO type', () => {
-      const result = runner.inferIOTypes({
-        scoredFrames: [{ frameId: 'f1', filename: 'f1.jpg', path: '/f1.jpg', timestamp: 0, index: 0, score: 50 }],
-      });
-      expect(result).toContain('scores');
-    });
-
-    it('should detect classifications IO type', () => {
-      const result = runner.inferIOTypes({
-        recommendedFrames: [{ frameId: 'f1', filename: 'f1.jpg', path: '/f1.jpg', timestamp: 0, index: 0, productId: 'p1' }],
-      });
-      expect(result).toContain('classifications');
-    });
-
-    it('should not detect classifications for empty array', () => {
-      const result = runner.inferIOTypes({ recommendedFrames: [] });
-      expect(result).not.toContain('classifications');
-    });
-
-    it('should not detect classifications for frames without AI data', () => {
-      // Frames with isFinalSelection but no productId/variantId are not "classified"
-      const result = runner.inferIOTypes({
-        recommendedFrames: [{ frameId: 'f1', filename: 'f1.jpg', path: '/f1.jpg', timestamp: 0, index: 0, isFinalSelection: true }],
-      });
-      expect(result).not.toContain('classifications');
-    });
-
-    it('should detect frame-records IO type', () => {
-      const frameRecords = new Map<string, string>();
-      frameRecords.set('f1', 'db-id-1');
-      const result = runner.inferIOTypes({ frameRecords });
-      expect(result).toContain('frame-records');
     });
 
     it('should detect multiple IO types', () => {
       const result = runner.inferIOTypes({
+        metadata: {},
         video: { path: '/path/to/video.mp4' },
         images: ['/path/to/img.jpg'],
         text: 'some text',
-        frames: [{ frameId: 'f1', filename: 'f1.jpg', path: '/f1.jpg', timestamp: 0, index: 0 }],
-        recommendedFrames: [{ frameId: 'f1', filename: 'f1.jpg', path: '/f1.jpg', timestamp: 0, index: 0, productId: 'p1' }],
       });
       expect(result).toContain('video');
       expect(result).toContain('images');
       expect(result).toContain('text');
-      expect(result).toContain('frames');
-      expect(result).toContain('classifications');
+      expect(result).toHaveLength(3);
     });
   });
 
@@ -326,12 +286,12 @@ describe('StackRunner', () => {
 
     it('should reject swaps with incompatible IO', () => {
       processorRegistry.register(createMockProcessor('proc-a', ['images'], ['images']));
-      processorRegistry.register(createMockProcessor('proc-b', ['images'], ['classifications']));
+      processorRegistry.register(createMockProcessor('proc-b', ['images'], ['text']));
 
       const result = runner.validateSwaps({ 'proc-a': 'proc-b' });
 
       expect(result.valid).toBe(false);
-      expect(result.error).toContain("IO contracts don't match");
+      expect(result.error).toContain("data path contracts don't match");
     });
 
     it('should reject swaps with nonexistent processors', () => {
@@ -624,7 +584,7 @@ describe('StackRunner', () => {
     it('should throw on invalid processor swaps', async () => {
       processorRegistry.register(createMockProcessor('download', [], ['video']));
       processorRegistry.register(createMockProcessor('proc-a', ['video'], ['images']));
-      processorRegistry.register(createMockProcessor('proc-b', ['video'], ['classifications'])); // Different output
+      processorRegistry.register(createMockProcessor('proc-b', ['video'], ['text'])); // Different output
 
       const stack: StackTemplate = {
         id: 'test',
@@ -665,7 +625,7 @@ describe('StackRunner', () => {
       };
 
       const context = createMockContext();
-      const initialData: PipelineData = { video: { path: '/initial-video.mp4' } };
+      const initialData: PipelineData = { metadata: {}, video: { path: '/initial-video.mp4' } };
 
       const result = await runner.execute(stack, context, undefined, initialData);
 
@@ -691,7 +651,7 @@ describe('StackRunner', () => {
     beforeEach(() => {
       processorRegistry.register(createMockProcessor('step1', [], ['video']));
       processorRegistry.register(createMockProcessor('step2', ['video'], ['images']));
-      processorRegistry.register(createMockProcessor('step3', ['images'], ['classifications', 'text']));
+      processorRegistry.register(createMockProcessor('step3', ['images'], ['text']));
     });
 
     it('should return available IO types up to specified step', () => {
@@ -707,7 +667,7 @@ describe('StackRunner', () => {
 
       expect(runner.getAvailableIO(stack, 0)).toEqual(new Set(['video']));
       expect(runner.getAvailableIO(stack, 1)).toEqual(new Set(['video', 'images']));
-      expect(runner.getAvailableIO(stack, 2)).toEqual(new Set(['video', 'images', 'classifications', 'text']));
+      expect(runner.getAvailableIO(stack, 2)).toEqual(new Set(['video', 'images', 'text']));
     });
 
     it('should handle out of bounds step index', () => {
@@ -725,7 +685,7 @@ describe('StackRunner', () => {
     beforeEach(() => {
       processorRegistry.register(createMockProcessor('download', [], ['video']));
       processorRegistry.register(createMockProcessor('extract', ['video'], ['images']));
-      processorRegistry.register(createMockProcessor('classify', ['images'], ['classifications']));
+      processorRegistry.register(createMockProcessor('classify', ['images'], ['text']));
     });
 
     it('should return empty array for stack starting with no-requirement processor', () => {
@@ -773,7 +733,7 @@ describe('StackRunner', () => {
     beforeEach(() => {
       processorRegistry.register(createMockProcessor('download', [], ['video']));
       processorRegistry.register(createMockProcessor('extract', ['video'], ['images']));
-      processorRegistry.register(createMockProcessor('classify', ['images'], ['classifications']));
+      processorRegistry.register(createMockProcessor('classify', ['images'], ['text']));
     });
 
     it('should return all outputs produced by stack processors', () => {
@@ -790,7 +750,7 @@ describe('StackRunner', () => {
       const outputs = runner.getProducedOutputs(stack);
       expect(outputs).toContain('video');
       expect(outputs).toContain('images');
-      expect(outputs).toContain('classifications');
+      expect(outputs).toContain('text');
       expect(outputs).toHaveLength(3);
     });
 

@@ -398,6 +398,7 @@ describe('fillProductHolesProcessor (mocked)', () => {
 
     expect(fillProductHolesProcessor.id).toBe('fill-product-holes');
     expect(fillProductHolesProcessor.displayName).toBe('Fill Product Holes');
+    // DataPath is the unified type for all data requirements
     expect(fillProductHolesProcessor.io.requires).toContain('images');
     expect(fillProductHolesProcessor.io.requires).toContain('frames');
     expect(fillProductHolesProcessor.io.produces).toContain('images');

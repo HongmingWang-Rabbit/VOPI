@@ -2,7 +2,7 @@
  * Stack Runner
  *
  * Executes processor stacks with validation and error handling.
- * Handles processor swapping, insertion, and IO validation.
+ * Handles processor swapping, insertion, and data path validation.
  */
 
 import type {
@@ -12,8 +12,9 @@ import type {
   StackValidationResult,
   ProcessorContext,
   PipelineData,
-  IOType,
+  DataPath,
 } from './types.js';
+import { validateDataRequirements } from './types.js';
 import { processorRegistry } from './registry.js';
 import { createChildLogger } from '../utils/logger.js';
 
@@ -22,35 +23,45 @@ const logger = createChildLogger({ service: 'stack-runner' });
 /**
  * StackRunner - Executes processor stacks
  *
- * Uses WeakMap caching for IO computation methods to avoid repeated
+ * Uses WeakMap caching for data path computation methods to avoid repeated
  * iteration over stack steps. Cache is automatically cleared when
  * stack templates are garbage collected.
  */
 export class StackRunner {
   /** Cache for getRequiredInputs results */
-  private requiredInputsCache = new WeakMap<StackTemplate, IOType[]>();
+  private requiredInputsCache = new WeakMap<StackTemplate, DataPath[]>();
 
   /** Cache for getProducedOutputs results */
-  private producedOutputsCache = new WeakMap<StackTemplate, IOType[]>();
+  private producedOutputsCache = new WeakMap<StackTemplate, DataPath[]>();
 
   /**
-   * Clear IO computation caches.
+   * Clear data path computation caches.
    * Useful when processors are re-registered or for testing.
    */
   clearCache(): void {
-    this.requiredInputsCache = new WeakMap<StackTemplate, IOType[]>();
-    this.producedOutputsCache = new WeakMap<StackTemplate, IOType[]>();
+    this.requiredInputsCache = new WeakMap<StackTemplate, DataPath[]>();
+    this.producedOutputsCache = new WeakMap<StackTemplate, DataPath[]>();
   }
 
   /**
    * Validate a stack template
-   * Checks that IO types flow correctly through the stack
+   * Checks that data paths flow correctly through the stack
    * @param stack - Stack template to validate
-   * @param initialIO - Optional initial IO types available (from initialData)
+   * @param initialData - Optional initial pipeline data
    * @returns Validation result
    */
-  validate(stack: StackTemplate, initialIO?: IOType[]): StackValidationResult {
-    const available = new Set<IOType>(initialIO);
+  validate(
+    stack: StackTemplate,
+    initialData?: PipelineData
+  ): StackValidationResult {
+    const availablePaths = new Set<DataPath>();
+
+    // Infer initial data paths from initialData
+    if (initialData) {
+      for (const path of this.inferDataPaths(initialData)) {
+        availablePaths.add(path);
+      }
+    }
 
     for (let i = 0; i < stack.steps.length; i++) {
       const step = stack.steps[i];
@@ -63,25 +74,25 @@ export class StackRunner {
         };
       }
 
-      // Check requirements are satisfied
+      // Check all requirements are satisfied
       for (const req of processor.io.requires) {
-        if (!available.has(req)) {
+        if (!availablePaths.has(req)) {
           return {
             valid: false,
-            error: `Step ${i + 1}: Processor '${step.processor}' requires '${req}' but it's not available. Available: [${[...available].join(', ')}]`,
+            error: `Step ${i + 1}: Processor '${step.processor}' requires '${req}' but it's not available. Available: [${[...availablePaths].join(', ')}]`,
           };
         }
       }
 
       // Add outputs to available set
       for (const out of processor.io.produces) {
-        available.add(out);
+        availablePaths.add(out);
       }
     }
 
     return {
       valid: true,
-      availableOutputs: [...available],
+      availableOutputs: [...availablePaths],
     };
   }
 
@@ -111,7 +122,7 @@ export class StackRunner {
         const replProc = processorRegistry.get(replacement)!;
         return {
           valid: false,
-          error: `Cannot swap '${original}' (requires: [${origProc.io.requires}], produces: [${origProc.io.produces}]) with '${replacement}' (requires: [${replProc.io.requires}], produces: [${replProc.io.produces}]) - IO contracts don't match`,
+          error: `Cannot swap '${original}' (requires: [${origProc.io.requires}], produces: [${origProc.io.produces}]) with '${replacement}' (requires: [${replProc.io.requires}], produces: [${replProc.io.produces}]) - data path contracts don't match`,
         };
       }
     }
@@ -202,16 +213,19 @@ export class StackRunner {
     // Apply configuration to get final steps
     const steps = config ? this.applyConfig(stack, config) : stack.steps;
 
-    // Infer initial IO types from initialData
-    const initialIO = this.inferIOTypes(initialData);
-
-    // Validate the final stack with initial IO
-    const validation = this.validate({ ...stack, steps }, initialIO);
+    // Validate the final stack with initial data
+    const validation = this.validate({ ...stack, steps }, initialData);
     if (!validation.valid) {
       throw new Error(`Invalid stack: ${validation.error}`);
     }
 
-    let data: PipelineData = initialData || {};
+    // Initialize pipeline data with empty metadata if not provided
+    let data: PipelineData = initialData || { metadata: {} };
+
+    // Ensure metadata object always exists
+    if (!data.metadata) {
+      data = { ...data, metadata: {} };
+    }
 
     logger.info({
       stackId: stack.id,
@@ -237,21 +251,18 @@ export class StackRunner {
         jobId: context.jobId,
       }, 'Executing processor');
 
-      // Runtime IO validation - check if declared requirements are met
-      const currentIO = this.inferIOTypes(data);
-      for (const req of processor.io.requires) {
-        if (!currentIO.includes(req)) {
-          const message = `Processor '${processor.id}' requires '${req}' but only [${currentIO.join(', ')}] available`;
-          if (config?.strictIOValidation) {
-            throw new Error(message);
-          }
-          logger.warn({
-            processor: processor.id,
-            missing: req,
-            available: currentIO,
-            jobId: context.jobId,
-          }, 'Runtime IO requirement not met - processor may fail');
+      // Runtime data path validation
+      const dataValidation = validateDataRequirements(data, processor.io.requires);
+      if (!dataValidation.valid) {
+        const message = `Processor '${processor.id}' requires [${dataValidation.missing.join(', ')}] but it's not available`;
+        if (config?.strictIOValidation) {
+          throw new Error(message);
         }
+        logger.warn({
+          processor: processor.id,
+          missing: dataValidation.missing,
+          jobId: context.jobId,
+        }, 'Runtime data requirement not met - processor may fail');
       }
 
       try {
@@ -267,7 +278,26 @@ export class StackRunner {
 
         // Merge result data
         if (result.data) {
-          data = { ...data, ...result.data };
+          // Deep merge metadata
+          const mergedMetadata = {
+            ...data.metadata,
+            ...result.data.metadata,
+          };
+          data = { ...data, ...result.data, metadata: mergedMetadata };
+        }
+
+        // Log frame count progression for debugging
+        if (data.metadata?.frames) {
+          const frameCount = data.metadata.frames.length;
+          const hasScores = data.metadata.frames.some(f => f.sharpness !== undefined);
+          const hasClassifications = data.metadata.frames.some(f => f.productId);
+          logger.debug({
+            processor: processor.id,
+            frameCount,
+            hasScores,
+            hasClassifications,
+            jobId: context.jobId,
+          }, 'Frame count after processor');
         }
 
         // Check for skip flag
@@ -295,31 +325,60 @@ export class StackRunner {
   }
 
   /**
-   * Infer IO types from pipeline data
+   * Infer data paths from pipeline data
    * @param data - Pipeline data to inspect
-   * @returns Array of available IO types
+   * @returns Array of available data paths
    */
-  inferIOTypes(data?: PipelineData): IOType[] {
+  inferDataPaths(data?: PipelineData): DataPath[] {
     if (!data) return [];
 
-    const types: IOType[] = [];
+    const paths: DataPath[] = [];
 
-    // Core types
+    // Core data types
+    if (data.video?.path || data.video?.sourceUrl) paths.push('video');
+    if (data.images && data.images.length > 0) paths.push('images');
+    if (data.text) paths.push('text');
+
+    // Frame metadata paths
+    if (data.metadata?.frames && data.metadata.frames.length > 0) {
+      paths.push('frames');
+
+      if (data.metadata.frames.some(f => f.sharpness !== undefined)) {
+        paths.push('frames.scores');
+      }
+      if (data.metadata.frames.some(f => f.productId || f.variantId)) {
+        paths.push('frames.classifications');
+      }
+      if (data.metadata.frames.some(f => f.dbId)) {
+        paths.push('frames.dbId');
+      }
+      if (data.metadata.frames.some(f => f.s3Url)) {
+        paths.push('frames.s3Url');
+      }
+      if (data.metadata.frames.some(f => f.version)) {
+        paths.push('frames.version');
+      }
+    }
+
+    return paths;
+  }
+
+  /**
+   * Infer IO types from pipeline data (core types only)
+   * @deprecated Use inferDataPaths instead - this method only returns core data types (video, images, text).
+   * Scheduled for removal in v3.0. Migrate to inferDataPaths() for full data path detection.
+   * @param data - Pipeline data to inspect
+   * @returns Array of core data paths only
+   */
+  inferIOTypes(data?: PipelineData): DataPath[] {
+    if (!data) return [];
+
+    const types: DataPath[] = [];
+
+    // Core types only for backwards compatibility
     if (data.video?.path || data.video?.sourceUrl) types.push('video');
     if (data.images && data.images.length > 0) types.push('images');
     if (data.text) types.push('text');
-
-    // Frame data types
-    if (data.frames && data.frames.length > 0) types.push('frames');
-    if (data.scoredFrames && data.scoredFrames.length > 0) types.push('scores');
-    if (data.frameRecords && data.frameRecords.size > 0) types.push('frame-records');
-
-    // Classifications: frames with AI classification data (productId, variantId)
-    // Check recommendedFrames first (typical location), then frames
-    const classifiedFrames = data.recommendedFrames || data.frames;
-    if (classifiedFrames && classifiedFrames.some((f) => f.productId || f.variantId)) {
-      types.push('classifications');
-    }
 
     return types;
   }
@@ -335,12 +394,12 @@ export class StackRunner {
   }
 
   /**
-   * Get available IO types after running a stack up to a certain step
+   * Get available data paths after running a stack up to a certain step
    * @param stack - Stack template
    * @param upToStep - Step index (inclusive)
    */
-  getAvailableIO(stack: StackTemplate, upToStep: number): Set<IOType> {
-    const available = new Set<IOType>();
+  getAvailableIO(stack: StackTemplate, upToStep: number): Set<DataPath> {
+    const available = new Set<DataPath>();
 
     for (let i = 0; i <= upToStep && i < stack.steps.length; i++) {
       const step = stack.steps[i];
@@ -359,9 +418,9 @@ export class StackRunner {
    * Get the required inputs for a stack (from the first processor)
    * Results are cached using WeakMap for performance.
    * @param stack - Stack template to analyze
-   * @returns Array of required IO types, or empty array if stack is empty or first processor not found
+   * @returns Array of required data paths, or empty array if stack is empty or first processor not found
    */
-  getRequiredInputs(stack: StackTemplate): IOType[] {
+  getRequiredInputs(stack: StackTemplate): DataPath[] {
     // Check cache first
     const cached = this.requiredInputsCache.get(stack);
     if (cached) return cached;
@@ -383,15 +442,15 @@ export class StackRunner {
    * Get the outputs produced by a stack (accumulated from all processors)
    * Results are cached using WeakMap for performance.
    * @param stack - Stack template to analyze
-   * @returns Array of IO types that will be available after stack execution
+   * @returns Array of data paths that will be available after stack execution
    */
-  getProducedOutputs(stack: StackTemplate): IOType[] {
+  getProducedOutputs(stack: StackTemplate): DataPath[] {
     // Check cache first
     const cached = this.producedOutputsCache.get(stack);
     if (cached) return cached;
 
     // Compute if not cached
-    const outputs = new Set<IOType>();
+    const outputs = new Set<DataPath>();
 
     for (const step of stack.steps) {
       const processor = processorRegistry.get(step.processor);
@@ -410,15 +469,15 @@ export class StackRunner {
   }
 
   /**
-   * Get a summary of stack IO computed from processor declarations
+   * Get a summary of stack data paths computed from processor declarations
    * @param stack - Stack template to summarize
    * @returns Object with input/output information
    */
   getStackIOSummary(stack: StackTemplate): {
     id: string;
     name: string;
-    requiredInputs: IOType[];
-    producedOutputs: IOType[];
+    requiredInputs: DataPath[];
+    producedOutputs: DataPath[];
   } {
     return {
       id: stack.id,

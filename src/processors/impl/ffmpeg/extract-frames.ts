@@ -88,8 +88,21 @@ export const extractFramesProcessor: Processor = {
           dbId: video.id,
         },
         images: imagePaths,
+        // Legacy field for backwards compatibility
         frames,
-        metadata: { videoMetadata: metadata },
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames,
+          video: {
+            duration: metadata.duration,
+            width: metadata.width,
+            height: metadata.height,
+            fps: metadata.fps,
+            codec: metadata.codec,
+            filename: metadata.filename,
+          },
+        },
       },
     };
   },

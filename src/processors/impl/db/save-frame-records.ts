@@ -4,7 +4,7 @@
  * Saves frame records to the database.
  */
 
-import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
+import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { getDatabase, schema } from '../../../db/index.js';
 import type { NewFrame } from '../../../db/schema.js';
 import { JobStatus } from '../../../types/job.types.js';
@@ -18,7 +18,7 @@ export const saveFrameRecordsProcessor: Processor = {
   statusKey: JobStatus.EXTRACTING_PRODUCT,
   io: {
     requires: ['frames'],
-    produces: ['frame-records'],
+    produces: ['frames.dbId'],
   },
 
   async execute(
@@ -34,9 +34,18 @@ export const saveFrameRecordsProcessor: Processor = {
       return { success: false, error: 'No video ID for frame records' };
     }
 
-    // Use scoredFrames if available (classic strategy), otherwise recommendedFrames
-    const allFrames = data.scoredFrames || data.frames || [];
-    const recommendedFrames = data.recommendedFrames || [];
+    // Use metadata.frames as primary source for final selection
+    const metadataFrames = data.metadata?.frames || [];
+
+    // For saving to DB, we need all scored frames (from legacy field)
+    // This ensures we save the complete frame history, not just final selections
+    // Check length to avoid empty array being truthy and blocking fallback
+    const allFrames = (data.scoredFrames?.length ? data.scoredFrames : null)
+      || (data.frames?.length ? data.frames : null)
+      || metadataFrames;
+
+    // Build lookup for recommended frames (from metadata or legacy)
+    const recommendedFrames = metadataFrames.length > 0 ? metadataFrames : (data.recommendedFrames || []);
     const candidateFrames = data.candidateFrames || [];
 
     logger.info({
@@ -84,6 +93,10 @@ export const saveFrameRecordsProcessor: Processor = {
         success: true,
         data: {
           frameRecords: new Map(),
+          metadata: {
+            ...data.metadata,
+            frameRecordCount: 0,
+          },
         },
       };
     }
@@ -100,14 +113,23 @@ export const saveFrameRecordsProcessor: Processor = {
       frameRecords.set(record.frameId, record.id);
     }
 
+    // Update metadata.frames with dbIds
+    const updatedFrames: FrameMetadata[] = (data.metadata?.frames || []).map((frame) => ({
+      ...frame,
+      dbId: frameRecords.get(frame.frameId),
+    }));
+
     logger.info({ jobId, savedCount: records.length }, 'Frame records saved');
 
     return {
       success: true,
       data: {
+        // Legacy field for backwards compatibility
         frameRecords,
+        // New unified metadata
         metadata: {
           ...data.metadata,
+          frames: updatedFrames,
           frameRecordCount: records.length,
         },
       },

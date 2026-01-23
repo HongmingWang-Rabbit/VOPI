@@ -56,8 +56,12 @@ Each test prompts for required inputs and uses real services.
 
 ### Processing Pipeline
 
-VOPI uses a **composable processor stack architecture** where each processing step is a modular processor with declared IO types. This enables:
-- **Flexible composition** - Mix and match processors
+VOPI uses a **composable processor stack architecture** where each processing step is a modular processor with declared data path requirements. The unified `DataPath` type system includes:
+- Core data: `video`, `images`, `text`
+- Frame metadata: `frames`, `frames.scores`, `frames.classifications`, `frames.dbId`, `frames.s3Url`, `frames.version`
+
+This enables:
+- **Flexible composition** - Mix and match processors based on data path compatibility
 - **Processor swapping** - Replace processors with compatible alternatives (e.g., Photoroom ↔ Claid for background removal)
 - **Custom stacks** - Create specialized workflows for different use cases
 

@@ -221,16 +221,27 @@ export const generateCommercialProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, config, workDirs, onProgress, timer } = context;
 
-    const frames = data.recommendedFrames || data.frames;
-    if (!frames || frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames for commercial generation' };
     }
 
+    // Get frameRecords from metadata.frames dbIds or legacy field
     const frameRecords = data.frameRecords || new Map();
+    // Build frameRecords from metadata.frames if not present
+    if (frameRecords.size === 0 && data.metadata?.frames) {
+      for (const frame of data.metadata.frames) {
+        if (frame.dbId) {
+          frameRecords.set(frame.frameId, frame.dbId);
+        }
+      }
+    }
+
     const extractionResults = data.extractionResults || new Map();
     const versions = (options?.versions as string[]) ?? config.commercialVersions;
 
-    logger.info({ jobId, frameCount: frames.length, versions }, 'Generating commercial images');
+    logger.info({ jobId, frameCount: inputFrames.length, versions }, 'Generating commercial images');
 
     await onProgress?.({
       status: JobStatus.GENERATING,
@@ -243,9 +254,9 @@ export const generateCommercialProcessor: Processor = {
     let totalErrors = 0;
     let successfulFrames = 0;
 
-    for (let i = 0; i < frames.length; i++) {
-      const frame = frames[i];
-      const progress = calculateProgress(i, frames.length, PROGRESS.GENERATE_COMMERCIAL.START, PROGRESS.GENERATE_COMMERCIAL.END);
+    for (let i = 0; i < inputFrames.length; i++) {
+      const frame = inputFrames[i];
+      const progress = calculateProgress(i, inputFrames.length, PROGRESS.GENERATE_COMMERCIAL.START, PROGRESS.GENERATE_COMMERCIAL.END);
 
       await onProgress?.({
         status: JobStatus.GENERATING,
@@ -253,7 +264,7 @@ export const generateCommercialProcessor: Processor = {
         message: `Generating images for ${frame.recommendedType || frame.frameId}`,
       });
 
-      const frameDbId = frameRecords.get(frame.frameId);
+      const frameDbId = frameRecords.get(frame.frameId) || frame.dbId;
 
       try {
         const result = await processFrameVersions(
@@ -294,7 +305,7 @@ export const generateCommercialProcessor: Processor = {
       generatedCount: successCount,
       totalErrors,
       successfulFrames,
-      totalFrames: frames.length,
+      totalFrames: inputFrames.length,
     }, 'Commercial generation complete');
 
     // Return partial success info in metadata
@@ -302,11 +313,12 @@ export const generateCommercialProcessor: Processor = {
       success: true,
       data: {
         commercialImages: allCommercialImages,
+        // New unified metadata
         metadata: {
           ...data.metadata,
           commercialImageUrls,
           commercialGenerationStats: {
-            totalFrames: frames.length,
+            totalFrames: inputFrames.length,
             successfulFrames,
             totalErrors,
             totalImagesGenerated: successCount,

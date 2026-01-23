@@ -18,7 +18,7 @@
 
 import path from 'path';
 import sharp from 'sharp';
-import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
+import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
 import { stabilityService } from '../../../services/stability.service.js';
@@ -30,8 +30,8 @@ const logger = createChildLogger({ service: 'processor:fill-product-holes' });
 // Constants
 // =============================================================================
 
-/** Target number of boundary points to sample (controls computation vs accuracy tradeoff) */
-const BOUNDARY_SAMPLE_TARGET = 500;
+/** Default target number of boundary points to sample (controls computation vs accuracy tradeoff) */
+const DEFAULT_BOUNDARY_SAMPLE_TARGET = 500;
 
 // =============================================================================
 // Geometry Helpers (exported for testing)
@@ -174,11 +174,13 @@ export function fillConvexHullScanline(hull: Point[], width: number, height: num
  *
  * @param imagePath - Path to the PNG image
  * @param alphaThreshold - Threshold below which pixels are considered transparent
+ * @param boundarySampleTarget - Target number of boundary points to sample (default: 500)
  * @returns Hole statistics and a mask buffer (255 = hole, 0 = not hole)
  */
 async function detectHoles(
   imagePath: string,
-  alphaThreshold: number
+  alphaThreshold: number,
+  boundarySampleTarget: number = DEFAULT_BOUNDARY_SAMPLE_TARGET
 ): Promise<{ holeCount: number; totalPixels: number; opaquePixels: number; holeMask: Uint8Array; width: number; height: number }> {
   // Load image
   const image = sharp(imagePath);
@@ -212,7 +214,7 @@ async function detectHoles(
   // Sample boundary points (pixels that are opaque and adjacent to transparent)
   // Sample every Nth pixel to reduce computation for large images
   const boundaryPoints: Point[] = [];
-  const sampleRate = Math.max(1, Math.floor(Math.min(width, height) / BOUNDARY_SAMPLE_TARGET));
+  const sampleRate = Math.max(1, Math.floor(Math.min(width, height) / boundarySampleTarget));
 
   for (let y = 0; y < height; y += sampleRate) {
     for (let x = 0; x < width; x += sampleRate) {
@@ -316,8 +318,9 @@ export const fillProductHolesProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
-    const frames = data.recommendedFrames || data.frames;
-    if (!frames || frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames to process for hole filling' };
     }
 
@@ -328,8 +331,10 @@ export const fillProductHolesProcessor: Processor = {
     // Minimum absolute hole pixel count to trigger inpainting (default 100 pixels)
     // This catches significant holes even in very large images where percentage is tiny
     const minHolePixels = (options?.minHolePixels as number) ?? 100;
+    // Target number of boundary points for convex hull computation (higher = more accurate, slower)
+    const boundarySampleTarget = (options?.boundarySampleTarget as number) ?? DEFAULT_BOUNDARY_SAMPLE_TARGET;
 
-    logger.info({ jobId, frameCount: frames.length, alphaThreshold, minHolePercentage, minHolePixels }, 'Detecting and filling product holes');
+    logger.info({ jobId, frameCount: inputFrames.length, alphaThreshold, minHolePercentage, minHolePixels }, 'Detecting and filling product holes');
 
     await onProgress?.({
       status: JobStatus.EXTRACTING_PRODUCT,
@@ -337,24 +342,24 @@ export const fillProductHolesProcessor: Processor = {
       message: 'Detecting product holes',
     });
 
-    const updatedFrames = [];
+    const updatedFrames: FrameMetadata[] = [];
     let totalHolesFilled = 0;
 
-    for (let i = 0; i < frames.length; i++) {
-      const frame = frames[i];
-      const progress = 66 + Math.round(((i + 1) / frames.length) * 4);
+    for (let i = 0; i < inputFrames.length; i++) {
+      const frame = inputFrames[i];
+      const progress = 66 + Math.round(((i + 1) / inputFrames.length) * 4);
 
       await onProgress?.({
         status: JobStatus.EXTRACTING_PRODUCT,
         percentage: progress,
-        message: `Checking holes ${i + 1}/${frames.length}`,
+        message: `Checking holes ${i + 1}/${inputFrames.length}`,
       });
 
       try {
         // Detect holes using convex hull algorithm
         const { holeCount, opaquePixels, holeMask, width, height } = await timer.timeOperation(
           'detect_holes',
-          () => detectHoles(frame.path, alphaThreshold),
+          () => detectHoles(frame.path, alphaThreshold, boundarySampleTarget),
           { frameId: frame.frameId }
         );
 
@@ -457,13 +462,19 @@ export const fillProductHolesProcessor: Processor = {
       }
     }
 
-    logger.info({ jobId, totalHolesFilled, totalFrames: frames.length }, 'Product hole filling complete');
+    logger.info({ jobId, totalHolesFilled, totalFrames: inputFrames.length }, 'Product hole filling complete');
 
     return {
       success: true,
       data: {
         images: updatedFrames.map((f) => f.path),
+        // Legacy field for backwards compatibility
         recommendedFrames: updatedFrames,
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames: updatedFrames,
+        },
       },
     };
   },

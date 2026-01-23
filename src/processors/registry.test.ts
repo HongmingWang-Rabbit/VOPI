@@ -71,7 +71,7 @@ describe('ProcessorRegistry', () => {
       const processors = [
         createMockProcessor('proc-1', [], ['video']),
         createMockProcessor('proc-2', ['video'], ['images']),
-        createMockProcessor('proc-3', ['images'], ['classifications']),
+        createMockProcessor('proc-3', ['images'], ['text']),
       ];
 
       registry.registerAll(processors);
@@ -176,8 +176,8 @@ describe('ProcessorRegistry', () => {
   describe('getConsumers', () => {
     it('should return processors that require a specific IO type', () => {
       const videoConsumer = createMockProcessor('video-cons', ['video'], ['images']);
-      const imageConsumer = createMockProcessor('image-cons', ['images'], ['classifications']);
-      const bothConsumer = createMockProcessor('both-cons', ['video', 'images'], ['classifications']);
+      const imageConsumer = createMockProcessor('image-cons', ['images'], ['text']);
+      const bothConsumer = createMockProcessor('both-cons', ['video', 'images'], ['text']);
 
       registry.registerAll([videoConsumer, imageConsumer, bothConsumer]);
 
@@ -214,7 +214,7 @@ describe('ProcessorRegistry', () => {
 
     it('should return false for processors with different outputs', () => {
       const proc1 = createMockProcessor('proc-1', ['images'], ['images']);
-      const proc2 = createMockProcessor('proc-2', ['images'], ['classifications']);
+      const proc2 = createMockProcessor('proc-2', ['images'], ['text']);
 
       registry.registerAll([proc1, proc2]);
 
@@ -230,9 +230,9 @@ describe('ProcessorRegistry', () => {
     });
 
     it('should handle processors with multiple IO types', () => {
-      const proc1 = createMockProcessor('proc-1', ['video', 'classifications'], ['images', 'text']);
-      const proc2 = createMockProcessor('proc-2', ['video', 'classifications'], ['images', 'text']);
-      const proc3 = createMockProcessor('proc-3', ['classifications', 'video'], ['text', 'images']); // Same but different order
+      const proc1 = createMockProcessor('proc-1', ['video', 'text'], ['images', 'text']);
+      const proc2 = createMockProcessor('proc-2', ['video', 'text'], ['images', 'text']);
+      const proc3 = createMockProcessor('proc-3', ['text', 'video'], ['text', 'images']); // Same but different order
 
       registry.registerAll([proc1, proc2, proc3]);
 

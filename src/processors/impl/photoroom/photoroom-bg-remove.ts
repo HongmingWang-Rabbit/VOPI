@@ -5,7 +5,7 @@
  */
 
 import path from 'path';
-import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
+import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { photoroomBackgroundRemovalProvider } from '../../../providers/implementations/index.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
@@ -28,12 +28,13 @@ export const photoroomBgRemoveProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
-    const frames = data.recommendedFrames || data.frames;
-    if (!frames || frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames for background removal' };
     }
 
-    logger.info({ jobId, frameCount: frames.length }, 'Removing backgrounds with Photoroom');
+    logger.info({ jobId, frameCount: inputFrames.length }, 'Removing backgrounds with Photoroom');
 
     await onProgress?.({
       status: JobStatus.EXTRACTING_PRODUCT,
@@ -42,16 +43,16 @@ export const photoroomBgRemoveProcessor: Processor = {
     });
 
     const useAIEdit = options?.useAIEdit as boolean | undefined;
-    const results = new Map<string, { success: boolean; outputPath?: string; error?: string }>();
+    const results = new Map<string, { success: boolean; outputPath?: string; rotationApplied: number; error?: string }>();
 
-    for (let i = 0; i < frames.length; i++) {
-      const frame = frames[i];
-      const progress = 65 + Math.round(((i + 1) / frames.length) * 5);
+    for (let i = 0; i < inputFrames.length; i++) {
+      const frame = inputFrames[i];
+      const progress = 65 + Math.round(((i + 1) / inputFrames.length) * 5);
 
       await onProgress?.({
         status: JobStatus.EXTRACTING_PRODUCT,
         percentage: progress,
-        message: `Processing ${i + 1}/${frames.length}`,
+        message: `Processing ${i + 1}/${inputFrames.length}`,
       });
 
       try {
@@ -73,34 +74,62 @@ export const photoroomBgRemoveProcessor: Processor = {
         results.set(frame.frameId, {
           success: result.success,
           outputPath: result.success ? outputPath : undefined,
+          rotationApplied: 0,
           error: result.error,
         });
       } catch (error) {
         results.set(frame.frameId, {
           success: false,
+          rotationApplied: 0,
           error: (error as Error).message,
         });
       }
     }
 
     const successCount = [...results.values()].filter((r) => r.success).length;
-    logger.info({ jobId, success: successCount, total: frames.length }, 'Background removal complete');
+    const failedCount = inputFrames.length - successCount;
+
+    // Log failures
+    if (failedCount > 0) {
+      const failures = [...results.entries()].filter(([, r]) => !r.success);
+      for (const [frameId, result] of failures) {
+        logger.error({ jobId, frameId, error: result.error }, 'Photoroom background removal failed for frame');
+      }
+    }
+
+    logger.info({ jobId, success: successCount, failed: failedCount, total: inputFrames.length }, 'Background removal complete');
+
+    // If ALL frames failed, return error
+    if (successCount === 0) {
+      const firstError = [...results.values()].find((r) => r.error)?.error || 'All frames failed';
+      return {
+        success: false,
+        error: `Photoroom background removal failed: ${firstError}`,
+      };
+    }
 
     // Update frame paths
-    const updatedFrames = frames.map((frame) => {
+    const updatedFrames: FrameMetadata[] = inputFrames.map((frame) => {
       const result = results.get(frame.frameId);
       if (result?.success && result.outputPath) {
         return { ...frame, path: result.outputPath };
       }
+      logger.warn({ jobId, frameId: frame.frameId }, 'Using original frame (extraction failed)');
       return frame;
     });
 
     return {
       success: true,
       data: {
-        extractionResults: results as Map<string, { success: boolean; outputPath?: string; rotationApplied: number; error?: string }>,
+        extractionResults: results,
         images: updatedFrames.map((f) => f.path),
+        // Legacy field for backwards compatibility
         recommendedFrames: updatedFrames,
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames: updatedFrames,
+        },
       },
     };
   },

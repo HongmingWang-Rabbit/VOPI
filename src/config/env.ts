@@ -41,6 +41,7 @@ export const envSchema = z.object({
   PHOTOROOM_PLUS_HOST: z.string().default('image-api.photoroom.com'),
   CLAID_API_KEY: z.string().optional(),
   STABILITY_API_KEY: z.string().optional(),
+  STABILITY_API_BASE: z.string().url().default('https://api.stability.ai'),
 
   // Worker
   WORKER_CONCURRENCY: z.coerce.number().default(2),

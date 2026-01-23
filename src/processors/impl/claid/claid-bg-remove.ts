@@ -5,7 +5,7 @@
  */
 
 import path from 'path';
-import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
+import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { claidBackgroundRemovalProvider } from '../../../providers/implementations/index.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
@@ -28,14 +28,17 @@ export const claidBgRemoveProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
-    const frames = data.recommendedFrames || data.frames;
-    if (!frames || frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames for background removal' };
     }
 
     // Check if Claid provider is available
     if (!claidBackgroundRemovalProvider.isAvailable()) {
-      logger.warn({ jobId }, 'Claid provider not available, skipping');
+      logger.info({ jobId }, 'Claid provider not available (CLAID_API_KEY not set), skipping background removal');
+      // Return success with no data changes - pipeline continues with next processor
+      // Note: Do NOT set skip: true here, as that would skip ALL remaining processors
       return {
         success: true,
         data: {}, // No changes, keep existing data
@@ -45,12 +48,13 @@ export const claidBgRemoveProcessor: Processor = {
     // Determine product type from options or pipeline data
     // Priority: processor options > pipeline data (metadata)
     const customPrompt = (options?.customPrompt as string) ||
+                         data.metadata?.productType ||
                          (data.productType as string | undefined) ||
                          undefined;
 
     logger.info({
       jobId,
-      frameCount: frames.length,
+      frameCount: inputFrames.length,
       customPrompt: customPrompt || '(default: product)',
     }, 'Removing backgrounds with Claid');
 
@@ -65,14 +69,14 @@ export const claidBgRemoveProcessor: Processor = {
     // Build provider options
     const providerOptions = customPrompt ? { customPrompt } : {};
 
-    for (let i = 0; i < frames.length; i++) {
-      const frame = frames[i];
-      const progress = 65 + Math.round(((i + 1) / frames.length) * 5);
+    for (let i = 0; i < inputFrames.length; i++) {
+      const frame = inputFrames[i];
+      const progress = 65 + Math.round(((i + 1) / inputFrames.length) * 5);
 
       await onProgress?.({
         status: JobStatus.EXTRACTING_PRODUCT,
         percentage: progress,
-        message: `Processing ${i + 1}/${frames.length}`,
+        message: `Processing ${i + 1}/${inputFrames.length}`,
       });
 
       try {
@@ -104,7 +108,7 @@ export const claidBgRemoveProcessor: Processor = {
     }
 
     const successCount = [...results.values()].filter((r) => r.success).length;
-    const failedCount = frames.length - successCount;
+    const failedCount = inputFrames.length - successCount;
 
     // Log failures with details
     if (failedCount > 0) {
@@ -114,7 +118,7 @@ export const claidBgRemoveProcessor: Processor = {
       }
     }
 
-    logger.info({ jobId, success: successCount, failed: failedCount, total: frames.length }, 'Claid background removal complete');
+    logger.info({ jobId, success: successCount, failed: failedCount, total: inputFrames.length }, 'Claid background removal complete');
 
     // If ALL frames failed, return error instead of silently passing through originals
     if (successCount === 0) {
@@ -126,7 +130,7 @@ export const claidBgRemoveProcessor: Processor = {
     }
 
     // Update frame paths only for successful extractions
-    const updatedFrames = frames.map((frame) => {
+    const updatedFrames: FrameMetadata[] = inputFrames.map((frame) => {
       const result = results.get(frame.frameId);
       if (result?.success && result.outputPath) {
         return { ...frame, path: result.outputPath };
@@ -141,7 +145,13 @@ export const claidBgRemoveProcessor: Processor = {
       data: {
         extractionResults: results,
         images: updatedFrames.map((f) => f.path),
+        // Legacy field for backwards compatibility
         recommendedFrames: updatedFrames,
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames: updatedFrames,
+        },
       },
     };
   },

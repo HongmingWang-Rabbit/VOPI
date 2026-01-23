@@ -5,13 +5,12 @@
  * Processors are modular units that can be composed into stacks/pipelines.
  *
  * This module exports:
- * - IOType: Union type for processor input/output types
- * - FrameMetadata interfaces: BaseFrameMetadata, ScoredFrameMetadata, ClassifiedFrameMetadata
- * - Type guards: isScored(), isClassified() for runtime type checking
- * - Array helpers: hasClassifications() to check if frames have AI data
+ * - DataPath: Union type for all data paths (video, images, text, frames, etc.)
+ * - FrameMetadata: Unified frame metadata interface (progressively enriched)
+ * - Data validation: validateDataRequirements() for path validation
  * - Processor interfaces: Processor, ProcessorIO, ProcessorResult, ProcessorContext
  * - Stack interfaces: StackTemplate, StackStep, StackConfig, StackValidationResult
- * - Data interfaces: PipelineData, VideoData, WorkDirs
+ * - Data interfaces: PipelineData, PipelineMetadata, VideoData, WorkDirs
  */
 
 import type { Job } from '../db/schema.js';
@@ -21,63 +20,306 @@ import type { EffectiveConfig } from '../types/config.types.js';
 import type { PipelineTimer } from '../utils/timer.js';
 
 /**
- * IO types that processors can require and produce
+ * Data path identifiers for processor requirements and outputs
  *
- * Core types:
- * - video: Video file data (path, metadata, sourceUrl)
- * - images: Array of image file paths
- * - text: Text/string data
+ * Unified type for all data that flows through the pipeline:
+ * - Core data: video, images, text
+ * - Frame metadata: frames, frames.scores, frames.classifications, etc.
  *
- * Frame data types (progressively enriched):
- * - frames: Basic frame metadata (frameId, path, timestamp)
- * - scores: Frames with quality scores (sharpness, motion, combined score)
- * - classifications: Frames with AI classification (productId, variantId, etc.)
- *
- * Database types:
- * - frame-records: Database record IDs for frames
- *
- * Typical IO progression through classic pipeline:
- * ```
- * download:            video(url) → video(path)
- * extract-frames:      video → images, frames
- * score-frames:        images, frames → images, scores
- * gemini-classify:     images → classifications
- * filter-by-score:     images, scores → images
- * save-frame-records:  frames → frame-records
- * upload-frames:       images → text
- * complete-job:        (any) → (saves to DB)
- * ```
- *
- * Gemini video pipeline:
- * ```
- * download:              video(url) → video(path)
- * gemini-video-analysis: video → images, frames, classifications
- * save-frame-records:    frames → frame-records
- * upload-frames:         images → text
- * complete-job:          (any) → (saves to DB)
- * ```
+ * Processors declare what data paths they require and produce using these identifiers.
  */
-export type IOType =
-  | 'video'           // Video file data
-  | 'images'          // Array of image file paths
-  | 'text'            // Text/string data
-  | 'frames'          // Basic frame metadata (from extraction)
-  | 'scores'          // Frames with quality scores (from scoring)
-  | 'classifications' // Frames with AI classifications (from Gemini)
-  | 'frame-records';  // Database record IDs for frames
+export type DataPath =
+  // Core data types
+  | 'video'                 // Video file data (path, metadata, sourceUrl)
+  | 'images'                // Array of image file paths
+  | 'text'                  // Text/string data
+  // Frame metadata paths
+  | 'frames'                // Base frame metadata exists
+  | 'frames.scores'         // Frames have score fields (sharpness, motion, score)
+  | 'frames.classifications' // Frames have classification fields (productId, variantId)
+  | 'frames.dbId'           // Frames have database IDs
+  | 'frames.s3Url'          // Frames have S3 URLs
+  | 'frames.version';       // Frames have commercial version field
+
+/**
+ * @deprecated Use DataPath instead - IOType has been unified into DataPath
+ * Scheduled for removal in v3.0. Migrate to DataPath.
+ */
+export type IOType = 'video' | 'images' | 'text';
+
+/**
+ * @deprecated Use DataPath instead - MetadataPath has been unified into DataPath
+ * Scheduled for removal in v3.0. Migrate to DataPath.
+ */
+export type MetadataPath = DataPath;
 
 /**
  * Processor IO declaration
  */
 export interface ProcessorIO {
-  /** What this processor needs as input */
-  requires: IOType[];
-  /** What this processor produces as output */
-  produces: IOType[];
+  /** Data paths this processor requires as input */
+  requires: DataPath[];
+  /** Data paths this processor produces as output */
+  produces: DataPath[];
 }
 
 /**
- * Base frame metadata from extraction (IOType: 'frames')
+ * Unified frame metadata - progressively enriched through the pipeline
+ *
+ * Frame data progression:
+ *   extract-frames: Creates base fields (frameId, path, timestamp, index)
+ *   score-frames: Adds sharpness, motion, score; REMOVES low-scoring frames
+ *   gemini-classify: Adds productId, variantId, etc.; REMOVES rejected frames
+ *   save-frame-records: Adds dbId
+ *   bg-remove/fill/center: Updates path to processed image
+ *   generate-commercial: Creates 4x frames with version field
+ *   upload-frames: Adds s3Url
+ */
+export interface FrameMetadata {
+  // Base fields (from extract-frames)
+  frameId: string;
+  filename: string;
+  path: string;
+  timestamp: number;
+  index: number;
+
+  // Score fields (added by score-frames) - optional
+  sharpness?: number;
+  motion?: number;
+  score?: number;
+  isBestPerSecond?: boolean;
+
+  // Classification fields (added by gemini-classify/gemini-video-analysis) - optional
+  productId?: string;
+  variantId?: string;
+  angleEstimate?: string;
+  recommendedType?: string;
+  variantDescription?: string;
+  geminiScore?: number;
+  rotationAngleDeg?: number;
+  allFrameIds?: string[];
+  obstructions?: FrameObstructions;
+  backgroundRecommendations?: BackgroundRecommendations;
+  scores?: FrameScores;
+  isFinalSelection?: boolean;
+
+  // Commercial version (added by generate-commercial) - optional
+  version?: 'transparent' | 'solid' | 'real' | 'creative';
+  sourceFrameId?: string;    // Original frameId before commercial split
+
+  // Upload/DB fields (added by save-frame-records, upload-frames) - optional
+  s3Url?: string;
+  dbId?: string;
+}
+
+/**
+ * Video metadata within pipeline metadata
+ */
+export interface PipelineVideoMetadata {
+  duration: number;
+  width: number;
+  height: number;
+  fps: number;
+  codec: string;
+  filename?: string;
+}
+
+/**
+ * Pipeline metadata - persistent container that is enriched by each processor
+ *
+ * This is NOT an IO type. It always exists from pipeline start and is progressively
+ * enriched by each processor. Processors declare their metadata requirements via
+ * metadataRequires/metadataProduces in their IO declaration.
+ */
+export interface PipelineMetadata {
+  /** Video metadata (added by extract-frames/gemini-video-analysis) */
+  video?: PipelineVideoMetadata;
+
+  /** Frames - current images being processed, progressively enriched and filtered */
+  frames?: FrameMetadata[];
+
+  /** Analysis results from Gemini (raw response) */
+  analysisResult?: unknown;
+
+  /** Products detected in video */
+  products?: unknown[];
+
+  /** Number of frames analyzed */
+  framesAnalyzed?: number;
+
+  /** Variants discovered count */
+  variantsDiscovered?: number;
+
+  /** Product type/category detected */
+  productType?: string;
+
+  /** Frame record count saved to DB */
+  frameRecordCount?: number;
+
+  /** Commercial image URLs organized by variant */
+  commercialImageUrls?: Record<string, Record<string, string>>;
+
+  /** Commercial generation statistics */
+  commercialGenerationStats?: {
+    totalFrames: number;
+    successfulFrames: number;
+    totalErrors: number;
+    totalImagesGenerated: number;
+  };
+
+  /** Final job result */
+  result?: unknown;
+
+  /** Custom extension data - use this instead of adding arbitrary keys */
+  extensions?: Record<string, unknown>;
+}
+
+/**
+ * Data validation result
+ */
+export interface DataValidationResult {
+  valid: boolean;
+  missing: DataPath[];
+}
+
+/**
+ * @deprecated Use DataValidationResult instead
+ */
+export type MetadataValidationResult = DataValidationResult;
+
+/**
+ * Validate that required data paths are present
+ *
+ * @param data - Pipeline data to validate
+ * @param requirements - Array of data paths to check
+ * @returns Validation result with missing paths
+ */
+export function validateDataRequirements(
+  data: PipelineData | undefined,
+  requirements: DataPath[] | undefined
+): DataValidationResult {
+  if (!requirements || requirements.length === 0) {
+    return { valid: true, missing: [] };
+  }
+
+  if (!data) {
+    return { valid: false, missing: requirements };
+  }
+
+  const missing: DataPath[] = [];
+
+  for (const path of requirements) {
+    let satisfied = false;
+
+    switch (path) {
+      // Core data types
+      case 'video':
+        satisfied = !!(data.video?.path || data.video?.sourceUrl);
+        break;
+
+      case 'images':
+        satisfied = !!(data.images && data.images.length > 0);
+        break;
+
+      case 'text':
+        satisfied = typeof data.text === 'string' && data.text.length > 0;
+        break;
+
+      // Frame metadata paths
+      case 'frames':
+        satisfied = !!(data.metadata?.frames && data.metadata.frames.length > 0);
+        break;
+
+      case 'frames.scores':
+        satisfied = !!(data.metadata?.frames?.some(f => f.sharpness !== undefined));
+        break;
+
+      case 'frames.classifications':
+        satisfied = !!(data.metadata?.frames?.some(f => f.productId || f.variantId));
+        break;
+
+      case 'frames.dbId':
+        satisfied = !!(data.metadata?.frames?.some(f => f.dbId));
+        break;
+
+      case 'frames.s3Url':
+        satisfied = !!(data.metadata?.frames?.some(f => f.s3Url));
+        break;
+
+      case 'frames.version':
+        satisfied = !!(data.metadata?.frames?.some(f => f.version));
+        break;
+
+      default:
+        // Unknown path - check if it exists in metadata
+        satisfied = path in (data.metadata ?? {}) && data.metadata?.[path] !== undefined;
+    }
+
+    if (!satisfied) {
+      missing.push(path);
+    }
+  }
+
+  return { valid: missing.length === 0, missing };
+}
+
+/**
+ * @deprecated Use validateDataRequirements instead
+ */
+export function validateMetadataRequirements(
+  metadata: PipelineMetadata | undefined,
+  requirements: DataPath[] | undefined
+): DataValidationResult {
+  // Create a minimal PipelineData wrapper for the new function
+  const data = metadata ? { metadata } as PipelineData : undefined;
+  return validateDataRequirements(data, requirements);
+}
+
+/**
+ * Check if a frame has score data
+ */
+export function hasScores(frame: FrameMetadata): boolean {
+  return typeof frame.sharpness === 'number' &&
+         typeof frame.motion === 'number' &&
+         typeof frame.score === 'number';
+}
+
+/**
+ * Check if a frame has classification data
+ */
+export function hasClassificationData(frame: FrameMetadata): boolean {
+  return typeof frame.productId === 'string' && typeof frame.variantId === 'string';
+}
+
+/**
+ * Check if any frames in an array have classification data
+ *
+ * @param frames - Array of frames to check
+ * @returns true if at least one frame has classification data
+ */
+export function hasClassifications(frames: FrameMetadata[] | undefined): boolean {
+  if (!frames || frames.length === 0) return false;
+  return frames.some(hasClassificationData);
+}
+
+/**
+ * Sync helper: Update data.images to match metadata.frames paths
+ * Call this after modifying metadata.frames to keep them in sync
+ */
+export function syncImagesWithFrames(metadata: PipelineMetadata | undefined): string[] {
+  if (!metadata?.frames || metadata.frames.length === 0) {
+    return [];
+  }
+  return metadata.frames.map(f => f.path);
+}
+
+// ============================================================================
+// Legacy type guards - kept for backwards compatibility
+// ============================================================================
+
+/**
+ * Base frame metadata from extraction
+ * @deprecated Use FrameMetadata directly - all fields are optional
  */
 export interface BaseFrameMetadata {
   frameId: string;
@@ -88,8 +330,8 @@ export interface BaseFrameMetadata {
 }
 
 /**
- * Frame metadata with quality scores (IOType: 'scores')
- * Produced by score-frames processor
+ * Frame metadata with quality scores
+ * @deprecated Use FrameMetadata with hasScores() check
  */
 export interface ScoredFrameMetadata extends BaseFrameMetadata {
   sharpness: number;
@@ -99,8 +341,8 @@ export interface ScoredFrameMetadata extends BaseFrameMetadata {
 }
 
 /**
- * Frame metadata with AI classification (IOType: 'classifications')
- * Produced by gemini-classify or gemini-video-analysis processors
+ * Frame metadata with AI classification
+ * @deprecated Use FrameMetadata with hasClassificationData() check
  */
 export interface ClassifiedFrameMetadata extends BaseFrameMetadata {
   productId: string;
@@ -117,72 +359,24 @@ export interface ClassifiedFrameMetadata extends BaseFrameMetadata {
 }
 
 /**
- * Full frame metadata - union of all enrichment stages
- * This is the primary type used in PipelineData for flexibility.
- *
- * Frame data progression through the pipeline:
- *   extract-frames: produces BaseFrameMetadata (basic metadata)
- *   score-frames: adds sharpness, motion, score → ScoredFrameMetadata
- *   gemini-classify: adds productId, variantId → ClassifiedFrameMetadata
- */
-export interface FrameMetadata {
-  frameId: string;
-  filename: string;
-  path: string;
-  timestamp: number;
-  index: number;
-  // Score fields (from score-frames)
-  sharpness?: number;
-  motion?: number;
-  score?: number;
-  // Classification fields (from gemini-classify/gemini-video-analysis)
-  productId?: string;
-  variantId?: string;
-  angleEstimate?: string;
-  recommendedType?: string;
-  variantDescription?: string;
-  geminiScore?: number;
-  rotationAngleDeg?: number;
-  allFrameIds?: string[];
-  obstructions?: FrameObstructions;
-  backgroundRecommendations?: BackgroundRecommendations;
-  scores?: FrameScores;
-  // Selection markers
-  isBestPerSecond?: boolean;
-  isFinalSelection?: boolean;
-  // Upload/DB fields
-  s3Url?: string;
-  dbId?: string;
-}
-
-/**
  * Type guard to check if frame has score data
+ * @deprecated Use hasScores() instead
  */
 export function isScored(frame: FrameMetadata): frame is FrameMetadata & ScoredFrameMetadata {
-  return typeof frame.sharpness === 'number' &&
-         typeof frame.motion === 'number' &&
-         typeof frame.score === 'number';
+  return hasScores(frame);
 }
 
 /**
  * Type guard to check if frame has AI classification data
+ * @deprecated Use hasClassificationData() instead
  */
 export function isClassified(frame: FrameMetadata): frame is FrameMetadata & ClassifiedFrameMetadata {
-  return typeof frame.productId === 'string' && typeof frame.variantId === 'string';
+  return hasClassificationData(frame);
 }
 
-/**
- * Check if any frames in an array have AI classification data
- *
- * Useful for determining if classification processor has run on frame data.
- *
- * @param frames - Array of frames to check
- * @returns true if at least one frame has classification data
- */
-export function hasClassifications(frames: FrameMetadata[] | undefined): boolean {
-  if (!frames || frames.length === 0) return false;
-  return frames.some(isClassified);
-}
+// ============================================================================
+// Core data interfaces
+// ============================================================================
 
 /**
  * Video metadata with source info
@@ -227,6 +421,13 @@ export interface ProductExtractionResultData {
 
 /**
  * Unified pipeline data that flows between processors
+ *
+ * The simplified structure:
+ * - video, images, text: Core IO types
+ * - metadata: Persistent container for all frame data and auxiliary info
+ *
+ * Legacy fields (frames, scoredFrames, etc.) are maintained for backwards
+ * compatibility but should be migrated to use metadata.frames
  */
 export interface PipelineData {
   // Core data by type
@@ -235,22 +436,23 @@ export interface PipelineData {
   text?: string;
 
   /**
-   * Auxiliary metadata not tracked in IO validation.
-   * Used for passing context between processors that doesn't fit into typed fields:
-   * - videoMetadata: Raw video metadata from FFmpeg
-   * - analysisResult: Raw Gemini analysis response
-   * - products: Product information from video analysis
-   * - commercialImageUrls: Generated commercial image URLs
-   *
-   * Prefer using typed fields (frames, scoredFrames, etc.) for data that
-   * affects IO validation and processor connectivity.
+   * Unified metadata container - always present, enriched by processors
+   * This is the primary location for frame data and auxiliary information
    */
-  metadata?: Record<string, unknown>;
+  metadata: PipelineMetadata;
 
-  // Extended frame data
+  // ============================================================================
+  // Legacy fields - maintained for backwards compatibility during migration
+  // New code should use metadata.frames instead
+  // ============================================================================
+
+  /** @deprecated Use metadata.frames */
   frames?: FrameMetadata[];
+  /** @deprecated Use metadata.frames with hasScores() filter */
   scoredFrames?: FrameMetadata[];
+  /** @deprecated Use metadata.frames */
   candidateFrames?: FrameMetadata[];
+  /** @deprecated Use metadata.frames */
   recommendedFrames?: FrameMetadata[];
 
   // Commercial images
@@ -260,12 +462,20 @@ export interface PipelineData {
   uploadedUrls?: string[];
 
   // Frame DB records mapping (frameId -> dbId)
+  /** @deprecated Frame dbIds are now stored in metadata.frames[].dbId */
   frameRecords?: Map<string, string>;
 
   // Product extraction results
   extractionResults?: Map<string, ProductExtractionResultData>;
 
-  // Extended data (processors can add custom fields)
+  // Product type detected by Gemini
+  productType?: string;
+
+  // Custom extension data - preferred for new code
+  extensions?: Record<string, unknown>;
+
+  // Allow arbitrary keys for backwards compatibility and processor flexibility
+  // Note: Prefer using 'extensions' field for new custom data
   [key: string]: unknown;
 }
 
@@ -323,7 +533,12 @@ export interface ProcessorResult {
   data?: Partial<PipelineData>;
   /** Error message if failed */
   error?: string;
-  /** Skip remaining processors */
+  /**
+   * If true, skip ALL remaining processors in the stack.
+   * Use this for early termination (e.g., job completion, fatal conditions).
+   * Do NOT use this to indicate "this processor was skipped" - instead return
+   * { success: true, data: {} } to continue with the next processor.
+   */
   skip?: boolean;
 }
 
@@ -389,8 +604,8 @@ export interface StackTemplate {
 export interface StackValidationResult {
   valid: boolean;
   error?: string;
-  /** IO types available at end of stack */
-  availableOutputs?: IOType[];
+  /** Data paths available at end of stack */
+  availableOutputs?: DataPath[];
 }
 
 /**

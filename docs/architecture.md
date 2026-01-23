@@ -306,33 +306,44 @@ VOPI uses a modular processor stack architecture that enables flexible workflow 
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**IO Types**: Processors declare what they require and produce:
-- `video` - Video file path
-- `images` - Array of image paths
-- `text` - Text/JSON data
-- `metadata` - Structured metadata
+**DataPath Types**: Processors declare what data paths they require and produce using a unified type system:
 
-Any processor that outputs `images` can connect to any processor that requires `images`.
+```typescript
+type DataPath =
+  // Core data types
+  | 'video'                   // Video file data (path, metadata, sourceUrl)
+  | 'images'                  // Array of image file paths
+  | 'text'                    // Text/string data
+  // Frame metadata paths
+  | 'frames'                  // Base frame metadata exists
+  | 'frames.scores'           // Frames have score fields (sharpness, motion)
+  | 'frames.classifications'  // Frames have classification fields (productId, variantId)
+  | 'frames.dbId'             // Frames have database IDs
+  | 'frames.s3Url'            // Frames have S3 URLs
+  | 'frames.version';         // Frames have commercial version field
+```
+
+Any processor that outputs a data path can connect to any processor that requires that path.
 
 ### Processor IO Contracts
 
 | Processor | Requires | Produces | Description |
 |-----------|----------|----------|-------------|
-| download | - | video | Downloads video from URL |
-| extract-frames | video | images | Extracts frames with FFmpeg |
-| gemini-video-analysis | video | images, metadata | Direct video analysis |
-| score-frames | images | images, metadata | Calculates quality scores |
-| gemini-classify | images | metadata | AI classification |
-| filter-by-score | images, metadata | images | Filters by score |
-| photoroom-bg-remove | images | images | Background removal (Photoroom) |
-| claid-bg-remove | images | images | Background removal (Claid) - swappable |
-| center-product | images | images | Centers product in frame |
-| rotate-image | images | images | Rotates images |
-| fill-product-holes | images | images | Fills transparent holes in products |
-| extract-products | images | images | Full product extraction |
-| upload-frames | images | text | Uploads to S3 |
-| generate-commercial | images | images | Commercial image generation |
-| save-frame-records | metadata | - | Persists to database |
+| download | video | video | Downloads video from URL |
+| extract-frames | video | images, frames | Extracts frames with FFmpeg |
+| gemini-video-analysis | video | images, frames, frames.classifications | Direct video analysis |
+| score-frames | images, frames | images, frames.scores | Calculates quality scores |
+| gemini-classify | images, frames | frames.classifications | AI classification |
+| filter-by-score | images, frames, frames.scores | images | Filters by score |
+| photoroom-bg-remove | images, frames | images | Background removal (Photoroom) |
+| claid-bg-remove | images, frames | images | Background removal (Claid) - swappable |
+| center-product | images, frames | images | Centers product in frame |
+| rotate-image | images, frames | images | Rotates images |
+| fill-product-holes | images, frames | images | Fills transparent holes in products |
+| extract-products | images, frames | images | Full product extraction |
+| upload-frames | images, frames | text, frames.s3Url | Uploads to S3 |
+| generate-commercial | images, frames | images, frames.version | Commercial image generation |
+| save-frame-records | frames | frames.dbId | Persists to database |
 | complete-job | - | - | Finalizes job |
 
 ### Stack Configuration

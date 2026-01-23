@@ -20,6 +20,7 @@ export const downloadProcessor: Processor = {
   io: {
     requires: ['video'],  // Needs video.sourceUrl to know where to download from
     produces: ['video'],  // Outputs video.path after downloading
+    // No metadata requirements or productions
   },
 
   async execute(

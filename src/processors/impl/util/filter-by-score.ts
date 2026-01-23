@@ -15,8 +15,8 @@ export const filterByScoreProcessor: Processor = {
   displayName: 'Filter by Score',
   statusKey: JobStatus.SCORING,
   io: {
-    requires: ['images', 'scores'],
-    produces: ['images'],  // Filters scored frames, doesn't add new data types
+    requires: ['images', 'frames', 'frames.scores'],
+    produces: ['images'],
   },
 
   async execute(
@@ -26,10 +26,9 @@ export const filterByScoreProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, effectiveConfig } = context;
 
-    // Use candidateFrames (best per second) or scoredFrames (all scored)
-    // Both have score data from the score-frames processor
-    const frames = data.candidateFrames || data.scoredFrames;
-    if (!frames || frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.candidateFrames || data.scoredFrames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No scored frames to filter. Ensure score-frames processor ran first.' };
     }
 
@@ -37,10 +36,10 @@ export const filterByScoreProcessor: Processor = {
     const minFrames = (options?.minFrames as number) ?? 1;
     const maxFrames = (options?.maxFrames as number) ?? 100;
 
-    logger.info({ jobId, frameCount: frames.length, topKPercent }, 'Filtering frames by score');
+    logger.info({ jobId, frameCount: inputFrames.length, topKPercent }, 'Filtering frames by score');
 
     // Sort by score descending
-    const sorted = [...frames].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    const sorted = [...inputFrames].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
     // Calculate how many to keep
     let keepCount = Math.ceil(sorted.length * topKPercent);
@@ -51,13 +50,23 @@ export const filterByScoreProcessor: Processor = {
       isFinalSelection: true,
     }));
 
-    logger.info({ jobId, filteredCount: filtered.length }, 'Frames filtered');
+    logger.info({
+      jobId,
+      inputCount: inputFrames.length,
+      filteredCount: filtered.length,
+    }, `Frames filtered: ${inputFrames.length} → ${filtered.length}`);
 
     return {
       success: true,
       data: {
-        recommendedFrames: filtered,
         images: filtered.map((f) => f.path),
+        // Legacy field for backwards compatibility
+        recommendedFrames: filtered,
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames: filtered,
+        },
       },
     };
   },

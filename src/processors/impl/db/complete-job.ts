@@ -21,6 +21,7 @@ export const completeJobProcessor: Processor = {
     // Writes final result to auxiliary metadata (not tracked in IO validation).
     requires: [],
     produces: [],
+    // No metadata requirements - this is a terminal processor
   },
 
   async execute(
@@ -39,12 +40,13 @@ export const completeJobProcessor: Processor = {
       message: 'Pipeline completed',
     });
 
-    // Gather results
-    const recommendedFrames = data.recommendedFrames || [];
+    // Gather results - prefer metadata.frames, fall back to legacy fields
+    const metadataFrames = data.metadata?.frames || [];
+    const recommendedFrames = metadataFrames.length > 0 ? metadataFrames : (data.recommendedFrames || []);
     const candidateFrames = data.candidateFrames || [];
-    const framesAnalyzed = (data.metadata?.framesAnalyzed as number) ?? candidateFrames.length;
+    const framesAnalyzed = data.metadata?.framesAnalyzed ?? candidateFrames.length;
     const uploadedUrls = data.uploadedUrls || [];
-    const commercialImageUrls = (data.metadata?.commercialImageUrls as Record<string, Record<string, string>>) || {};
+    const commercialImageUrls = data.metadata?.commercialImageUrls || {};
 
     const result: JobResult = {
       variantsDiscovered: recommendedFrames.length,

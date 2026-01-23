@@ -16,6 +16,7 @@ import {
   type WorkDirs,
   type StackTemplate,
   type FrameMetadata,
+  type PipelineData,
 } from '../../processors/index.js';
 import { initDatabase, getDatabase, schema } from '../../db/index.js';
 import { eq } from 'drizzle-orm';
@@ -213,12 +214,8 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
         break;
       }
 
-      case 'frames':
-      case 'scores':
-      case 'classifications': {
-        // Already loaded from metadata above
-        break;
-      }
+      // Note: Old IO types 'frames', 'scores', 'classifications' have been simplified to just 3 types
+      // Frame metadata is now handled via the unified metadata object, not as separate IO types
 
       case 'text': {
         const textInput = await input({
@@ -338,8 +335,8 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
   printDivider();
 
   try {
-    // Prepare initial data
-    const initialData: Record<string, unknown> = {};
+    // Prepare initial data with required metadata object
+    const initialData: PipelineData = { metadata: {} };
     if (videoUrl) {
       // For stacks starting with download, pass the URL as video.sourceUrl
       // For stacks starting with extract-frames, pass as video.path (local file)
@@ -356,6 +353,8 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
     if (framesMetadata) {
       initialData.frames = framesMetadata;
       initialData.recommendedFrames = framesMetadata;
+      // Also set in unified metadata
+      initialData.metadata.frames = framesMetadata;
     }
     if (textData) {
       initialData.text = textData;
@@ -364,12 +363,12 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
       initialData.productType = productType;
     }
 
-    // Run the stack
+    // Run the stack - initialData always has metadata now
     const result = await stackRunner.execute(
       stack,
       context,
       Object.keys(processorOptions).length > 0 ? { processorOptions } : undefined,
-      Object.keys(initialData).length > 0 ? initialData : undefined
+      initialData
     );
 
     printDivider();

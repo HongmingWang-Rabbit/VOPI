@@ -138,9 +138,12 @@ describe('Processor Integration', () => {
   });
 
   describe('stack validation with real processors', () => {
+    // Helper to create initial data with video
+    const videoData = { metadata: {}, video: { sourceUrl: 'test://video.mp4' } };
+
     it('should validate classic stack', () => {
-      // Pass initialIO: ['video'] since download processor now requires video input
-      const result = stackRunner.validate(classicStack, ['video']);
+      // Pass initial video data since download processor requires video input
+      const result = stackRunner.validate(classicStack, videoData);
 
       expect(result.valid).toBe(true);
       expect(result.availableOutputs).toContain('video');
@@ -148,34 +151,33 @@ describe('Processor Integration', () => {
     });
 
     it('should validate gemini video stack', () => {
-      const result = stackRunner.validate(geminiVideoStack, ['video']);
+      const result = stackRunner.validate(geminiVideoStack, videoData);
 
       expect(result.valid).toBe(true);
     });
 
     it('should validate minimal stack', () => {
-      const result = stackRunner.validate(minimalStack, ['video']);
+      const result = stackRunner.validate(minimalStack, videoData);
 
       expect(result.valid).toBe(true);
     });
 
     it('should validate frames only stack', () => {
-      const result = stackRunner.validate(framesOnlyStack, ['video']);
+      const result = stackRunner.validate(framesOnlyStack, videoData);
 
       expect(result.valid).toBe(true);
     });
 
     it('should validate custom bg removal stack', () => {
-      const result = stackRunner.validate(customBgRemovalStack, ['video']);
+      const result = stackRunner.validate(customBgRemovalStack, videoData);
 
       expect(result.valid).toBe(true);
     });
 
     it('should validate all predefined stacks', () => {
       for (const stack of Object.values(stackTemplates)) {
-        // All production stacks require video input - compute dynamically
-        const requiredInputs = stackRunner.getRequiredInputs(stack);
-        const result = stackRunner.validate(stack, requiredInputs);
+        // All production stacks require video input
+        const result = stackRunner.validate(stack, videoData);
         expect(result.valid).toBe(true);
       }
     });
@@ -236,27 +238,30 @@ describe('Processor Integration', () => {
   });
 
   describe('IO flow validation', () => {
+    // Note: IOType is now simplified to 3 types: video, images, text
+    // Frame metadata (frames, scores, classifications) are tracked via metadataProduces
+
     it('should track IO availability through classic stack', () => {
       // After download
       expect(stackRunner.getAvailableIO(classicStack, 0)).toContain('video');
 
-      // After extract-frames (produces images and frames)
+      // After extract-frames (produces images)
       expect(stackRunner.getAvailableIO(classicStack, 1)).toContain('video');
       expect(stackRunner.getAvailableIO(classicStack, 1)).toContain('images');
-      expect(stackRunner.getAvailableIO(classicStack, 1)).toContain('frames');
+      // 'frames' is now a metadata path, not an IO type
 
-      // After score-frames (produces scores)
-      expect(stackRunner.getAvailableIO(classicStack, 2)).toContain('scores');
+      // After score-frames (still produces images)
+      expect(stackRunner.getAvailableIO(classicStack, 2)).toContain('images');
+      // 'scores' is now a metadata path, not an IO type
     });
 
     it('should track IO availability through gemini video stack', () => {
       // After download
       expect(stackRunner.getAvailableIO(geminiVideoStack, 0)).toContain('video');
 
-      // After gemini-video-analysis (produces images, frames, and classifications)
+      // After gemini-video-analysis (produces images)
       expect(stackRunner.getAvailableIO(geminiVideoStack, 1)).toContain('images');
-      expect(stackRunner.getAvailableIO(geminiVideoStack, 1)).toContain('frames');
-      expect(stackRunner.getAvailableIO(geminiVideoStack, 1)).toContain('classifications');
+      // 'frames' and 'classifications' are now metadata paths, not IO types
     });
   });
 
@@ -316,8 +321,9 @@ describe('Processor Integration', () => {
         { processor: 'complete-job' },
       ]);
 
-      // Pass initialIO: ['video'] since download requires video input
-      const result = stackRunner.validate(customStack, ['video']);
+      // Pass initial video data since download requires video input
+      const videoData = { metadata: {}, video: { sourceUrl: 'test://video.mp4' } };
+      const result = stackRunner.validate(customStack, videoData);
 
       expect(result.valid).toBe(true);
     });
@@ -330,7 +336,8 @@ describe('Processor Integration', () => {
       ]);
 
       // Even with video input, this should fail because score-frames needs images
-      const result = stackRunner.validate(invalidStack, ['video']);
+      const videoData = { metadata: {}, video: { sourceUrl: 'test://video.mp4' } };
+      const result = stackRunner.validate(invalidStack, videoData);
 
       expect(result.valid).toBe(false);
       expect(result.error).toContain("requires 'images'");

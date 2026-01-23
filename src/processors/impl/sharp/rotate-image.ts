@@ -5,7 +5,7 @@
  */
 
 import path from 'path';
-import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
+import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { sharpImageTransformProvider } from '../../../providers/implementations/index.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
@@ -28,14 +28,16 @@ export const rotateImageProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
-    const frames = data.recommendedFrames || data.frames;
-    if (!frames || frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames to rotate' };
     }
 
     const defaultAngle = (options?.angle as number) ?? 0;
+    const threshold = (options?.threshold as number) ?? 0.5; // Don't rotate if < 0.5 degree
 
-    logger.info({ jobId, frameCount: frames.length }, 'Rotating images');
+    logger.info({ jobId, frameCount: inputFrames.length }, 'Rotating images');
 
     await onProgress?.({
       status: JobStatus.EXTRACTING_PRODUCT,
@@ -43,24 +45,25 @@ export const rotateImageProcessor: Processor = {
       message: 'Rotating images',
     });
 
-    const updatedFrames = [];
+    const updatedFrames: FrameMetadata[] = [];
+    let rotatedCount = 0;
 
-    for (let i = 0; i < frames.length; i++) {
-      const frame = frames[i];
+    for (let i = 0; i < inputFrames.length; i++) {
+      const frame = inputFrames[i];
       const angle = frame.rotationAngleDeg ?? defaultAngle;
 
       // Skip if no rotation needed
-      if (Math.abs(angle) < 0.5) {
+      if (Math.abs(angle) < threshold) {
         updatedFrames.push(frame);
         continue;
       }
 
-      const progress = 66 + Math.round(((i + 1) / frames.length) * 2);
+      const progress = 66 + Math.round(((i + 1) / inputFrames.length) * 2);
 
       await onProgress?.({
         status: JobStatus.EXTRACTING_PRODUCT,
         percentage: progress,
-        message: `Rotating ${i + 1}/${frames.length}`,
+        message: `Rotating ${i + 1}/${inputFrames.length}`,
       });
 
       try {
@@ -75,7 +78,8 @@ export const rotateImageProcessor: Processor = {
         if (result.success && result.outputBuffer) {
           const { writeFile } = await import('fs/promises');
           await writeFile(outputPath, result.outputBuffer);
-          updatedFrames.push({ ...frame, path: outputPath, rotationAngleDeg: angle });
+          updatedFrames.push({ ...frame, path: outputPath });
+          rotatedCount++;
         } else {
           updatedFrames.push(frame);
         }
@@ -85,13 +89,19 @@ export const rotateImageProcessor: Processor = {
       }
     }
 
-    logger.info({ jobId, rotatedCount: updatedFrames.filter((f) => f.rotationAngleDeg !== undefined && f.rotationAngleDeg !== 0).length }, 'Image rotation complete');
+    logger.info({ jobId, rotatedCount, total: inputFrames.length }, 'Image rotation complete');
 
     return {
       success: true,
       data: {
         images: updatedFrames.map((f) => f.path),
+        // Legacy field for backwards compatibility
         recommendedFrames: updatedFrames,
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames: updatedFrames,
+        },
       },
     };
   },

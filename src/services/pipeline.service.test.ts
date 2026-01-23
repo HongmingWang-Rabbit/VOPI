@@ -287,6 +287,7 @@ describe('PipelineService', () => {
     it('should pass initialData to stack runner when provided', async () => {
       const initialData = {
         video: { path: '/local/video.mp4' },
+        metadata: {},
       };
 
       await service.runPipeline(mockJob, undefined, undefined, initialData);
@@ -308,6 +309,7 @@ describe('PipelineService', () => {
     it('should not override initialData video.sourceUrl if already provided', async () => {
       const initialData = {
         video: { sourceUrl: 'https://custom.url/video.mp4', path: '/local/video.mp4' },
+        metadata: {},
       };
 
       await service.runPipeline(mockJob, undefined, undefined, initialData);

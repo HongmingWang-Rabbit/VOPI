@@ -88,10 +88,12 @@ describe('filterByScoreProcessor', () => {
     });
 
     it('should have correct IO declaration', () => {
+      // DataPath is the unified type for all data requirements
       expect(filterByScoreProcessor.io.requires).toContain('images');
-      expect(filterByScoreProcessor.io.requires).toContain('scores');
+      expect(filterByScoreProcessor.io.requires).toContain('frames');
+      expect(filterByScoreProcessor.io.requires).toContain('frames.scores');
       expect(filterByScoreProcessor.io.produces).toContain('images');
-      expect(filterByScoreProcessor.io.produces).toHaveLength(1); // Only images, no classifications
+      expect(filterByScoreProcessor.io.produces).toHaveLength(1); // Only images
     });
   });
 
@@ -103,7 +105,7 @@ describe('filterByScoreProcessor', () => {
     });
 
     it('should return error if no scored frames provided', async () => {
-      const data: PipelineData = {};
+      const data: PipelineData = { metadata: {} };
 
       const result = await filterByScoreProcessor.execute(context, data);
 
@@ -112,7 +114,7 @@ describe('filterByScoreProcessor', () => {
     });
 
     it('should return error if scored frames array is empty', async () => {
-      const data: PipelineData = { scoredFrames: [] };
+      const data: PipelineData = { metadata: {}, scoredFrames: [] };
 
       const result = await filterByScoreProcessor.execute(context, data);
 
@@ -134,7 +136,7 @@ describe('filterByScoreProcessor', () => {
         createFrame('f10', 1),
       ];
 
-      const data: PipelineData = { candidateFrames: frames };
+      const data: PipelineData = { metadata: {}, candidateFrames: frames };
 
       // topKPercent is 0.3 by default, so 30% of 10 = 3 frames
       const result = await filterByScoreProcessor.execute(context, data);
@@ -155,7 +157,7 @@ describe('filterByScoreProcessor', () => {
         createFrame('f2', 80),
       ];
 
-      const data: PipelineData = { candidateFrames: frames };
+      const data: PipelineData = { metadata: {}, candidateFrames: frames };
 
       // With topKPercent 0.3, we'd get 0.6 frames, but minFrames should ensure at least 1
       const result = await filterByScoreProcessor.execute(context, data, { minFrames: 1 });
@@ -169,7 +171,7 @@ describe('filterByScoreProcessor', () => {
         createFrame(`f${i}`, 100 - i)
       );
 
-      const data: PipelineData = { candidateFrames: frames };
+      const data: PipelineData = { metadata: {}, candidateFrames: frames };
 
       // With 100 frames and 30% = 30 frames, but maxFrames limits it
       const result = await filterByScoreProcessor.execute(context, data, { maxFrames: 5 });
@@ -183,7 +185,7 @@ describe('filterByScoreProcessor', () => {
         createFrame(`f${i}`, 100 - i * 10)
       );
 
-      const data: PipelineData = { candidateFrames: frames };
+      const data: PipelineData = { metadata: {}, candidateFrames: frames };
 
       // 50% of 10 = 5 frames
       const result = await filterByScoreProcessor.execute(context, data, { topKPercent: 0.5 });
@@ -198,7 +200,7 @@ describe('filterByScoreProcessor', () => {
         createFrame('f2', 50),
       ];
 
-      const data: PipelineData = { candidateFrames: frames };
+      const data: PipelineData = { metadata: {}, candidateFrames: frames };
 
       const result = await filterByScoreProcessor.execute(context, data);
 
@@ -216,7 +218,7 @@ describe('filterByScoreProcessor', () => {
         createFrame('f3', 60),
       ];
 
-      const data: PipelineData = { candidateFrames: frames };
+      const data: PipelineData = { metadata: {}, candidateFrames: frames };
 
       const result = await filterByScoreProcessor.execute(context, data);
 
@@ -228,7 +230,7 @@ describe('filterByScoreProcessor', () => {
       const scoredFrames: FrameMetadata[] = [createFrame('scored', 50)];
       const candidateFrames: FrameMetadata[] = [createFrame('candidate', 100)];
 
-      const data: PipelineData = { scoredFrames, candidateFrames };
+      const data: PipelineData = { metadata: {}, scoredFrames, candidateFrames };
 
       const result = await filterByScoreProcessor.execute(context, data);
 
@@ -244,7 +246,7 @@ describe('filterByScoreProcessor', () => {
         createFrame('f3', 50),
       ];
 
-      const data: PipelineData = { candidateFrames: frames };
+      const data: PipelineData = { metadata: {}, candidateFrames: frames };
 
       const result = await filterByScoreProcessor.execute(context, data);
 
@@ -261,7 +263,7 @@ describe('filterByScoreProcessor', () => {
         createFrame('f3', 50),
       ];
 
-      const data: PipelineData = { candidateFrames: frames };
+      const data: PipelineData = { metadata: {}, candidateFrames: frames };
 
       const result = await filterByScoreProcessor.execute(context, data);
 

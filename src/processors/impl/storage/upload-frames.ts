@@ -7,7 +7,7 @@
 import { copyFile } from 'fs/promises';
 import path from 'path';
 import { eq } from 'drizzle-orm';
-import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
+import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { storageService } from '../../../services/storage.service.js';
 import { getDatabase, schema } from '../../../db/index.js';
 import { JobStatus } from '../../../types/job.types.js';
@@ -21,7 +21,7 @@ export const uploadFramesProcessor: Processor = {
   statusKey: JobStatus.GENERATING,
   io: {
     requires: ['images', 'frames'],
-    produces: ['text'],
+    produces: ['text', 'frames.s3Url'],
   },
 
   async execute(
@@ -32,14 +32,24 @@ export const uploadFramesProcessor: Processor = {
     const { jobId, workDirs, onProgress, timer } = context;
     const db = getDatabase();
 
-    const frames = data.recommendedFrames || data.frames;
-    if (!frames || frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames to upload' };
     }
 
+    // Get frameRecords from metadata.frames dbIds or legacy field
     const frameRecords = data.frameRecords || new Map();
+    // Build frameRecords from metadata.frames if not present
+    if (frameRecords.size === 0 && data.metadata?.frames) {
+      for (const frame of data.metadata.frames) {
+        if (frame.dbId) {
+          frameRecords.set(frame.frameId, frame.dbId);
+        }
+      }
+    }
 
-    logger.info({ jobId, frameCount: frames.length }, 'Uploading frames');
+    logger.info({ jobId, frameCount: inputFrames.length }, 'Uploading frames');
 
     await onProgress?.({
       status: JobStatus.GENERATING,
@@ -48,15 +58,16 @@ export const uploadFramesProcessor: Processor = {
     });
 
     const finalFrameUrls: string[] = [];
+    const updatedFrames: FrameMetadata[] = [];
 
-    for (let i = 0; i < frames.length; i++) {
-      const frame = frames[i];
-      const progress = 70 + Math.round(((i + 1) / frames.length) * 5);
+    for (let i = 0; i < inputFrames.length; i++) {
+      const frame = inputFrames[i];
+      const progress = 70 + Math.round(((i + 1) / inputFrames.length) * 5);
 
       await onProgress?.({
         status: JobStatus.GENERATING,
         percentage: progress,
-        message: `Uploading frame ${i + 1}/${frames.length}`,
+        message: `Uploading frame ${i + 1}/${inputFrames.length}`,
       });
 
       // Create final filename
@@ -78,8 +89,11 @@ export const uploadFramesProcessor: Processor = {
 
       finalFrameUrls.push(url);
 
+      // Update frame with s3Url
+      updatedFrames.push({ ...frame, s3Url: url });
+
       // Update frame record with S3 URL
-      const frameDbId = frameRecords.get(frame.frameId);
+      const frameDbId = frameRecords.get(frame.frameId) || frame.dbId;
       if (frameDbId) {
         await db
           .update(schema.frames)
@@ -95,6 +109,11 @@ export const uploadFramesProcessor: Processor = {
       data: {
         uploadedUrls: finalFrameUrls,
         text: JSON.stringify(finalFrameUrls),
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames: updatedFrames,
+        },
       },
     };
   },

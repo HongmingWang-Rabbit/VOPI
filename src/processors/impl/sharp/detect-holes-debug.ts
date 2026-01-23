@@ -232,7 +232,7 @@ export const detectHolesDebugProcessor: Processor = {
   displayName: 'Detect Holes (Debug)',
   statusKey: JobStatus.EXTRACTING_PRODUCT,
   io: {
-    requires: ['images'],
+    requires: ['images', 'frames'],
     produces: ['images'],
   },
 
@@ -243,14 +243,14 @@ export const detectHolesDebugProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress } = context;
 
-    // Accept either frames or just image paths
+    // Use metadata.frames as primary source, fall back to legacy fields
     const images = data.images || [];
     if (images.length === 0) {
       return { success: false, error: 'No images to process' };
     }
 
     // Build frames from images if not provided
-    const frames = data.frames || images.map((imgPath, idx) => ({
+    const frames = data.metadata?.frames || data.frames || images.map((imgPath, idx) => ({
       frameId: `frame-${String(idx + 1).padStart(3, '0')}`,
       filename: imgPath.split('/').pop() || `image-${idx}.png`,
       path: imgPath,
@@ -346,7 +346,13 @@ export const detectHolesDebugProcessor: Processor = {
       success: true,
       data: {
         images: frames.map((f) => f.path),
+        // Legacy field for backwards compatibility
         recommendedFrames: frames,
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames,
+        },
       },
     };
   },

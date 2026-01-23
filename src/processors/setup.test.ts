@@ -211,16 +211,21 @@ describe('Processor Setup', () => {
       }
     });
 
-    it('all processors should have valid IO arrays', () => {
+    it('all processors should have valid data path arrays', () => {
       const processors = processorRegistry.getAll();
-      const validTypes = ['video', 'images', 'text', 'frames', 'scores', 'classifications', 'frame-records'];
+      // DataPath: unified type for all data requirements
+      const validPaths = [
+        'video', 'images', 'text',
+        'frames', 'frames.scores', 'frames.classifications',
+        'frames.dbId', 'frames.s3Url', 'frames.version'
+      ];
 
       for (const processor of processors) {
         for (const req of processor.io.requires) {
-          expect(validTypes).toContain(req);
+          expect(validPaths).toContain(req);
         }
         for (const prod of processor.io.produces) {
-          expect(validTypes).toContain(prod);
+          expect(validPaths).toContain(prod);
         }
       }
     });

@@ -5,7 +5,7 @@
  */
 
 import path from 'path';
-import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
+import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { sharpImageTransformProvider } from '../../../providers/implementations/index.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
@@ -28,15 +28,16 @@ export const centerProductProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
-    const frames = data.recommendedFrames || data.frames;
-    if (!frames || frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames to center' };
     }
 
     const padding = (options?.padding as number) ?? 0.05; // 5% padding
     const minSize = (options?.minSize as number) ?? 512;
 
-    logger.info({ jobId, frameCount: frames.length, padding }, 'Centering products');
+    logger.info({ jobId, frameCount: inputFrames.length, padding }, 'Centering products');
 
     await onProgress?.({
       status: JobStatus.EXTRACTING_PRODUCT,
@@ -44,16 +45,16 @@ export const centerProductProcessor: Processor = {
       message: 'Centering products',
     });
 
-    const updatedFrames = [];
+    const updatedFrames: FrameMetadata[] = [];
 
-    for (let i = 0; i < frames.length; i++) {
-      const frame = frames[i];
-      const progress = 68 + Math.round(((i + 1) / frames.length) * 2);
+    for (let i = 0; i < inputFrames.length; i++) {
+      const frame = inputFrames[i];
+      const progress = 68 + Math.round(((i + 1) / inputFrames.length) * 2);
 
       await onProgress?.({
         status: JobStatus.EXTRACTING_PRODUCT,
         percentage: progress,
-        message: `Centering ${i + 1}/${frames.length}`,
+        message: `Centering ${i + 1}/${inputFrames.length}`,
       });
 
       try {
@@ -117,7 +118,13 @@ export const centerProductProcessor: Processor = {
       success: true,
       data: {
         images: updatedFrames.map((f) => f.path),
+        // Legacy field for backwards compatibility
         recommendedFrames: updatedFrames,
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames: updatedFrames,
+        },
       },
     };
   },

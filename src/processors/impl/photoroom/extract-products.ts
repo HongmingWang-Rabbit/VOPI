@@ -5,7 +5,7 @@
  * Uses the provider registry for flexible implementation swapping.
  */
 
-import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
+import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { providerRegistry } from '../../../providers/index.js';
 import type { ExtractionFrame } from '../../../providers/interfaces/product-extraction.provider.js';
 import { JobStatus } from '../../../types/job.types.js';
@@ -29,12 +29,13 @@ export const extractProductsProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, config, workDirs, onProgress, timer } = context;
 
-    const frames = data.recommendedFrames || data.frames;
-    if (!frames || frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames to extract products from' };
     }
 
-    logger.info({ jobId, frameCount: frames.length }, 'Extracting products');
+    logger.info({ jobId, frameCount: inputFrames.length }, 'Extracting products');
 
     await onProgress?.({
       status: JobStatus.EXTRACTING_PRODUCT,
@@ -42,7 +43,7 @@ export const extractProductsProcessor: Processor = {
       message: 'Extracting products',
     });
 
-    const hasObstructions = frames.some((f) => f.obstructions?.has_obstruction);
+    const hasObstructions = inputFrames.some((f) => f.obstructions?.has_obstruction);
     const useAIEdit = (options?.useAIEdit as boolean) ?? (config.aiCleanup && hasObstructions);
 
     // Get product extraction provider from registry
@@ -50,7 +51,7 @@ export const extractProductsProcessor: Processor = {
     logger.info({ providerId, abTestId, jobId }, 'Using product extraction provider');
 
     // Map frames to ExtractionFrame interface
-    const extractionFrames: ExtractionFrame[] = frames.map((frame) => ({
+    const extractionFrames: ExtractionFrame[] = inputFrames.map((frame) => ({
       frameId: frame.frameId,
       path: frame.path,
       rotationAngleDeg: frame.rotationAngleDeg || 0,
@@ -80,19 +81,40 @@ export const extractProductsProcessor: Processor = {
     );
 
     const successCount = [...results.values()].filter((r) => r.success).length;
+    const failedCount = inputFrames.length - successCount;
+
+    // Log failures
+    if (failedCount > 0) {
+      const failures = [...results.entries()].filter(([, r]) => !r.success);
+      for (const [frameId, result] of failures) {
+        logger.error({ jobId, frameId, error: result.error }, 'Product extraction failed for frame');
+      }
+    }
+
     logger.info({
       jobId,
-      total: frames.length,
+      total: inputFrames.length,
       success: successCount,
+      failed: failedCount,
       providerId,
     }, 'Product extraction complete');
 
+    // If ALL frames failed, return error
+    if (successCount === 0) {
+      const firstError = [...results.values()].find((r) => r.error)?.error || 'All frames failed';
+      return {
+        success: false,
+        error: `Product extraction failed: ${firstError}`,
+      };
+    }
+
     // Update frame paths to extracted versions where available
-    const updatedFrames = frames.map((frame) => {
+    const updatedFrames: FrameMetadata[] = inputFrames.map((frame) => {
       const result = results.get(frame.frameId);
       if (result?.success && result.outputPath) {
         return { ...frame, path: result.outputPath };
       }
+      logger.warn({ jobId, frameId: frame.frameId }, 'Using original frame (extraction failed)');
       return frame;
     });
 
@@ -101,7 +123,13 @@ export const extractProductsProcessor: Processor = {
       data: {
         extractionResults: results,
         images: updatedFrames.map((f) => f.path),
+        // Legacy field for backwards compatibility
         recommendedFrames: updatedFrames,
+        // New unified metadata
+        metadata: {
+          ...data.metadata,
+          frames: updatedFrames,
+        },
       },
     };
   },

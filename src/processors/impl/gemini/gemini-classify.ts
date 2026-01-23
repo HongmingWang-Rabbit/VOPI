@@ -2,6 +2,7 @@
  * Gemini Classify Processor
  *
  * Classifies frames using Gemini AI to discover product variants.
+ * Removes rejected frames, keeping only final selections.
  */
 
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
@@ -18,8 +19,8 @@ export const geminiClassifyProcessor: Processor = {
   displayName: 'Classify with Gemini',
   statusKey: JobStatus.CLASSIFYING,
   io: {
-    requires: ['images', 'frames'],  // uses candidateFrames if available, falls back to frames
-    produces: ['classifications'],
+    requires: ['images', 'frames'],
+    produces: ['frames.classifications'],
   },
 
   async execute(
@@ -29,13 +30,13 @@ export const geminiClassifyProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, config, onProgress, timer } = context;
 
-    // Use candidateFrames if available, otherwise fall back to frames
-    const candidateFrames = data.candidateFrames || data.frames;
-    if (!candidateFrames || candidateFrames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy fields
+    const inputFrames = data.metadata?.frames || data.candidateFrames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames to classify' };
     }
 
-    const videoMetadata = (data.metadata?.videoMetadata as VideoMetadata) || {
+    const videoMetadata = (data.metadata?.video as VideoMetadata) || {
       duration: 0,
       width: 1920,
       height: 1080,
@@ -44,7 +45,7 @@ export const geminiClassifyProcessor: Processor = {
       filename: 'unknown',
     };
 
-    logger.info({ jobId, frameCount: candidateFrames.length }, 'Classifying frames with Gemini');
+    logger.info({ jobId, frameCount: inputFrames.length }, 'Classifying frames with Gemini');
 
     await onProgress?.({
       status: JobStatus.CLASSIFYING,
@@ -52,16 +53,18 @@ export const geminiClassifyProcessor: Processor = {
       message: 'AI variant discovery',
     });
 
-    const BATCH_SIZE = (options?.batchSize as number) ?? config.batchSize;
+    // Default batch size of 20 if not specified in options or config
+    const batchSize = (options?.batchSize as number) ?? config.batchSize ?? 20;
     const batches: FrameMetadata[][] = [];
 
-    for (let i = 0; i < candidateFrames.length; i += BATCH_SIZE) {
-      batches.push(candidateFrames.slice(i, i + BATCH_SIZE));
+    for (let i = 0; i < inputFrames.length; i += batchSize) {
+      batches.push(inputFrames.slice(i, i + batchSize));
     }
 
     // Track best frame per variant
     const bestByVariant = new Map<string, { frame: FrameMetadata; score: number }>();
     let failedBatches = 0;
+    let detectedProductType: string | undefined;
 
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       const batch = batches[batchIdx];
@@ -96,11 +99,10 @@ export const geminiClassifyProcessor: Processor = {
           { batchIdx, batchSize: batch.length }
         );
 
-        // Extract product category from first detected product (for downstream processors)
+        // Extract product category from first detected product
         const detectedCategory = batchResult.products_detected?.[0]?.product_category;
-        if (detectedCategory && !data.productType) {
-          // Store for use by downstream processors like claid-bg-remove
-          (data as Record<string, unknown>).productType = detectedCategory;
+        if (detectedCategory && !detectedProductType) {
+          detectedProductType = detectedCategory;
           logger.info({ productCategory: detectedCategory }, 'Product category detected by Gemini');
         }
 
@@ -146,6 +148,7 @@ export const geminiClassifyProcessor: Processor = {
       }
     }
 
+    // IMPORTANT: Only keep the final selected frames (removes rejected ones)
     const recommendedFrames = [...bestByVariant.values()].map((v) => v.frame);
 
     // Check if all batches failed
@@ -166,26 +169,29 @@ export const geminiClassifyProcessor: Processor = {
       };
     }
 
-    // Get product type (either from Gemini detection or existing data)
-    const productType = (data as Record<string, unknown>).productType as string | undefined;
-
     logger.info({
       jobId,
+      inputFrames: inputFrames.length,
       variantsFound: recommendedFrames.length,
       failedBatches,
-      productType: productType || '(not detected)',
-    }, 'Classification complete');
+      productType: detectedProductType || '(not detected)',
+    }, `Classification complete: ${inputFrames.length} → ${recommendedFrames.length} frames`);
 
     return {
       success: true,
       data: {
+        // Update images to only include recommended frames
+        images: recommendedFrames.map((f) => f.path),
+        // Legacy fields for backwards compatibility
         recommendedFrames,
-        // Pass productType to downstream processors (e.g., claid-bg-remove)
-        productType,
+        // Pass productType to downstream processors
+        productType: detectedProductType,
+        // New unified metadata - frames are now filtered to final selections only
         metadata: {
           ...data.metadata,
+          frames: recommendedFrames,
           variantsDiscovered: recommendedFrames.length,
-          productType,
+          productType: detectedProductType,
         },
       },
     };

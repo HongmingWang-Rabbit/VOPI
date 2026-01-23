@@ -2,6 +2,7 @@
  * Score Frames Processor
  *
  * Calculates quality scores for extracted frames.
+ * Removes low-scoring frames, keeping only top candidates (best per second).
  */
 
 import { copyFile } from 'fs/promises';
@@ -20,7 +21,7 @@ export const scoreFramesProcessor: Processor = {
   statusKey: JobStatus.SCORING,
   io: {
     requires: ['images', 'frames'],
-    produces: ['images', 'scores'],
+    produces: ['images', 'frames.scores'],
   },
 
   async execute(
@@ -30,11 +31,13 @@ export const scoreFramesProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress } = context;
 
-    if (!data.frames || data.frames.length === 0) {
+    // Use metadata.frames as primary source, fall back to legacy field
+    const inputFrames = data.metadata?.frames || data.frames;
+    if (!inputFrames || inputFrames.length === 0) {
       return { success: false, error: 'No frames to score' };
     }
 
-    logger.info({ jobId, frameCount: data.frames.length }, 'Scoring frames');
+    logger.info({ jobId, frameCount: inputFrames.length }, 'Scoring frames');
 
     await onProgress?.({
       status: JobStatus.SCORING,
@@ -43,7 +46,7 @@ export const scoreFramesProcessor: Processor = {
     });
 
     // Convert FrameMetadata to format expected by scoring service
-    const extractedFrames = data.frames.map((f, idx) => ({
+    const extractedFrames = inputFrames.map((f, idx) => ({
       frameId: f.frameId,
       filename: f.filename,
       path: f.path,
@@ -65,7 +68,7 @@ export const scoreFramesProcessor: Processor = {
       }
     );
 
-    // Select best frame per second
+    // Select best frame per second - these are the candidates to keep
     const candidateFrames = frameScoringService.selectBestFramePerSecond(scoredFrames);
 
     // Copy candidates to candidates directory
@@ -75,10 +78,30 @@ export const scoreFramesProcessor: Processor = {
       )
     );
 
-    // Update frame metadata with scores
-    const inputFrames = data.frames;
-    const scoredFrameMetadata: FrameMetadata[] = scoredFrames.map((sf) => {
-      const original = inputFrames?.find((f) => f.frameId === sf.frameId);
+    // Build enriched metadata with scores, marking which are best per second
+    const candidateSet = new Set(candidateFrames.map(c => c.frameId));
+
+    // IMPORTANT: We filter frames here to reduce context - only keep candidates
+    // This is a key simplification from the plan
+    const enrichedFrames: FrameMetadata[] = candidateFrames.map((cf) => {
+      const original = inputFrames.find((f) => f.frameId === cf.frameId);
+      return {
+        ...original,
+        frameId: cf.frameId,
+        filename: cf.filename,
+        path: cf.path,
+        timestamp: cf.timestamp,
+        index: original?.index ?? 0,
+        sharpness: cf.sharpness,
+        motion: cf.motion,
+        score: cf.score,
+        isBestPerSecond: true,
+      };
+    });
+
+    // Keep all scored frames for legacy compatibility (save-frame-records needs them)
+    const allScoredFrames: FrameMetadata[] = scoredFrames.map((sf) => {
+      const original = inputFrames.find((f) => f.frameId === sf.frameId);
       return {
         ...original,
         frameId: sf.frameId,
@@ -89,34 +112,30 @@ export const scoreFramesProcessor: Processor = {
         sharpness: sf.sharpness,
         motion: sf.motion,
         score: sf.score,
-        isBestPerSecond: candidateFrames.some((c) => c.frameId === sf.frameId),
+        isBestPerSecond: candidateSet.has(sf.frameId),
       };
     });
 
-    const candidateMetadata: FrameMetadata[] = candidateFrames.map((cf) => {
-      const metadata = scoredFrameMetadata.find((f) => f.frameId === cf.frameId);
-      return metadata || {
-        frameId: cf.frameId,
-        filename: cf.filename,
-        path: cf.path,
-        timestamp: cf.timestamp,
-        index: 0,
-        sharpness: cf.sharpness,
-        motion: cf.motion,
-        score: cf.score,
-        isBestPerSecond: true,
-      };
-    });
-
-    logger.info({ jobId, candidateCount: candidateFrames.length }, 'Frame scoring complete');
+    logger.info({
+      jobId,
+      totalScored: scoredFrames.length,
+      candidateCount: enrichedFrames.length,
+    }, `Frame scoring complete: ${scoredFrames.length} → ${enrichedFrames.length} frames`);
 
     return {
       success: true,
       data: {
-        images: candidateFrames.map((f) => f.path),
-        scoredFrames: scoredFrameMetadata,
-        candidateFrames: candidateMetadata,
-        frames: scoredFrameMetadata,
+        // Update images to only include candidates
+        images: enrichedFrames.map((f) => f.path),
+        // Legacy fields for backwards compatibility
+        scoredFrames: allScoredFrames,
+        candidateFrames: enrichedFrames,
+        frames: allScoredFrames,
+        // New unified metadata - frames are now filtered to candidates only
+        metadata: {
+          ...data.metadata,
+          frames: enrichedFrames,
+        },
       },
     };
   },
