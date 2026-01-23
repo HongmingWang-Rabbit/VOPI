@@ -6,13 +6,40 @@
  */
 
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
-import { geminiService } from '../../../services/gemini.service.js';
+import { geminiService, type TranscriptContext } from '../../../services/gemini.service.js';
 import { frameScoringService, type ScoredFrame } from '../../../services/frame-scoring.service.js';
 import { JobStatus } from '../../../types/job.types.js';
 import type { VideoMetadata } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
 
 const logger = createChildLogger({ service: 'processor:gemini-classify' });
+
+/**
+ * Build transcript context from pipeline metadata if available
+ */
+function buildTranscriptContext(data: PipelineData): TranscriptContext | undefined {
+  const transcript = data.metadata?.transcript;
+  if (!transcript || transcript.length === 0) {
+    return undefined;
+  }
+
+  const productMetadata = data.metadata?.productMetadata;
+
+  // Extract key features from bullet points
+  const keyFeatures = productMetadata?.bulletPoints?.slice(0, 5) || [];
+
+  return {
+    transcript,
+    productMetadata: productMetadata ? {
+      title: productMetadata.title,
+      category: productMetadata.category,
+      materials: productMetadata.materials,
+      color: productMetadata.color,
+      bulletPoints: productMetadata.bulletPoints,
+    } : undefined,
+    keyFeatures,
+  };
+}
 
 export const geminiClassifyProcessor: Processor = {
   id: 'gemini-classify',
@@ -45,12 +72,16 @@ export const geminiClassifyProcessor: Processor = {
       filename: 'unknown',
     };
 
-    logger.info({ jobId, frameCount: inputFrames.length }, 'Classifying frames with Gemini');
+    // Build transcript context if audio analysis was performed
+    const transcriptContext = buildTranscriptContext(data);
+    const hasAudioContext = !!transcriptContext;
+
+    logger.info({ jobId, frameCount: inputFrames.length, hasAudioContext }, 'Classifying frames with Gemini');
 
     await onProgress?.({
       status: JobStatus.CLASSIFYING,
       percentage: 50,
-      message: 'AI variant discovery',
+      message: hasAudioContext ? 'AI variant discovery (with audio context)' : 'AI variant discovery',
     });
 
     // Default batch size of 20 if not specified in options or config
@@ -93,10 +124,14 @@ export const geminiClassifyProcessor: Processor = {
       try {
         const batchResult = await timer.timeOperation(
           'gemini_classify_batch',
-          () => geminiService.classifyFrames(scoredBatch, batchMetadata, videoMetadata, {
-            model: (options?.model as string) ?? config.geminiModel,
-          }),
-          { batchIdx, batchSize: batch.length }
+          () => geminiService.classifyFrames(
+            scoredBatch,
+            batchMetadata,
+            videoMetadata,
+            { model: (options?.model as string) ?? config.geminiModel },
+            transcriptContext
+          ),
+          { batchIdx, batchSize: batch.length, hasAudioContext }
         );
 
         // Extract product category from first detected product
@@ -111,6 +146,17 @@ export const geminiClassifyProcessor: Processor = {
         for (const winner of batchWinners) {
           const key = `${winner.productId}_${winner.variantId}`;
           const score = winner.geminiScore || 50;
+
+          // Skip frames with very low scores (rejected by Gemini due to cutoff, etc.)
+          const minScoreThreshold = (options?.minScore as number) ?? 15;
+          if (score < minScoreThreshold) {
+            logger.info(
+              { frameId: winner.frameId, score, threshold: minScoreThreshold },
+              'Skipping low-score frame (likely cut-off or unusable)'
+            );
+            continue;
+          }
+
           const existing = bestByVariant.get(key);
 
           if (!existing || score > existing.score) {

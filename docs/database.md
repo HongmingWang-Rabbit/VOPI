@@ -120,6 +120,7 @@ Main table tracking processing jobs.
 | `result` | JSONB | Yes | - | Final results on completion |
 | `error` | TEXT | Yes | - | Error message if failed |
 | `callback_url` | TEXT | Yes | - | Webhook URL for notifications |
+| `product_metadata` | JSONB | Yes | - | Product metadata extracted from audio analysis |
 | `created_at` | TIMESTAMP | No | `now()` | Creation timestamp |
 | `updated_at` | TIMESTAMP | No | `now()` | Last update timestamp |
 | `started_at` | TIMESTAMP | Yes | - | Processing start time |
@@ -169,6 +170,47 @@ Main table tracking processing jobs.
       [version]: string       // S3 URL
     }
   }
+}
+```
+
+**Product Metadata Schema** (JSONB):
+```typescript
+{
+  transcript: string;           // Raw audio transcription
+  product: {
+    title: string;
+    description: string;
+    shortDescription?: string;
+    bulletPoints: string[];
+    brand?: string;
+    category?: string;
+    subcategory?: string;
+    materials?: string[];
+    color?: string;
+    colors?: string[];
+    price?: number;
+    currency?: string;
+    keywords?: string[];
+    tags?: string[];
+    condition?: 'new' | 'refurbished' | 'used' | 'open_box';
+    confidence: {
+      overall: number;
+      title: number;
+      description: number;
+      price?: number;
+      attributes?: number;
+    };
+    extractedFromAudio: boolean;
+    transcriptExcerpts?: string[];
+  };
+  platforms: {
+    shopify: ShopifyProductInput;
+    amazon: AmazonListingInput;
+    ebay: EbayListingInput;
+  };
+  extractedAt: string;          // ISO timestamp
+  audioDuration?: number;       // Seconds
+  pipelineVersion: string;
 }
 ```
 

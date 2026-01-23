@@ -122,6 +122,63 @@ export const customBgRemovalStack: StackTemplate = {
 };
 
 /**
+ * Full Product Analysis stack
+ *
+ * Audio-first approach: extracts audio FIRST, transcribes it, and uses the
+ * transcript context to enhance frame classification.
+ *
+ * Flow: Download → Extract Audio → Analyze Audio → Extract Frames → Score →
+ *       Classify (with audio context) → Claid BG Remove → Fill Holes →
+ *       Center → Upload → Generate Commercial → Complete (uploads metadata.json)
+ *
+ * Produces:
+ * - Product images (enhanced selection using audio context)
+ * - metadata.json file with e-commerce data (visual + audio)
+ */
+export const fullProductAnalysisStack: StackTemplate = {
+  id: 'full_product_analysis',
+  name: 'Full Product Analysis Pipeline',
+  description: 'Extract audio first for context, then analyze video with enhanced AI classification',
+  steps: [
+    { processor: 'download' },
+    { processor: 'extract-audio' },           // Extract audio track
+    { processor: 'gemini-audio-analysis' },   // Transcribe + extract metadata
+    { processor: 'extract-frames' },          // Dense frame extraction
+    { processor: 'score-frames' },            // Sharpness + motion scoring
+    { processor: 'gemini-classify' },         // ENHANCED: Uses audio context
+    { processor: 'save-frame-records' },
+    { processor: 'claid-bg-remove' },
+    { processor: 'fill-product-holes' },
+    { processor: 'center-product' },
+    { processor: 'upload-frames' },
+    { processor: 'generate-commercial' },
+    { processor: 'complete-job' },            // Also uploads metadata.json
+  ],
+};
+
+/**
+ * Audio Metadata Only stack
+ *
+ * Minimal pipeline that only extracts and analyzes audio for metadata.
+ * Does not process video frames. Useful for quickly extracting product
+ * information from seller narration.
+ *
+ * Produces:
+ * - metadata.json with product information from audio
+ */
+export const audioMetadataOnlyStack: StackTemplate = {
+  id: 'audio_metadata_only',
+  name: 'Audio Metadata Only Pipeline',
+  description: 'Extract audio and generate product metadata without video processing',
+  steps: [
+    { processor: 'download' },
+    { processor: 'extract-audio' },
+    { processor: 'gemini-audio-analysis' },
+    { processor: 'complete-job' },
+  ],
+};
+
+/**
  * All available stack templates
  */
 export const stackTemplates: Record<string, StackTemplate> = {
@@ -130,6 +187,8 @@ export const stackTemplates: Record<string, StackTemplate> = {
   minimal: minimalStack,
   frames_only: framesOnlyStack,
   custom_bg_removal: customBgRemovalStack,
+  full_product_analysis: fullProductAnalysisStack,
+  audio_metadata_only: audioMetadataOnlyStack,
 };
 
 /**

@@ -10,6 +10,7 @@ import type {
   BackgroundRecommendations,
 } from '../types/job.types.js';
 import type { GlobalConfigValue } from '../types/config.types.js';
+import type { MetadataFileOutput } from '../types/product-metadata.types.js';
 
 /**
  * API Keys table - invitation codes with usage limits
@@ -41,6 +42,8 @@ export const jobs = pgTable('jobs', {
   result: jsonb('result').$type<JobResult>(),
   error: text('error'),
   callbackUrl: text('callback_url'),
+  /** Product metadata extracted from audio analysis (transcript, e-commerce data) */
+  productMetadata: jsonb('product_metadata').$type<MetadataFileOutput>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
   startedAt: timestamp('started_at'),

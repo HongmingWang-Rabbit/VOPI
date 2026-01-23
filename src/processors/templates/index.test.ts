@@ -212,7 +212,9 @@ describe('Stack Templates', () => {
       expect(ids).toContain('minimal');
       expect(ids).toContain('frames_only');
       expect(ids).toContain('custom_bg_removal');
-      expect(ids).toHaveLength(5);
+      expect(ids).toContain('full_product_analysis');
+      expect(ids).toContain('audio_metadata_only');
+      expect(ids).toHaveLength(7);
     });
   });
 

@@ -31,11 +31,19 @@ Go through each frame and ask: "Is this a NEW unique view, or SIMILAR to one I'v
 
 **Base score starts at 50, then adjust:**
 
-Visibility:
-- Product fully visible with gap from edges: +20
-- Product touching edge slightly: +10
-- Minor cut-off (<10%): -10
-- Significant cut-off (>10%): -30
+**CRITICAL - Product Completeness (MOST IMPORTANT):**
+- Product 100% visible with gap from all edges: +25
+- Product 95%+ visible, touching edge slightly: +15
+- Product 90-95% visible (minor cut-off): +5
+- Product 80-90% visible: -20
+- Product 50-80% visible: -40 (STRONGLY DISCOURAGE)
+- Product <50% visible: SCORE 0 (REJECT - DO NOT SELECT)
+
+**REJECTION RULES - Set score to 0 for:**
+- Product is mostly cut off (less than 50% visible)
+- Only a corner or small portion of product visible
+- Product extends significantly beyond frame on multiple edges
+- Cannot see what the product actually is
 
 Sharpness/Focus:
 - Sharp and clear: +15
@@ -44,8 +52,8 @@ Sharpness/Focus:
 
 Obstructions:
 - No obstructions: +10
-- Removable obstructions (hands, etc.): -10
-- Blocking key features: -30
+- Removable obstructions (hands, fingers): -5 (still usable with AI fill)
+- Obstructions blocking key features/labels: -25
 
 ### OBSTRUCTION DETECTION
 

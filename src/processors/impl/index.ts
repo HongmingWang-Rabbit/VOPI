@@ -19,6 +19,7 @@ export { uploadFramesProcessor } from './storage/upload-frames.js';
 
 // FFmpeg processors
 export { extractFramesProcessor } from './ffmpeg/extract-frames.js';
+export { extractAudioProcessor } from './ffmpeg/extract-audio.js';
 
 // Sharp (image processing) processors
 export { centerProductProcessor } from './sharp/center-product.js';
@@ -30,6 +31,7 @@ export { scoreFramesProcessor } from './sharp/score-frames.js';
 // Gemini AI processors
 export { geminiClassifyProcessor } from './gemini/gemini-classify.js';
 export { geminiVideoAnalysisProcessor } from './gemini/gemini-video-analysis.js';
+export { geminiAudioAnalysisProcessor } from './gemini/gemini-audio-analysis.js';
 
 // Photoroom API processors
 export { photoroomBgRemoveProcessor } from './photoroom/photoroom-bg-remove.js';
@@ -51,6 +53,7 @@ import type { Processor } from '../types.js';
 import { downloadProcessor } from './storage/download.js';
 import { uploadFramesProcessor } from './storage/upload-frames.js';
 import { extractFramesProcessor } from './ffmpeg/extract-frames.js';
+import { extractAudioProcessor } from './ffmpeg/extract-audio.js';
 import { centerProductProcessor } from './sharp/center-product.js';
 import { detectHolesDebugProcessor } from './sharp/detect-holes-debug.js';
 import { fillProductHolesProcessor } from './sharp/fill-product-holes.js';
@@ -58,6 +61,7 @@ import { rotateImageProcessor } from './sharp/rotate-image.js';
 import { scoreFramesProcessor } from './sharp/score-frames.js';
 import { geminiClassifyProcessor } from './gemini/gemini-classify.js';
 import { geminiVideoAnalysisProcessor } from './gemini/gemini-video-analysis.js';
+import { geminiAudioAnalysisProcessor } from './gemini/gemini-audio-analysis.js';
 import { photoroomBgRemoveProcessor } from './photoroom/photoroom-bg-remove.js';
 import { extractProductsProcessor } from './photoroom/extract-products.js';
 import { generateCommercialProcessor } from './photoroom/generate-commercial.js';
@@ -75,6 +79,7 @@ export const allProcessors: Processor[] = [
   uploadFramesProcessor,
   // FFmpeg
   extractFramesProcessor,
+  extractAudioProcessor,
   // Sharp
   centerProductProcessor,
   detectHolesDebugProcessor,
@@ -84,6 +89,7 @@ export const allProcessors: Processor[] = [
   // Gemini
   geminiClassifyProcessor,
   geminiVideoAnalysisProcessor,
+  geminiAudioAnalysisProcessor,
   // Photoroom
   photoroomBgRemoveProcessor,
   extractProductsProcessor,

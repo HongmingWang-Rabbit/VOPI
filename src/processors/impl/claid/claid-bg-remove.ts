@@ -6,9 +6,12 @@
 
 import path from 'path';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
+import { getInputFrames } from '../../types.js';
 import { claidBackgroundRemovalProvider } from '../../../providers/implementations/index.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
+import { parallelMap, isParallelError } from '../../../utils/parallel.js';
+import { getConcurrency } from '../../concurrency.js';
 
 const logger = createChildLogger({ service: 'processor:claid-bg-remove' });
 
@@ -28,9 +31,9 @@ export const claidBgRemoveProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
-    // Use metadata.frames as primary source, fall back to legacy fields
-    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
-    if (!inputFrames || inputFrames.length === 0) {
+    // Get input frames with fallback to legacy fields
+    const inputFrames = getInputFrames(data);
+    if (inputFrames.length === 0) {
       return { success: false, error: 'No frames for background removal' };
     }
 
@@ -69,17 +72,13 @@ export const claidBgRemoveProcessor: Processor = {
     // Build provider options
     const providerOptions = customPrompt ? { customPrompt } : {};
 
-    for (let i = 0; i < inputFrames.length; i++) {
-      const frame = inputFrames[i];
-      const progress = 65 + Math.round(((i + 1) / inputFrames.length) * 5);
+    // Process frames in parallel with concurrency limit (API rate limiting)
+    const concurrency = getConcurrency('CLAID_BG_REMOVE', options);
+    let processedCount = 0;
 
-      await onProgress?.({
-        status: JobStatus.EXTRACTING_PRODUCT,
-        percentage: progress,
-        message: `Processing ${i + 1}/${inputFrames.length}`,
-      });
-
-      try {
+    const parallelResults = await parallelMap(
+      inputFrames,
+      async (frame) => {
         const outputPath = path.join(workDirs.extracted, `${frame.frameId}_transparent.png`);
 
         const result = await timer.timeOperation(
@@ -92,18 +91,38 @@ export const claidBgRemoveProcessor: Processor = {
           { frameId: frame.frameId }
         );
 
-        results.set(frame.frameId, {
+        // Update progress (thread-safe increment)
+        processedCount++;
+        await onProgress?.({
+          status: JobStatus.EXTRACTING_PRODUCT,
+          percentage: 65 + Math.round((processedCount / inputFrames.length) * 5),
+          message: `Processing ${processedCount}/${inputFrames.length}`,
+        });
+
+        return {
+          frameId: frame.frameId,
           success: result.success,
           outputPath: result.success ? outputPath : undefined,
-          rotationApplied: 0, // Claid does not apply rotation
+          rotationApplied: 0,
           error: result.error,
-        });
-      } catch (error) {
+        };
+      },
+      { concurrency }
+    );
+
+    // Collect results
+    for (let i = 0; i < inputFrames.length; i++) {
+      const frame = inputFrames[i];
+      const result = parallelResults.results[i];
+
+      if (isParallelError(result)) {
         results.set(frame.frameId, {
           success: false,
           rotationApplied: 0,
-          error: (error as Error).message,
+          error: result.message,
         });
+      } else {
+        results.set(frame.frameId, result);
       }
     }
 

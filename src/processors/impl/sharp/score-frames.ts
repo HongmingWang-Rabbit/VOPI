@@ -8,6 +8,7 @@
 import { copyFile } from 'fs/promises';
 import path from 'path';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
+import { getInputFrames } from '../../types.js';
 import { frameScoringService } from '../../../services/frame-scoring.service.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
@@ -31,9 +32,9 @@ export const scoreFramesProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress } = context;
 
-    // Use metadata.frames as primary source, fall back to legacy field
-    const inputFrames = data.metadata?.frames || data.frames;
-    if (!inputFrames || inputFrames.length === 0) {
+    // Get input frames with fallback to legacy fields
+    const inputFrames = getInputFrames(data);
+    if (inputFrames.length === 0) {
       return { success: false, error: 'No frames to score' };
     }
 

@@ -314,6 +314,10 @@ type DataPath =
   | 'video'                   // Video file data (path, metadata, sourceUrl)
   | 'images'                  // Array of image file paths
   | 'text'                    // Text/string data
+  // Audio pipeline paths
+  | 'audio'                   // Audio file data (path, format, duration, hasAudio)
+  | 'transcript'              // Transcribed text from audio
+  | 'product.metadata'        // Structured product metadata for e-commerce
   // Frame metadata paths
   | 'frames'                  // Base frame metadata exists
   | 'frames.scores'           // Frames have score fields (sharpness, motion)
@@ -331,7 +335,9 @@ Any processor that outputs a data path can connect to any processor that require
 |-----------|----------|----------|-------------|
 | download | video | video | Downloads video from URL |
 | extract-frames | video | images, frames | Extracts frames with FFmpeg |
+| extract-audio | video | audio | Extracts audio track (16kHz mono MP3) |
 | gemini-video-analysis | video | images, frames, frames.classifications | Direct video analysis |
+| gemini-audio-analysis | audio | transcript, product.metadata | Transcription + metadata extraction |
 | score-frames | images, frames | images, frames.scores | Calculates quality scores |
 | gemini-classify | images, frames | frames.classifications | AI classification |
 | filter-by-score | images, frames, frames.scores | images | Filters by score |
@@ -344,7 +350,7 @@ Any processor that outputs a data path can connect to any processor that require
 | upload-frames | images, frames | text, frames.s3Url | Uploads to S3 |
 | generate-commercial | images, frames | images, frames.version | Commercial image generation |
 | save-frame-records | frames | frames.dbId | Persists to database |
-| complete-job | - | - | Finalizes job |
+| complete-job | - | - | Finalizes job, uploads metadata.json |
 
 ### Stack Configuration
 
@@ -389,6 +395,28 @@ The StackRunner validates stacks before execution:
 2. Checks IO flow (each processor's requirements are satisfied by previous outputs)
 3. Validates processor swaps have compatible IO contracts
 
+### Processor Concurrency
+
+Each processor has a configurable concurrency limit for parallel operations. Defaults are centralized in `src/processors/concurrency.ts`:
+
+| Processor Type | Default | Rationale |
+|----------------|---------|-----------|
+| `CLAID_BG_REMOVE` | 5 | External API, 2-5s per request |
+| `STABILITY_INPAINT` | 3 | External API, 3-8s per request |
+| `SHARP_TRANSFORM` | 8 | CPU-bound local processing, ~50-200ms |
+| `PHOTOROOM_GENERATE` | 3 | External API, 2-4s per request |
+| `FFMPEG_EXTRACT` | 4 | I/O bound, balanced for disk throughput |
+
+**Override via processor options**:
+```typescript
+// In stack configuration
+{
+  processorOptions: {
+    'claid-bg-remove': { concurrency: 10 }
+  }
+}
+```
+
 ### Key Files
 
 | File | Purpose |
@@ -396,6 +424,7 @@ The StackRunner validates stacks before execution:
 | `src/processors/types.ts` | IOType, Processor, Stack interfaces |
 | `src/processors/registry.ts` | ProcessorRegistry for managing processors |
 | `src/processors/runner.ts` | StackRunner with validation and execution |
+| `src/processors/concurrency.ts` | Centralized concurrency configuration |
 | `src/processors/templates/index.ts` | Pre-defined stack templates |
 | `src/processors/impl/` | Individual processor implementations |
 
@@ -423,6 +452,7 @@ src/
 │   ├── registry.ts        # Processor registry
 │   ├── runner.ts          # Stack runner
 │   ├── constants.ts       # Progress constants
+│   ├── concurrency.ts     # Centralized concurrency configuration
 │   ├── setup.ts           # Processor registration
 │   ├── impl/              # Processor implementations
 │   └── templates/         # Pre-defined stacks
@@ -515,3 +545,112 @@ Config modification endpoints require admin API keys (separate from regular API 
 - Set via `ADMIN_API_KEYS` environment variable
 - Endpoints: `PUT /config`, `DELETE /config/:key`, `POST /config/seed`
 - Regular users can only read config via `GET /config/effective`
+
+## Audio Analysis Pipeline
+
+VOPI includes an optional audio analysis pipeline that extracts audio from product videos, transcribes it using Gemini 2.0 Flash, and generates structured e-commerce metadata.
+
+### Audio Pipeline Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        Audio Analysis Pipeline                            │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. EXTRACT AUDIO                                                        │
+│     ├─ Use FFmpeg to extract audio track from video                     │
+│     ├─ Convert to 16kHz mono MP3 (optimized for speech recognition)     │
+│     └─ Check if video has audio track (skip if no audio)                │
+│                                                                          │
+│  2. UPLOAD TO GEMINI                                                     │
+│     ├─ Upload audio to Gemini Files API                                 │
+│     ├─ Wait for processing (with configurable timeout)                  │
+│     └─ Handle processing failures gracefully                            │
+│                                                                          │
+│  3. TRANSCRIBE & ANALYZE                                                 │
+│     ├─ Send audio to Gemini 2.0 Flash with analysis prompt              │
+│     ├─ Extract: transcript, product title, description, features        │
+│     ├─ Detect: brand, materials, colors, sizes, price mentions          │
+│     └─ Calculate confidence scores for each field                       │
+│                                                                          │
+│  4. FORMAT FOR PLATFORMS                                                 │
+│     ├─ Shopify: GraphQL productCreate mutation format                   │
+│     ├─ Amazon: SP-API Listings Items format (item_name, bullet_point)   │
+│     └─ eBay: Inventory API format (title max 80 chars, aspects)         │
+│                                                                          │
+│  5. SAVE METADATA                                                        │
+│     ├─ Generate metadata.json with all platform formats                 │
+│     ├─ Upload to S3 alongside frame images                              │
+│     └─ Store metadata S3 URL in jobs table                              │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Metadata Output Structure
+
+The pipeline generates a `metadata.json` file in S3:
+
+```json
+{
+  "transcript": "Full audio transcription from seller's description...",
+  "product": {
+    "title": "Product Name",
+    "description": "Full HTML/text description",
+    "shortDescription": "Brief summary",
+    "bulletPoints": ["Feature 1", "Feature 2", "Feature 3"],
+    "brand": "Brand Name",
+    "materials": ["leather", "cotton"],
+    "color": "Black",
+    "colors": ["Black", "Brown"],
+    "size": "Large",
+    "sizes": ["S", "M", "L", "XL"],
+    "category": "Clothing",
+    "keywords": ["keyword1", "keyword2"],
+    "condition": "new",
+    "confidence": {
+      "overall": 85,
+      "title": 90,
+      "description": 80,
+      "price": 70,
+      "attributes": 85
+    },
+    "extractedFromAudio": true,
+    "transcriptExcerpts": ["relevant quote 1", "relevant quote 2"]
+  },
+  "platforms": {
+    "shopify": { /* Shopify GraphQL format */ },
+    "amazon": { /* SP-API format */ },
+    "ebay": { /* Inventory API format */ }
+  },
+  "extractedAt": "2026-01-22T12:00:00.000Z",
+  "audioDuration": 45.2,
+  "pipelineVersion": "2.0.0"
+}
+```
+
+### Platform Format Mapping
+
+| Field | Shopify | Amazon | eBay |
+|-------|---------|--------|------|
+| Title | `title` | `item_name` | `title` (max 80 chars) |
+| Description | `descriptionHtml` | `product_description` | `description` |
+| Features | - | `bullet_point` (max 5) | - |
+| Brand | `vendor` | `brand_name` | `aspects.Brand` |
+| Keywords | `tags` | `generic_keyword` | - |
+| Weight | `variants[].weight` + `weightUnit` | `item_weight.value` + `unit` | `packageWeightAndSize.weight` |
+| Condition | - | `condition_type` | `condition` |
+
+### Audio Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUDIO_PROCESSING_TIMEOUT_MS` | 180000 | Gemini file processing timeout (3 minutes) |
+| `AUDIO_POLLING_INTERVAL_MS` | 3000 | Polling interval for processing status |
+| `AUDIO_MAX_RETRIES` | 3 | Max retries for audio analysis API calls |
+
+### Edge Cases
+
+1. **No audio track**: Pipeline detects and skips gracefully, sets `extractedFromAudio: false`
+2. **Poor audio quality**: Lower confidence scores, all fields still extracted where possible
+3. **Processing timeout**: Configurable timeout, fails gracefully without blocking pipeline
+4. **API failures**: Retry with exponential backoff, graceful degradation if all retries fail

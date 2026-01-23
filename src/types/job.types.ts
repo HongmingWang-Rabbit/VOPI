@@ -59,7 +59,7 @@ export const jobConfigSchema = z.object({
   batchSize: z.number().min(1).max(100).default(30),
   commercialVersions: z
     .array(z.enum(['transparent', 'solid', 'real', 'creative']))
-    .default(['transparent', 'solid', 'real', 'creative']),
+    .default(['transparent']),
   aiCleanup: z.boolean().default(true),
   geminiModel: z.string().default('gemini-2.0-flash'),
   // Stack configuration

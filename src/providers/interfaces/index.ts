@@ -12,3 +12,4 @@ export * from './commercial-image.provider.js';
 export * from './product-extraction.provider.js';
 export * from './video-extraction.provider.js';
 export * from './video-analysis.provider.js';
+export * from './audio-analysis.provider.js';

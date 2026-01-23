@@ -216,6 +216,7 @@ describe('Processor Setup', () => {
       // DataPath: unified type for all data requirements
       const validPaths = [
         'video', 'images', 'text',
+        'audio', 'transcript', 'product.metadata',
         'frames', 'frames.scores', 'frames.classifications',
         'frames.dbId', 'frames.s3Url', 'frames.version'
       ];

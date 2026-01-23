@@ -175,8 +175,8 @@ export interface PipelineMetadata {
   /** Structured product metadata for e-commerce platforms */
   productMetadata?: ProductMetadataOutput;
 
-  /** S3 URL to the uploaded metadata.json file */
-  metadataS3Url?: string;
+  /** Flag indicating audio analysis failed but pipeline continued */
+  audioAnalysisFailed?: boolean;
 
   /** Custom extension data - use this instead of adding arbitrary keys */
   extensions?: Record<string, unknown>;
@@ -368,6 +368,41 @@ export function getFrameDbIdMap(data: PipelineData): Map<string, string> {
     }
   }
   return map;
+}
+
+/**
+ * Get input frames from pipeline data with fallback to legacy fields.
+ *
+ * This normalizes the different ways frames can be stored in pipeline data:
+ * 1. metadata.frames (preferred, unified format)
+ * 2. recommendedFrames (legacy, from classification)
+ * 3. frames (legacy, from extraction)
+ *
+ * @param data - Pipeline data to extract frames from
+ * @returns Array of frame metadata, or empty array if no frames found
+ *
+ * @example
+ * const frames = getInputFrames(data);
+ * if (frames.length === 0) {
+ *   return { success: false, error: 'No frames available' };
+ * }
+ */
+export function getInputFrames(data: PipelineData): FrameMetadata[] {
+  // Prefer metadata.frames (unified format)
+  if (data.metadata?.frames && data.metadata.frames.length > 0) {
+    return data.metadata.frames;
+  }
+
+  // Fall back to legacy fields
+  if (data.recommendedFrames && data.recommendedFrames.length > 0) {
+    return data.recommendedFrames;
+  }
+
+  if (data.frames && data.frames.length > 0) {
+    return data.frames;
+  }
+
+  return [];
 }
 
 // ============================================================================

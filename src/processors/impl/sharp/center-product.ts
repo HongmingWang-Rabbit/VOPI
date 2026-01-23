@@ -6,9 +6,12 @@
 
 import path from 'path';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
+import { getInputFrames } from '../../types.js';
 import { sharpImageTransformProvider } from '../../../providers/implementations/index.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
+import { parallelMap, isParallelError } from '../../../utils/parallel.js';
+import { getConcurrency } from '../../concurrency.js';
 
 const logger = createChildLogger({ service: 'processor:center-product' });
 
@@ -28,9 +31,9 @@ export const centerProductProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
-    // Use metadata.frames as primary source, fall back to legacy fields
-    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
-    if (!inputFrames || inputFrames.length === 0) {
+    // Get input frames with fallback to legacy fields
+    const inputFrames = getInputFrames(data);
+    if (inputFrames.length === 0) {
       return { success: false, error: 'No frames to center' };
     }
 
@@ -45,72 +48,79 @@ export const centerProductProcessor: Processor = {
       message: 'Centering products',
     });
 
-    const updatedFrames: FrameMetadata[] = [];
+    // Process frames in parallel (CPU-bound Sharp operations, higher concurrency)
+    const concurrency = getConcurrency('SHARP_TRANSFORM', options);
+    let processedCount = 0;
+    const { writeFile } = await import('fs/promises');
 
-    for (let i = 0; i < inputFrames.length; i++) {
-      const frame = inputFrames[i];
-      const progress = 68 + Math.round(((i + 1) / inputFrames.length) * 2);
+    const parallelResults = await parallelMap(
+      inputFrames,
+      async (frame): Promise<FrameMetadata> => {
+        try {
+          // Detect content bounds
+          const bounds = await timer.timeOperation(
+            'detect_content_bounds',
+            () => sharpImageTransformProvider.findContentBounds(frame.path, 10),
+            { frameId: frame.frameId }
+          );
 
-      await onProgress?.({
-        status: JobStatus.EXTRACTING_PRODUCT,
-        percentage: progress,
-        message: `Centering ${i + 1}/${inputFrames.length}`,
-      });
+          // Update progress
+          processedCount++;
+          await onProgress?.({
+            status: JobStatus.EXTRACTING_PRODUCT,
+            percentage: 68 + Math.round((processedCount / inputFrames.length) * 2),
+            message: `Centering ${processedCount}/${inputFrames.length}`,
+          });
 
-      try {
-        // Detect content bounds
-        const bounds = await timer.timeOperation(
-          'detect_content_bounds',
-          () => sharpImageTransformProvider.findContentBounds(frame.path, 10),
-          { frameId: frame.frameId }
-        );
+          if (!bounds) {
+            return frame;
+          }
 
-        if (!bounds) {
-          // No content found, keep original
-          updatedFrames.push(frame);
-          continue;
+          const outputPath = path.join(workDirs.extracted, `${frame.frameId}_centered.png`);
+
+          // Crop to content bounds
+          const croppedResult = await timer.timeOperation(
+            'crop_content',
+            () => sharpImageTransformProvider.crop(frame.path, { region: bounds }),
+            { frameId: frame.frameId }
+          );
+
+          if (!croppedResult.success || !croppedResult.outputBuffer) {
+            return frame;
+          }
+
+          // Calculate canvas size with padding
+          const contentSize = Math.max(bounds.width, bounds.height);
+          const canvasSize = Math.max(minSize, Math.round(contentSize * (1 + padding * 2)));
+
+          // Center on canvas
+          const centeredResult = await timer.timeOperation(
+            'center_on_canvas',
+            () => sharpImageTransformProvider.centerOnCanvas(croppedResult.outputBuffer!, {
+              canvasSize,
+              padding,
+            }),
+            { frameId: frame.frameId }
+          );
+
+          if (centeredResult.success && centeredResult.outputBuffer) {
+            await writeFile(outputPath, centeredResult.outputBuffer);
+            return { ...frame, path: outputPath };
+          }
+
+          return frame;
+        } catch (error) {
+          logger.warn({ frameId: frame.frameId, error: (error as Error).message }, 'Failed to center product');
+          return frame;
         }
+      },
+      { concurrency }
+    );
 
-        const outputPath = path.join(workDirs.extracted, `${frame.frameId}_centered.png`);
-
-        // Crop to content bounds
-        const croppedResult = await timer.timeOperation(
-          'crop_content',
-          () => sharpImageTransformProvider.crop(frame.path, { region: bounds }),
-          { frameId: frame.frameId }
-        );
-
-        if (!croppedResult.success || !croppedResult.outputBuffer) {
-          updatedFrames.push(frame);
-          continue;
-        }
-
-        // Calculate canvas size with padding
-        const contentSize = Math.max(bounds.width, bounds.height);
-        const canvasSize = Math.max(minSize, Math.round(contentSize * (1 + padding * 2)));
-
-        // Center on canvas
-        const centeredResult = await timer.timeOperation(
-          'center_on_canvas',
-          () => sharpImageTransformProvider.centerOnCanvas(croppedResult.outputBuffer!, {
-            canvasSize,
-            padding,
-          }),
-          { frameId: frame.frameId }
-        );
-
-        if (centeredResult.success && centeredResult.outputBuffer) {
-          const { writeFile } = await import('fs/promises');
-          await writeFile(outputPath, centeredResult.outputBuffer);
-          updatedFrames.push({ ...frame, path: outputPath });
-        } else {
-          updatedFrames.push(frame);
-        }
-      } catch (error) {
-        logger.warn({ frameId: frame.frameId, error: (error as Error).message }, 'Failed to center product');
-        updatedFrames.push(frame); // Keep original on error
-      }
-    }
+    // Collect results maintaining order
+    const updatedFrames: FrameMetadata[] = parallelResults.results.map((result, i) =>
+      isParallelError(result) ? inputFrames[i] : result
+    );
 
     logger.info({ jobId, centeredCount: updatedFrames.length }, 'Product centering complete');
 

@@ -16,6 +16,26 @@ import type {
 const logger = createChildLogger({ service: 'gemini' });
 
 /**
+ * Transcript context for enhanced frame classification
+ * When audio analysis has been performed, this context helps Gemini
+ * make smarter frame selections based on what the seller describes.
+ */
+export interface TranscriptContext {
+  /** Raw transcript from audio */
+  transcript: string;
+  /** Product metadata extracted from audio */
+  productMetadata?: {
+    title?: string;
+    category?: string;
+    materials?: string[];
+    color?: string;
+    bulletPoints?: string[];
+  };
+  /** Key features mentioned in audio to prioritize in frame selection */
+  keyFeatures?: string[];
+}
+
+/**
  * Gemini response schema for variant-based classification
  */
 export interface GeminiResponse {
@@ -146,14 +166,58 @@ export class GeminiService {
       sequence_position: number;
       total_candidates: number;
     }>,
-    videoMetadata: VideoMetadata
+    videoMetadata: VideoMetadata,
+    transcriptContext?: TranscriptContext
   ): string {
     const metadataStr = JSON.stringify(candidateMetadata, null, 2);
 
-    return `## Video Information
+    let prompt = `## Video Information
 Filename: ${videoMetadata.filename}
 Duration: ${videoMetadata.duration.toFixed(2)} seconds
-Resolution: ${videoMetadata.width}x${videoMetadata.height}
+Resolution: ${videoMetadata.width}x${videoMetadata.height}`;
+
+    // Add transcript context if available
+    if (transcriptContext?.transcript) {
+      prompt += `
+
+## Audio Context from Seller
+The seller describes this product in the video. Use this information to better understand what features to look for and prioritize.
+
+**Transcript Summary:**
+${transcriptContext.transcript.slice(0, 2000)}${transcriptContext.transcript.length > 2000 ? '...' : ''}`;
+
+      if (transcriptContext.productMetadata?.title) {
+        prompt += `
+
+**Product identified from audio:**
+- Title: ${transcriptContext.productMetadata.title}`;
+        if (transcriptContext.productMetadata.category) {
+          prompt += `
+- Category: ${transcriptContext.productMetadata.category}`;
+        }
+        if (transcriptContext.productMetadata.materials?.length) {
+          prompt += `
+- Materials: ${transcriptContext.productMetadata.materials.join(', ')}`;
+        }
+        if (transcriptContext.productMetadata.color) {
+          prompt += `
+- Color: ${transcriptContext.productMetadata.color}`;
+        }
+        if (transcriptContext.keyFeatures?.length) {
+          prompt += `
+- Key features to show: ${transcriptContext.keyFeatures.join(', ')}`;
+        }
+      }
+
+      prompt += `
+
+**Selection guidance from audio:**
+- Prioritize frames that clearly show features mentioned in the transcript
+- Look for views that demonstrate key selling points
+- Consider the product category when evaluating angles`;
+    }
+
+    prompt += `
 
 ## Candidate Frames
 The following ${candidateMetadata.length} frames have been pre-selected as the sharpest, most stable moments in the video.
@@ -171,6 +235,8 @@ ${metadataStr}
 ${GEMINI_OUTPUT_SCHEMA}
 
 Return ONLY the JSON object. No additional text.`;
+
+    return prompt;
   }
 
   /**
@@ -213,6 +279,12 @@ Return ONLY the JSON object. No additional text.`;
 
   /**
    * Classify frames using Gemini
+   *
+   * @param candidates - Pre-scored candidate frames
+   * @param candidateMetadata - Metadata for each candidate
+   * @param videoMetadata - Video file metadata
+   * @param options - Classification options
+   * @param transcriptContext - Optional transcript context from audio analysis
    */
   async classifyFrames(
     candidates: ScoredFrame[],
@@ -223,7 +295,8 @@ Return ONLY the JSON object. No additional text.`;
       total_candidates: number;
     }>,
     videoMetadata: VideoMetadata,
-    options: { model?: string; maxRetries?: number; retryDelay?: number } = {}
+    options: { model?: string; maxRetries?: number; retryDelay?: number } = {},
+    transcriptContext?: TranscriptContext
   ): Promise<GeminiResponse> {
     const config = getConfig();
     const {
@@ -232,14 +305,15 @@ Return ONLY the JSON object. No additional text.`;
       retryDelay = config.worker.apiRetryDelayMs,
     } = options;
 
-    logger.info({ count: candidates.length, model }, 'Classifying frames with Gemini');
+    const hasTranscript = !!transcriptContext?.transcript;
+    logger.info({ count: candidates.length, model, hasTranscript }, 'Classifying frames with Gemini');
 
     const geminiModel = this.getModel(model);
 
     // Encode all images
     const imageParts = await Promise.all(candidates.map((c) => this.encodeImage(c.path)));
 
-    const prompt = this.buildPrompt(candidateMetadata, videoMetadata);
+    const prompt = this.buildPrompt(candidateMetadata, videoMetadata, transcriptContext);
 
     // Build content
     const content = [

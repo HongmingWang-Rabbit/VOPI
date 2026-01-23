@@ -311,6 +311,13 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
                   additionalProperties: { type: 'string' },
                 },
               },
+              metadata: {
+                type: 'object',
+                nullable: true,
+                properties: {
+                  downloadUrl: { type: 'string' },
+                },
+              },
             },
           },
         },
@@ -379,11 +386,15 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
 
       await Promise.all(commercialPromises);
 
+      // Include product metadata if available (now stored in database, not S3)
+      const productMetadata = job.productMetadata || null;
+
       return reply.send({
         jobId: id,
         expiresIn,
         frames,
         commercialImages,
+        productMetadata,
       });
     }
   );

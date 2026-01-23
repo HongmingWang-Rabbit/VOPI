@@ -6,7 +6,7 @@
 
 import path from 'path';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, CommercialImageData, FrameMetadata } from '../../types.js';
-import { getFrameDbIdMap } from '../../types.js';
+import { getFrameDbIdMap, getInputFrames } from '../../types.js';
 import { photoroomService } from '../../../services/photoroom.service.js';
 import { storageService } from '../../../services/storage.service.js';
 import { getDatabase, schema } from '../../../db/index.js';
@@ -19,6 +19,8 @@ import {
   DEFAULT_FRAME_OBSTRUCTIONS,
   DEFAULT_BACKGROUND_RECOMMENDATIONS,
 } from '../../constants.js';
+import { parallelMap, isParallelError } from '../../../utils/parallel.js';
+import { getConcurrency } from '../../concurrency.js';
 
 const logger = createChildLogger({ service: 'processor:generate-commercial' });
 
@@ -222,9 +224,9 @@ export const generateCommercialProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, config, workDirs, onProgress, timer } = context;
 
-    // Use metadata.frames as primary source, fall back to legacy fields
-    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
-    if (!inputFrames || inputFrames.length === 0) {
+    // Get input frames with fallback to legacy fields
+    const inputFrames = getInputFrames(data);
+    if (inputFrames.length === 0) {
       return { success: false, error: 'No frames for commercial generation' };
     }
 
@@ -242,34 +244,73 @@ export const generateCommercialProcessor: Processor = {
       message: 'Generating commercial images',
     });
 
+    // Process frames in parallel (Photoroom API rate limited)
+    const concurrency = getConcurrency('PHOTOROOM_GENERATE', options);
+    let processedCount = 0;
+
+    const parallelResults = await parallelMap(
+      inputFrames,
+      async (frame): Promise<FrameGenerationResult & { error?: string }> => {
+        const frameDbId = frameRecords.get(frame.frameId) || frame.dbId;
+
+        try {
+          const result = await processFrameVersions(
+            frame,
+            jobId,
+            workDirs,
+            timer,
+            versions,
+            frameDbId,
+            extractionResults
+          );
+
+          // Update progress
+          processedCount++;
+          await onProgress?.({
+            status: JobStatus.GENERATING,
+            percentage: calculateProgress(processedCount, inputFrames.length, PROGRESS.GENERATE_COMMERCIAL.START, PROGRESS.GENERATE_COMMERCIAL.END),
+            message: `Generating images for ${frame.recommendedType || frame.frameId}`,
+          });
+
+          return result;
+        } catch (error) {
+          processedCount++;
+          logger.error({ error, frame: frame.frameId, jobId }, 'Commercial generation failed for frame');
+          return {
+            variantKey: frame.recommendedType || frame.frameId,
+            commercialImages: [{
+              frameId: frame.frameId,
+              version: 'all',
+              success: false,
+              error: (error as Error).message,
+            }],
+            variantImages: {},
+            hasErrors: true,
+            error: (error as Error).message,
+          };
+        }
+      },
+      { concurrency }
+    );
+
+    // Collect results
     const allCommercialImages: CommercialImageData[] = [];
     const commercialImageUrls: Record<string, Record<string, string>> = {};
     let totalErrors = 0;
     let successfulFrames = 0;
 
     for (let i = 0; i < inputFrames.length; i++) {
-      const frame = inputFrames[i];
-      const progress = calculateProgress(i, inputFrames.length, PROGRESS.GENERATE_COMMERCIAL.START, PROGRESS.GENERATE_COMMERCIAL.END);
+      const result = parallelResults.results[i];
 
-      await onProgress?.({
-        status: JobStatus.GENERATING,
-        percentage: progress,
-        message: `Generating images for ${frame.recommendedType || frame.frameId}`,
-      });
-
-      const frameDbId = frameRecords.get(frame.frameId) || frame.dbId;
-
-      try {
-        const result = await processFrameVersions(
-          frame,
-          jobId,
-          workDirs,
-          timer,
-          versions,
-          frameDbId,
-          extractionResults
-        );
-
+      if (isParallelError(result)) {
+        totalErrors++;
+        allCommercialImages.push({
+          frameId: inputFrames[i].frameId,
+          version: 'all',
+          success: false,
+          error: result.message,
+        });
+      } else {
         allCommercialImages.push(...result.commercialImages);
         commercialImageUrls[result.variantKey] = result.variantImages;
 
@@ -278,17 +319,6 @@ export const generateCommercialProcessor: Processor = {
         } else {
           successfulFrames++;
         }
-      } catch (error) {
-        totalErrors++;
-        logger.error({ error, frame: frame.frameId, jobId }, 'Commercial generation failed for frame');
-
-        // Record the failure
-        allCommercialImages.push({
-          frameId: frame.frameId,
-          version: 'all',
-          success: false,
-          error: (error as Error).message,
-        });
       }
     }
 

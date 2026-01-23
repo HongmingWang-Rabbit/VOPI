@@ -5,8 +5,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { hasScores, hasClassificationData, hasClassifications } from './types.js';
-import type { FrameMetadata } from './types.js';
+import { hasScores, hasClassificationData, hasClassifications, getInputFrames } from './types.js';
+import type { FrameMetadata, PipelineData } from './types.js';
 
 describe('Type Guards', () => {
   describe('hasScores', () => {
@@ -287,5 +287,105 @@ describe('Type Guards', () => {
       };
       expect(hasClassifications([partialFrame])).toBe(false);
     });
+  });
+});
+
+describe('getInputFrames', () => {
+  const createFrame = (id: number): FrameMetadata => ({
+    frameId: `frame-${id}`,
+    filename: `frame-${id}.jpg`,
+    path: `/tmp/frame-${id}.jpg`,
+    timestamp: id,
+    index: id - 1,
+  });
+
+  it('should return metadata.frames when available', () => {
+    const frames = [createFrame(1), createFrame(2)];
+    const data: PipelineData = {
+      metadata: { frames },
+    };
+
+    expect(getInputFrames(data)).toEqual(frames);
+  });
+
+  it('should fall back to recommendedFrames when metadata.frames is empty', () => {
+    const frames = [createFrame(1), createFrame(2)];
+    const data: PipelineData = {
+      metadata: { frames: [] },
+      recommendedFrames: frames,
+    };
+
+    expect(getInputFrames(data)).toEqual(frames);
+  });
+
+  it('should fall back to recommendedFrames when metadata.frames is undefined', () => {
+    const frames = [createFrame(1), createFrame(2)];
+    const data: PipelineData = {
+      metadata: {},
+      recommendedFrames: frames,
+    };
+
+    expect(getInputFrames(data)).toEqual(frames);
+  });
+
+  it('should fall back to frames when both metadata.frames and recommendedFrames are empty', () => {
+    const frames = [createFrame(1), createFrame(2)];
+    const data: PipelineData = {
+      metadata: {},
+      recommendedFrames: [],
+      frames: frames,
+    };
+
+    expect(getInputFrames(data)).toEqual(frames);
+  });
+
+  it('should return empty array when no frames are available', () => {
+    const data: PipelineData = {
+      metadata: {},
+    };
+
+    expect(getInputFrames(data)).toEqual([]);
+  });
+
+  it('should return empty array when all frame sources are empty', () => {
+    const data: PipelineData = {
+      metadata: { frames: [] },
+      recommendedFrames: [],
+      frames: [],
+    };
+
+    expect(getInputFrames(data)).toEqual([]);
+  });
+
+  it('should prefer metadata.frames over recommendedFrames', () => {
+    const metadataFrames = [createFrame(1)];
+    const recommendedFrames = [createFrame(2), createFrame(3)];
+    const data: PipelineData = {
+      metadata: { frames: metadataFrames },
+      recommendedFrames,
+    };
+
+    expect(getInputFrames(data)).toEqual(metadataFrames);
+  });
+
+  it('should prefer recommendedFrames over frames', () => {
+    const recommendedFrames = [createFrame(1)];
+    const legacyFrames = [createFrame(2), createFrame(3)];
+    const data: PipelineData = {
+      metadata: {},
+      recommendedFrames,
+      frames: legacyFrames,
+    };
+
+    expect(getInputFrames(data)).toEqual(recommendedFrames);
+  });
+
+  it('should handle missing metadata object', () => {
+    const frames = [createFrame(1)];
+    const data = {
+      recommendedFrames: frames,
+    } as PipelineData;
+
+    expect(getInputFrames(data)).toEqual(frames);
   });
 });

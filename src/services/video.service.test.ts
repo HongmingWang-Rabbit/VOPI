@@ -247,10 +247,12 @@ describe('VideoService', () => {
 
       vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
       // @ts-expect-error - readdir mock returns string[] for simplicity
-      vi.mocked(readdir).mockResolvedValue(['frame_00001.png', 'frame_00002.png']);
+      vi.mocked(readdir).mockResolvedValue(['frame_00001.jpg', 'frame_00002.jpg']);
 
       const result = await service.extractFramesDense('/path/to/video.mp4', '/output', {
         fps: 5,
+        parallel: false, // Test sequential mode
+        format: 'jpg', // Match the mocked files
       });
 
       expect(mkdir).toHaveBeenCalledWith('/output', { recursive: true });
@@ -279,6 +281,7 @@ describe('VideoService', () => {
       await service.extractFramesDense('/path/to/video.mp4', '/output', {
         fps: 5,
         scale: '1280:720',
+        parallel: false, // Test sequential mode
       });
 
       const spawnCall = vi.mocked(spawn).mock.calls[0];
@@ -303,7 +306,7 @@ describe('VideoService', () => {
       vi.mocked(spawn).mockReturnValue(mockProcess as unknown as ChildProcess);
 
       await expect(
-        service.extractFramesDense('/path/to/video.mp4', '/output')
+        service.extractFramesDense('/path/to/video.mp4', '/output', { parallel: false })
       ).rejects.toThrow('ffmpeg extraction failed');
     });
   });

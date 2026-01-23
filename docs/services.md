@@ -9,6 +9,7 @@ The `/src/services/` directory contains the core business logic modules. Each se
 | **Video** | `video.service.ts` | FFmpeg operations for frame extraction |
 | **Frame Scoring** | `frame-scoring.service.ts` | Quality analysis and candidate selection |
 | **Gemini** | `gemini.service.ts` | AI classification via Google Gemini |
+| **Gemini Audio** | `gemini-audio-analysis.provider.ts` | Audio transcription and metadata extraction |
 | **Photoroom** | `photoroom.service.ts` | Background removal and image generation |
 | **Stability** | `stability.service.ts` | AI inpainting for hole filling |
 | **Storage** | `storage.service.ts` | S3/MinIO file operations |
@@ -279,6 +280,121 @@ Model and prompts are configurable:
 - Frames are batched to reduce API calls
 - Image data is base64-encoded inline (no upload needed)
 - Automatic retry with exponential backoff on failures
+
+---
+
+## Gemini Audio Analysis Provider
+
+**File**: `src/providers/implementations/gemini-audio-analysis.provider.ts`
+
+Transcribes audio from product videos and extracts structured e-commerce metadata using Gemini 2.0 Flash.
+
+### Methods
+
+#### `analyzeAudio(audioPath, options): Promise<AudioAnalysisResult>`
+
+Upload audio to Gemini Files API and analyze for product metadata.
+
+**Options**:
+```typescript
+interface AudioAnalysisOptions {
+  model?: string;          // Gemini model (default from config)
+  maxBulletPoints?: number; // Max bullet points to extract (default: 5)
+  maxRetries?: number;     // Retry attempts (default: 3)
+  retryDelay?: number;     // Retry delay in ms
+  temperature?: number;    // Model temperature
+  topP?: number;           // Top-p sampling
+  focusAreas?: string[];   // Areas to focus on (e.g., ['price', 'materials'])
+}
+```
+
+**Returns**:
+```typescript
+interface AudioAnalysisResult {
+  transcript: string;           // Full audio transcription
+  language: string;             // Detected language (ISO code)
+  audioQuality: number;         // Quality score 0-100
+  productMetadata: ProductMetadata;
+  confidence: MetadataConfidence;
+  relevantExcerpts: string[];   // Key quotes from transcript
+  rawResponse: unknown;         // Raw Gemini response
+}
+```
+
+#### `uploadAudio(audioPath): Promise<string>`
+
+Upload audio file to Gemini Files API and wait for processing.
+
+#### `deleteAudio(audioUri): Promise<void>`
+
+Clean up uploaded audio file from Gemini.
+
+### ProductMetadata Structure
+
+```typescript
+interface ProductMetadata {
+  // Core fields
+  title: string;
+  description: string;
+  shortDescription?: string;
+  bulletPoints: string[];
+
+  // Brand & classification
+  brand?: string;
+  category?: string;
+  subcategory?: string;
+  keywords?: string[];
+  tags?: string[];
+
+  // Physical attributes
+  materials?: string[];
+  color?: string;
+  colors?: string[];
+  size?: string;
+  sizes?: string[];
+
+  // Pricing (if mentioned in audio)
+  price?: number;
+  currency?: string;
+
+  // Confidence tracking
+  confidence: {
+    overall: number;   // 0-100
+    title: number;
+    description: number;
+    price?: number;
+    attributes?: number;
+  };
+
+  // Source tracking
+  extractedFromAudio: boolean;
+  transcriptExcerpts?: string[];
+}
+```
+
+### Platform Formatters
+
+The provider includes helper functions to format metadata for specific platforms:
+
+| Function | Output Format |
+|----------|---------------|
+| `formatForShopify()` | Shopify GraphQL `productCreate` format |
+| `formatForAmazon()` | SP-API Listings Items JSON |
+| `formatForEbay()` | eBay Inventory API format |
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUDIO_PROCESSING_TIMEOUT_MS` | 180000 | File processing timeout |
+| `AUDIO_POLLING_INTERVAL_MS` | 3000 | Polling interval |
+| `AUDIO_MAX_RETRIES` | 3 | Max retries for analysis |
+
+### Error Handling
+
+- Files are uploaded to Gemini Files API and deleted after processing
+- Processing failures are detected via file state polling
+- Graceful degradation: audio analysis failure doesn't block the visual pipeline
 
 ---
 
@@ -976,3 +1092,83 @@ When an HEVC (H.265) video is detected:
 - Video processing failures include detailed error info (file name, size, error code)
 - Automatic retry with exponential backoff
 - Cleanup runs even on errors (finally block)
+
+---
+
+## Parallel Processing Utility
+
+**File**: `src/utils/parallel.ts`
+
+Provides controlled concurrency for parallel async operations with error handling.
+
+### Purpose
+
+1. **Controlled Concurrency**: Limit parallel operations to avoid rate limiting
+2. **Error Isolation**: Capture errors per-item without failing the entire batch
+3. **Order Preservation**: Results maintain input order
+
+### Functions
+
+#### `parallelMap<T, R>(items, fn, options): Promise<ParallelMapResult<R>>`
+
+Process items in parallel with concurrency limit.
+
+**Parameters**:
+```typescript
+interface ParallelMapOptions {
+  concurrency: number;  // Max concurrent operations
+}
+```
+
+**Returns**:
+```typescript
+interface ParallelMapResult<R> {
+  results: Array<R | ParallelError>;  // Results in input order
+  successCount: number;
+  errorCount: number;
+}
+```
+
+**Example**:
+```typescript
+import { parallelMap, isParallelError } from '../utils/parallel.js';
+
+const results = await parallelMap(
+  frames,
+  async (frame) => processFrame(frame),
+  { concurrency: 5 }
+);
+
+// Handle results
+results.results.forEach((result, i) => {
+  if (isParallelError(result)) {
+    console.error(`Frame ${i} failed: ${result.message}`);
+  } else {
+    console.log(`Frame ${i} processed`);
+  }
+});
+```
+
+#### `isParallelError(result): result is ParallelError`
+
+Type guard to check if a result is an error.
+
+```typescript
+interface ParallelError {
+  error: true;
+  message: string;
+  originalError?: unknown;
+}
+```
+
+### Usage in Processors
+
+All image processing processors use `parallelMap` with centralized concurrency defaults:
+
+```typescript
+import { parallelMap, isParallelError } from '../../../utils/parallel.js';
+import { getConcurrency } from '../../concurrency.js';
+
+const concurrency = getConcurrency('CLAID_BG_REMOVE', options);
+const results = await parallelMap(frames, processFrame, { concurrency });
+```

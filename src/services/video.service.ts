@@ -4,6 +4,8 @@ import path from 'path';
 
 import { createChildLogger } from '../utils/logger.js';
 import { getConfig } from '../config/index.js';
+import { parallelMap, isParallelError } from '../utils/parallel.js';
+import { PROCESSOR_CONCURRENCY } from '../processors/concurrency.js';
 import type { VideoMetadata } from '../types/job.types.js';
 
 const logger = createChildLogger({ service: 'video' });
@@ -20,6 +22,12 @@ export interface ExtractFramesOptions {
   fps?: number;
   quality?: number;
   scale?: string | null;
+  /** Output format: 'png' (lossless) or 'jpg' (faster, smaller) */
+  format?: 'png' | 'jpg';
+  /** Enable parallel extraction by time segments */
+  parallel?: boolean;
+  /** Concurrency for parallel extraction (default: 4) */
+  concurrency?: number;
 }
 
 /**
@@ -98,14 +106,14 @@ export class VideoService {
 
   /**
    * Extract frames at a fixed FPS rate
+   * Supports parallel extraction for faster processing
    */
   async extractFramesDense(
     videoPath: string,
     outputDir: string,
     options: ExtractFramesOptions = {}
   ): Promise<ExtractedFrame[]> {
-    const config = getConfig();
-    const { fps = 5, quality = 2, scale = null } = options;
+    const { parallel = true, concurrency = PROCESSOR_CONCURRENCY.FFMPEG_EXTRACT } = options;
 
     // Ensure output directory exists
     await mkdir(outputDir, { recursive: true });
@@ -113,10 +121,31 @@ export class VideoService {
     // Clean any existing frames
     const existingFiles = await readdir(outputDir).catch(() => []);
     for (const file of existingFiles) {
-      if (file.startsWith('frame_') && file.endsWith('.png')) {
+      if (file.startsWith('frame_') && (file.endsWith('.png') || file.endsWith('.jpg'))) {
         await rm(path.join(outputDir, file));
       }
     }
+
+    if (parallel) {
+      // Get video duration first
+      const metadata = await this.getMetadata(videoPath);
+      return this.extractFramesParallel(videoPath, outputDir, metadata.duration, options, concurrency);
+    }
+
+    return this.extractFramesSequential(videoPath, outputDir, options);
+  }
+
+  /**
+   * Sequential frame extraction (original method)
+   */
+  private async extractFramesSequential(
+    videoPath: string,
+    outputDir: string,
+    options: ExtractFramesOptions = {}
+  ): Promise<ExtractedFrame[]> {
+    const config = getConfig();
+    const { fps = 5, quality = 2, scale = null, format = 'jpg' } = options;
+    const ext = format === 'jpg' ? 'jpg' : 'png';
 
     return new Promise((resolve, reject) => {
       // Build ffmpeg filter chain
@@ -130,10 +159,10 @@ export class VideoService {
         '-vf', filters.join(','),
         '-frame_pts', '1',
         '-q:v', quality.toString(),
-        path.join(outputDir, 'frame_%05d.png'),
+        path.join(outputDir, `frame_%05d.${ext}`),
       ];
 
-      logger.info({ fps }, 'Extracting frames');
+      logger.info({ fps, format }, 'Extracting frames (sequential)');
       const ffmpeg = spawn(config.ffmpeg.ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
       let stderr = '';
@@ -148,7 +177,7 @@ export class VideoService {
         }
 
         try {
-          const frames = await this.renameFramesWithTimestamps(outputDir, fps);
+          const frames = await this.collectAndRenameFrames(outputDir, fps, ext);
           logger.info({ count: frames.length }, 'Frames extracted');
           resolve(frames);
         } catch (e) {
@@ -163,14 +192,183 @@ export class VideoService {
   }
 
   /**
-   * Rename extracted frames to include timestamp in filename
+   * Parallel frame extraction by time segments
+   * Splits video into 1-second segments and extracts in parallel
    */
-  private async renameFramesWithTimestamps(
+  private async extractFramesParallel(
+    videoPath: string,
     outputDir: string,
-    fps: number
+    duration: number,
+    options: ExtractFramesOptions = {},
+    concurrency: number = PROCESSOR_CONCURRENCY.FFMPEG_EXTRACT
+  ): Promise<ExtractedFrame[]> {
+    const config = getConfig();
+    const { fps = 5, quality = 2, scale = null, format = 'jpg' } = options;
+    const ext = format === 'jpg' ? 'jpg' : 'png';
+
+    // Create segments (1 second each)
+    const segmentCount = Math.ceil(duration);
+    const segments: { start: number; end: number; index: number }[] = [];
+
+    for (let i = 0; i < segmentCount; i++) {
+      segments.push({
+        start: i,
+        end: Math.min(i + 1, duration),
+        index: i,
+      });
+    }
+
+    logger.info({ fps, format, segments: segments.length, concurrency }, 'Extracting frames (parallel)');
+
+    // Extract frames for each segment in parallel
+    const results = await parallelMap(
+      segments,
+      async (segment) => {
+        const segmentDir = path.join(outputDir, `seg_${segment.index}`);
+        await mkdir(segmentDir, { recursive: true });
+
+        const segmentFrames = await this.extractSegmentFrames(
+          config.ffmpeg.ffmpegPath,
+          videoPath,
+          segmentDir,
+          segment.start,
+          segment.end,
+          fps,
+          quality,
+          scale,
+          ext
+        );
+
+        return { segment, frames: segmentFrames };
+      },
+      { concurrency }
+    );
+
+    // Collect all frames and assign global indices
+    const allFrames: ExtractedFrame[] = [];
+    let globalIndex = 0;
+
+    for (let i = 0; i < segments.length; i++) {
+      const result = results.results[i];
+      if (isParallelError(result)) {
+        logger.warn({ segment: i, error: result.message }, 'Segment extraction failed');
+        continue;
+      }
+
+      const segmentDir = path.join(outputDir, `seg_${result.segment.index}`);
+      let allFramesMoved = true;
+
+      for (const frame of result.frames) {
+        globalIndex++;
+        const globalTimestamp = result.segment.start + frame.localTimestamp;
+        const newFilename = `frame_${String(globalIndex).padStart(5, '0')}_t${globalTimestamp.toFixed(2)}.${ext}`;
+        const newPath = path.join(outputDir, newFilename);
+
+        try {
+          // Move from segment dir to main dir
+          await rename(frame.path, newPath);
+
+          allFrames.push({
+            filename: newFilename,
+            path: newPath,
+            index: globalIndex,
+            timestamp: globalTimestamp,
+            frameId: `frame_${String(globalIndex).padStart(5, '0')}`,
+          });
+        } catch (err) {
+          logger.warn({ segment: i, frame: frame.path, error: (err as Error).message }, 'Failed to move frame');
+          allFramesMoved = false;
+        }
+      }
+
+      // Only clean up segment directory if all frames were successfully moved
+      if (allFramesMoved) {
+        await rm(segmentDir, { recursive: true, force: true });
+      } else {
+        logger.warn({ segment: i, segmentDir }, 'Keeping segment directory for debugging (some frames failed to move)');
+      }
+    }
+
+    logger.info({ count: allFrames.length }, 'Frames extracted (parallel)');
+    return allFrames;
+  }
+
+  /**
+   * Extract frames from a specific time segment
+   */
+  private extractSegmentFrames(
+    ffmpegPath: string,
+    videoPath: string,
+    outputDir: string,
+    startTime: number,
+    endTime: number,
+    fps: number,
+    quality: number,
+    scale: string | null,
+    ext: string
+  ): Promise<{ path: string; localTimestamp: number }[]> {
+    return new Promise((resolve, reject) => {
+      const segmentDuration = endTime - startTime;
+
+      // Build ffmpeg filter chain
+      const filters = [`fps=${fps}`];
+      if (scale) {
+        filters.push(`scale=${scale}`);
+      }
+
+      const args = [
+        '-ss', startTime.toString(),
+        '-t', segmentDuration.toString(),
+        '-i', videoPath,
+        '-vf', filters.join(','),
+        '-q:v', quality.toString(),
+        path.join(outputDir, `frame_%03d.${ext}`),
+      ];
+
+      const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+      let stderr = '';
+      ffmpeg.stderr?.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      ffmpeg.on('close', async (code: number | null) => {
+        if (code !== 0) {
+          // Non-zero exit might just mean no frames in segment
+          logger.debug({ startTime, stderr: stderr.slice(-200) }, 'Segment extraction ended with non-zero code');
+        }
+
+        try {
+          const files = await readdir(outputDir);
+          const frameFiles = files
+            .filter((f) => f.startsWith('frame_') && f.endsWith(`.${ext}`))
+            .sort();
+
+          const frames = frameFiles.map((file, idx) => ({
+            path: path.join(outputDir, file),
+            localTimestamp: idx / fps,
+          }));
+
+          resolve(frames);
+        } catch (e) {
+          reject(e);
+        }
+      });
+
+      ffmpeg.on('error', reject);
+    });
+  }
+
+  /**
+   * Collect and rename extracted frames with timestamps
+   */
+  private async collectAndRenameFrames(
+    outputDir: string,
+    fps: number,
+    ext: string
   ): Promise<ExtractedFrame[]> {
     const files = await readdir(outputDir);
-    const frameFiles = files.filter((f) => f.startsWith('frame_') && f.endsWith('.png')).sort();
+    const frameFiles = files.filter((f) => f.startsWith('frame_') && f.endsWith(`.${ext}`)).sort();
 
     const frames: ExtractedFrame[] = [];
 
@@ -179,7 +377,7 @@ export class VideoService {
       const frameIndex = i + 1;
       const timestamp = i / fps;
 
-      const newName = `frame_${String(frameIndex).padStart(5, '0')}_t${timestamp.toFixed(2)}.png`;
+      const newName = `frame_${String(frameIndex).padStart(5, '0')}_t${timestamp.toFixed(2)}.${ext}`;
       const oldPath = path.join(outputDir, oldName);
       const newPath = path.join(outputDir, newName);
 

@@ -6,6 +6,7 @@
 
 import path from 'path';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
+import { getInputFrames } from '../../types.js';
 import { sharpImageTransformProvider } from '../../../providers/implementations/index.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
@@ -28,9 +29,9 @@ export const rotateImageProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
-    // Use metadata.frames as primary source, fall back to legacy fields
-    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
-    if (!inputFrames || inputFrames.length === 0) {
+    // Get input frames with fallback to legacy fields
+    const inputFrames = getInputFrames(data);
+    if (inputFrames.length === 0) {
       return { success: false, error: 'No frames to rotate' };
     }
 

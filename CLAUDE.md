@@ -75,13 +75,26 @@ VOPI supports two pipeline strategies, controlled by `pipeline.strategy` global 
 
 The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) process queued jobs independently. This separation allows horizontal scaling of workers.
 
+### Audio Analysis Pipeline (Optional)
+VOPI can extract audio from videos and generate structured e-commerce metadata:
+1. **Extract Audio** - FFmpeg extracts 16kHz mono MP3 optimized for speech recognition
+2. **Analyze Audio** - Gemini 2.0 Flash transcribes and extracts product information
+3. **Format Metadata** - Generates `metadata.json` with platform-specific formats (Shopify, Amazon, eBay)
+
+The audio pipeline produces:
+- Full transcript from seller's audio description
+- Structured product metadata (title, description, bullet points, materials, etc.)
+- Platform-specific formatted data ready for listing APIs
+- Confidence scores for extracted information
+
 ### Composable Processor Stack
 The pipeline is built on a modular processor stack architecture using a unified `DataPath` type system:
-- **DataPaths** define what data processors require/produce: `video`, `images`, `text`, `frames`, `frames.scores`, `frames.classifications`, `frames.dbId`, `frames.s3Url`, `frames.version`
+- **DataPaths** define what data processors require/produce: `video`, `images`, `text`, `frames`, `audio`, `transcript`, `product.metadata`, `frames.scores`, `frames.classifications`, `frames.dbId`, `frames.s3Url`, `frames.version`
 - **Processors** declare their IO contracts using these paths
 - **Stacks** compose processors into pipelines with validated data flow
 - **Swapping** allows replacing processors with compatible IO contracts (e.g., `photoroom-bg-remove` ↔ `claid-bg-remove`)
 - **Templates** provide pre-defined stacks: `classic`, `gemini_video`, `minimal`, `frames_only`, `custom_bg_removal`
+- **Concurrency** is centralized in `src/processors/concurrency.ts` with documented defaults per processor type
 
 See `src/processors/` for implementation details.
 
@@ -94,7 +107,8 @@ See `src/processors/` for implementation details.
 - `src/db/schema.ts` - Drizzle ORM schema (api_keys, jobs, videos, frames, commercialImages, globalConfig)
 - `src/cli/` - CLI commands (API key management, pipeline testing)
 - `src/templates/` - Gemini prompts and output schemas
-- `src/utils/` - Shared utilities (logging, errors, URL validation, S3 URL parsing)
+- `src/types/` - Type definitions including `product-metadata.types.ts` for e-commerce metadata
+- `src/utils/` - Shared utilities (logging, errors, URL validation, S3 URL parsing, MIME types, parallel processing)
 - `src/smartFrameExtractor/` - Standalone CLI tool (JavaScript)
 
 ### Database Relationships
@@ -196,6 +210,7 @@ All configuration is via environment variables with sensible defaults. Key categ
 - **Database**: Connection pooling settings (`DB_POOL_*`)
 - **Queue**: Job retry and retention (`QUEUE_*`)
 - **Worker**: Concurrency, timeouts, rate limiting (`WORKER_*`, `API_*`)
+- **Audio**: Processing timeouts and retries (`AUDIO_PROCESSING_TIMEOUT_MS`, `AUDIO_POLLING_INTERVAL_MS`, `AUDIO_MAX_RETRIES`)
 - **Security**: CORS, auth skip paths, callback domains
 
 See `.env.example` for all available options.

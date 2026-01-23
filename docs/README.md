@@ -58,12 +58,14 @@ Each test prompts for required inputs and uses real services.
 
 VOPI uses a **composable processor stack architecture** where each processing step is a modular processor with declared data path requirements. The unified `DataPath` type system includes:
 - Core data: `video`, `images`, `text`
+- Audio data: `audio`, `transcript`, `product.metadata`
 - Frame metadata: `frames`, `frames.scores`, `frames.classifications`, `frames.dbId`, `frames.s3Url`, `frames.version`
 
 This enables:
 - **Flexible composition** - Mix and match processors based on data path compatibility
 - **Processor swapping** - Replace processors with compatible alternatives (e.g., Photoroom ↔ Claid for background removal)
 - **Custom stacks** - Create specialized workflows for different use cases
+- **Configurable concurrency** - Centralized concurrency defaults with per-processor overrides
 
 **Pre-defined stacks**:
 - `classic` - Full pipeline with scoring and AI classification
@@ -96,6 +98,16 @@ Google Gemini analyzes candidate frames to:
 - Identify optimal angles (hero, front, back, detail)
 - Detect obstructions and recommend cleanup
 - Suggest background styles for commercial images
+
+### Audio Analysis (Optional)
+
+VOPI can extract and analyze audio from product videos to generate structured e-commerce metadata:
+- **Transcription** - Full transcript using Gemini 2.0 Flash
+- **Metadata extraction** - Title, description, bullet points, materials, colors, sizes
+- **Platform formatting** - Auto-convert to Shopify, Amazon, and eBay listing formats
+- **Confidence scores** - Per-field confidence ratings for extracted data
+
+The extracted metadata is stored directly in the database's `product_metadata` JSONB column, including the transcript and platform-specific formatted data for Shopify, Amazon, and eBay.
 
 ### Commercial Image Versions
 

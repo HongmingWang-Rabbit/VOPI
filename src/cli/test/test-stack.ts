@@ -283,6 +283,7 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
     startedAt: null,
     completedAt: null,
     apiKeyId: null,
+    productMetadata: null,
   };
 
   // Create work directories

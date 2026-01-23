@@ -8,7 +8,7 @@ import { copyFile } from 'fs/promises';
 import path from 'path';
 import { eq } from 'drizzle-orm';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
-import { getFrameDbIdMap } from '../../types.js';
+import { getInputFrames, getFrameDbIdMap } from '../../types.js';
 import { storageService } from '../../../services/storage.service.js';
 import { getDatabase, schema } from '../../../db/index.js';
 import { JobStatus } from '../../../types/job.types.js';
@@ -33,9 +33,9 @@ export const uploadFramesProcessor: Processor = {
     const { jobId, workDirs, onProgress, timer } = context;
     const db = getDatabase();
 
-    // Use metadata.frames as primary source, fall back to legacy fields
-    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
-    if (!inputFrames || inputFrames.length === 0) {
+    // Get input frames with fallback to legacy fields
+    const inputFrames = getInputFrames(data);
+    if (inputFrames.length === 0) {
       return { success: false, error: 'No frames to upload' };
     }
 

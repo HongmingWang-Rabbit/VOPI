@@ -52,6 +52,11 @@ export const envSchema = z.object({
   API_RETRY_DELAY_MS: z.coerce.number().default(2000),
   API_RATE_LIMIT_DELAY_MS: z.coerce.number().default(500),
 
+  // Audio processing
+  AUDIO_PROCESSING_TIMEOUT_MS: z.coerce.number().default(180000), // 3 minutes
+  AUDIO_POLLING_INTERVAL_MS: z.coerce.number().default(3000), // 3 seconds
+  AUDIO_MAX_RETRIES: z.coerce.number().default(3), // Max retries for audio analysis
+
   // Queue
   QUEUE_JOB_ATTEMPTS: z.coerce.number().default(3),
   QUEUE_BACKOFF_DELAY_MS: z.coerce.number().default(5000),

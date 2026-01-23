@@ -58,6 +58,11 @@ export interface AppConfig {
     apiRetryDelayMs: number;
     apiRateLimitDelayMs: number;
   };
+  audio: {
+    processingTimeoutMs: number;
+    pollingIntervalMs: number;
+    maxRetries: number;
+  };
   queue: {
     jobAttempts: number;
     backoffDelayMs: number;
@@ -140,6 +145,11 @@ export function buildConfig(env: Env): AppConfig {
       callbackMaxRetries: env.CALLBACK_MAX_RETRIES,
       apiRetryDelayMs: env.API_RETRY_DELAY_MS,
       apiRateLimitDelayMs: env.API_RATE_LIMIT_DELAY_MS,
+    },
+    audio: {
+      processingTimeoutMs: env.AUDIO_PROCESSING_TIMEOUT_MS,
+      pollingIntervalMs: env.AUDIO_POLLING_INTERVAL_MS,
+      maxRetries: env.AUDIO_MAX_RETRIES,
     },
     queue: {
       jobAttempts: env.QUEUE_JOB_ATTEMPTS,

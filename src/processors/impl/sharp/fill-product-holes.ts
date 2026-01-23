@@ -19,10 +19,13 @@
 import path from 'path';
 import sharp from 'sharp';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
+import { getInputFrames } from '../../types.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
 import { stabilityService } from '../../../services/stability.service.js';
 import { safeUnlink } from '../../../utils/fs.js';
+import { parallelMap, isParallelError } from '../../../utils/parallel.js';
+import { getConcurrency } from '../../concurrency.js';
 
 const logger = createChildLogger({ service: 'processor:fill-product-holes' });
 
@@ -318,9 +321,9 @@ export const fillProductHolesProcessor: Processor = {
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress, timer } = context;
 
-    // Use metadata.frames as primary source, fall back to legacy fields
-    const inputFrames = data.metadata?.frames || data.recommendedFrames || data.frames;
-    if (!inputFrames || inputFrames.length === 0) {
+    // Get input frames with fallback to legacy fields
+    const inputFrames = getInputFrames(data);
+    if (inputFrames.length === 0) {
       return { success: false, error: 'No frames to process for hole filling' };
     }
 
@@ -342,123 +345,129 @@ export const fillProductHolesProcessor: Processor = {
       message: 'Detecting product holes',
     });
 
-    const updatedFrames: FrameMetadata[] = [];
+    // Process frames in parallel (concurrency limited for Stability AI API)
+    const concurrency = getConcurrency('STABILITY_INPAINT', options);
+    const inpaintPrompt = (options?.inpaintPrompt as string) ??
+      'Seamlessly fill in the missing parts of this product. Reconstruct the product to look complete, natural, and photorealistic. Match the exact texture, color, material, and style of the surrounding product areas.';
+    const debugMode = (options?.debug as boolean) ?? false;
+    let processedCount = 0;
     let totalHolesFilled = 0;
 
-    for (let i = 0; i < inputFrames.length; i++) {
-      const frame = inputFrames[i];
-      const progress = 66 + Math.round(((i + 1) / inputFrames.length) * 4);
+    const parallelResults = await parallelMap(
+      inputFrames,
+      async (frame): Promise<{ frame: FrameMetadata; filled: boolean }> => {
+        try {
+          // Detect holes using convex hull algorithm
+          const { holeCount, opaquePixels, holeMask, width, height } = await timer.timeOperation(
+            'detect_holes',
+            () => detectHoles(frame.path, alphaThreshold, boundarySampleTarget),
+            { frameId: frame.frameId }
+          );
 
-      await onProgress?.({
-        status: JobStatus.EXTRACTING_PRODUCT,
-        percentage: progress,
-        message: `Checking holes ${i + 1}/${inputFrames.length}`,
-      });
+          // Calculate hole percentage relative to product (opaque pixels)
+          const holePercentage = opaquePixels > 0 ? (holeCount / opaquePixels) * 100 : 0;
 
-      try {
-        // Detect holes using convex hull algorithm
-        const { holeCount, opaquePixels, holeMask, width, height } = await timer.timeOperation(
-          'detect_holes',
-          () => detectHoles(frame.path, alphaThreshold, boundarySampleTarget),
-          { frameId: frame.frameId }
-        );
-
-        // Calculate hole percentage relative to product (opaque pixels)
-        const holePercentage = opaquePixels > 0 ? (holeCount / opaquePixels) * 100 : 0;
-
-        logger.info({
-          frameId: frame.frameId,
-          holeCount,
-          opaquePixels,
-          holePercentage: holePercentage.toFixed(4) + '%',
-        }, 'Hole detection complete');
-
-        // Trigger inpainting if EITHER:
-        // 1. Hole percentage exceeds threshold (relative to product size)
-        // 2. Absolute hole pixel count exceeds threshold (catches large holes in big images)
-        const shouldFill = holeCount > 0 && (
-          holePercentage >= minHolePercentage ||
-          holeCount >= minHolePixels
-        );
-
-        if (shouldFill) {
           logger.info({
             frameId: frame.frameId,
             holeCount,
+            opaquePixels,
             holePercentage: holePercentage.toFixed(4) + '%',
-            reason: holePercentage >= minHolePercentage ? 'percentage' : 'absolute_count',
-          }, 'Filling product holes with Stability AI inpainting');
+          }, 'Hole detection complete');
 
-          // Create mask image (white = inpaint, black = preserve)
-          // Stability AI expects: white pixels = areas to fill, black = preserve
-          const maskPath = path.join(workDirs.extracted, `${frame.frameId}_mask.png`);
-          await sharp(Buffer.from(holeMask), {
-            raw: { width, height, channels: 1 },
-          })
-            .png()
-            .toFile(maskPath);
+          // Update progress
+          processedCount++;
+          await onProgress?.({
+            status: JobStatus.EXTRACTING_PRODUCT,
+            percentage: 66 + Math.round((processedCount / inputFrames.length) * 4),
+            message: `Checking holes ${processedCount}/${inputFrames.length}`,
+          });
 
-          logger.debug({ frameId: frame.frameId, maskPath }, 'Hole mask created for inpainting');
+          // Trigger inpainting if EITHER:
+          // 1. Hole percentage exceeds threshold (relative to product size)
+          // 2. Absolute hole pixel count exceeds threshold (catches large holes in big images)
+          const shouldFill = holeCount > 0 && (
+            holePercentage >= minHolePercentage ||
+            holeCount >= minHolePixels
+          );
 
-          const outputPath = path.join(workDirs.extracted, `${frame.frameId}_filled.png`);
-          const inpaintPrompt = (options?.inpaintPrompt as string) ??
-            'Seamlessly fill in the missing parts of this product. Reconstruct the product to look complete, natural, and photorealistic. Match the exact texture, color, material, and style of the surrounding product areas.';
-          const debugMode = (options?.debug as boolean) ?? false;
-
-          try {
-            const inpaintResult = await timer.timeOperation(
-              'inpaint_holes',
-              () => stabilityService.inpaintHoles(frame.path, maskPath, outputPath, {
-                prompt: inpaintPrompt,
-                debug: debugMode,
-                cleanup: !debugMode,
-              }),
-              { frameId: frame.frameId }
-            );
-
-            if (inpaintResult.success) {
-              logger.info({ frameId: frame.frameId, outputPath }, 'Holes filled successfully');
-              updatedFrames.push({ ...frame, path: outputPath });
-              totalHolesFilled++;
-
-              // Clean up the mask file (unless in debug mode)
-              if (!debugMode) {
-                await safeUnlink(maskPath);
-              }
-            } else {
-              logger.warn({ frameId: frame.frameId, error: inpaintResult.error }, 'Hole filling failed, keeping original');
-              updatedFrames.push(frame);
-
-              // Clean up mask on failure too
-              if (!debugMode) {
-                await safeUnlink(maskPath);
-              }
-            }
-          } catch (inpaintError) {
-            logger.warn({ frameId: frame.frameId, error: (inpaintError as Error).message }, 'Hole filling failed, keeping original');
-            updatedFrames.push(frame);
-
-            // Clean up mask on error
-            if (!debugMode) {
-              await safeUnlink(maskPath);
-            }
-          }
-        } else {
-          // No significant holes, keep original
-          if (holeCount > 0) {
-            logger.debug({
+          if (shouldFill) {
+            logger.info({
               frameId: frame.frameId,
               holeCount,
               holePercentage: holePercentage.toFixed(4) + '%',
-              minHolePercentage,
-              minHolePixels,
-            }, 'Holes below both thresholds, skipping inpaint');
+              reason: holePercentage >= minHolePercentage ? 'percentage' : 'absolute_count',
+            }, 'Filling product holes with Stability AI inpainting');
+
+            // Create mask image (white = inpaint, black = preserve)
+            const maskPath = path.join(workDirs.extracted, `${frame.frameId}_mask.png`);
+            await sharp(Buffer.from(holeMask), {
+              raw: { width, height, channels: 1 },
+            })
+              .png()
+              .toFile(maskPath);
+
+            const outputPath = path.join(workDirs.extracted, `${frame.frameId}_filled.png`);
+
+            try {
+              const inpaintResult = await timer.timeOperation(
+                'inpaint_holes',
+                () => stabilityService.inpaintHoles(frame.path, maskPath, outputPath, {
+                  prompt: inpaintPrompt,
+                  debug: debugMode,
+                  cleanup: !debugMode,
+                }),
+                { frameId: frame.frameId }
+              );
+
+              if (!debugMode) {
+                await safeUnlink(maskPath);
+              }
+
+              if (inpaintResult.success) {
+                logger.info({ frameId: frame.frameId, outputPath }, 'Holes filled successfully');
+                return { frame: { ...frame, path: outputPath }, filled: true };
+              } else {
+                logger.warn({ frameId: frame.frameId, error: inpaintResult.error }, 'Hole filling failed, keeping original');
+                return { frame, filled: false };
+              }
+            } catch (inpaintError) {
+              logger.warn({ frameId: frame.frameId, error: (inpaintError as Error).message }, 'Hole filling failed, keeping original');
+              if (!debugMode) {
+                await safeUnlink(maskPath);
+              }
+              return { frame, filled: false };
+            }
+          } else {
+            if (holeCount > 0) {
+              logger.debug({
+                frameId: frame.frameId,
+                holeCount,
+                holePercentage: holePercentage.toFixed(4) + '%',
+                minHolePercentage,
+                minHolePixels,
+              }, 'Holes below both thresholds, skipping inpaint');
+            }
+            return { frame, filled: false };
           }
-          updatedFrames.push(frame);
+        } catch (error) {
+          logger.warn({ frameId: frame.frameId, error: (error as Error).message }, 'Hole detection failed, keeping original');
+          return { frame, filled: false };
         }
-      } catch (error) {
-        logger.warn({ frameId: frame.frameId, error: (error as Error).message }, 'Hole detection failed, keeping original');
-        updatedFrames.push(frame);
+      },
+      { concurrency }
+    );
+
+    // Collect results maintaining order
+    const updatedFrames: FrameMetadata[] = [];
+    for (let i = 0; i < inputFrames.length; i++) {
+      const result = parallelResults.results[i];
+      if (isParallelError(result)) {
+        updatedFrames.push(inputFrames[i]);
+      } else {
+        updatedFrames.push(result.frame);
+        if (result.filled) {
+          totalHolesFilled++;
+        }
       }
     }
 
