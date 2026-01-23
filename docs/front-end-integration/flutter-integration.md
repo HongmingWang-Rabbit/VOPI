@@ -410,6 +410,8 @@ class DownloadUrlsResponse with _$DownloadUrlsResponse {
     required int expiresIn,
     required List<FrameDownload> frames,
     required Map<String, Map<String, String>> commercialImages,
+    /// Product metadata extracted from audio analysis (null if no audio or analysis failed)
+    ProductMetadataOutput? productMetadata,
   }) = _DownloadUrlsResponse;
 
   factory DownloadUrlsResponse.fromJson(Map<String, dynamic> json) =>
@@ -425,6 +427,137 @@ class FrameDownload with _$FrameDownload {
 
   factory FrameDownload.fromJson(Map<String, dynamic> json) =>
       _$FrameDownloadFromJson(json);
+}
+
+// Product Metadata (from audio analysis)
+
+/// Complete product metadata output including platform-specific formats
+@freezed
+class ProductMetadataOutput with _$ProductMetadataOutput {
+  const factory ProductMetadataOutput({
+    /// Raw transcript from audio
+    required String transcript,
+    /// Universal product metadata
+    required ProductMetadata product,
+    /// Platform-specific formatted versions
+    required PlatformFormats platforms,
+    /// ISO timestamp when metadata was extracted
+    required String extractedAt,
+    /// Audio duration in seconds (if available)
+    double? audioDuration,
+    /// Pipeline version
+    required String pipelineVersion,
+  }) = _ProductMetadataOutput;
+
+  factory ProductMetadataOutput.fromJson(Map<String, dynamic> json) =>
+      _$ProductMetadataOutputFromJson(json);
+}
+
+/// Universal product metadata
+@freezed
+class ProductMetadata with _$ProductMetadata {
+  const factory ProductMetadata({
+    required String title,
+    required String description,
+    String? shortDescription,
+    required List<String> bulletPoints,
+    String? brand,
+    String? category,
+    String? subcategory,
+    List<String>? materials,
+    String? color,
+    List<String>? colors,
+    String? size,
+    List<String>? sizes,
+    double? price,
+    String? currency,
+    List<String>? keywords,
+    List<String>? tags,
+    String? condition,
+    required MetadataConfidence confidence,
+    required bool extractedFromAudio,
+    List<String>? transcriptExcerpts,
+  }) = _ProductMetadata;
+
+  factory ProductMetadata.fromJson(Map<String, dynamic> json) =>
+      _$ProductMetadataFromJson(json);
+}
+
+/// Confidence scores for metadata fields
+@freezed
+class MetadataConfidence with _$MetadataConfidence {
+  const factory MetadataConfidence({
+    required int overall,
+    required int title,
+    required int description,
+    int? price,
+    int? attributes,
+  }) = _MetadataConfidence;
+
+  factory MetadataConfidence.fromJson(Map<String, dynamic> json) =>
+      _$MetadataConfidenceFromJson(json);
+}
+
+/// Platform-specific formatted product data
+@freezed
+class PlatformFormats with _$PlatformFormats {
+  const factory PlatformFormats({
+    required ShopifyProduct shopify,
+    required AmazonProduct amazon,
+    required EbayProduct ebay,
+  }) = _PlatformFormats;
+
+  factory PlatformFormats.fromJson(Map<String, dynamic> json) =>
+      _$PlatformFormatsFromJson(json);
+}
+
+/// Shopify-formatted product data
+@freezed
+class ShopifyProduct with _$ShopifyProduct {
+  const factory ShopifyProduct({
+    required String title,
+    required String descriptionHtml,
+    String? productType,
+    String? vendor,
+    List<String>? tags,
+    String? status,
+  }) = _ShopifyProduct;
+
+  factory ShopifyProduct.fromJson(Map<String, dynamic> json) =>
+      _$ShopifyProductFromJson(json);
+}
+
+/// Amazon-formatted product data
+@freezed
+class AmazonProduct with _$AmazonProduct {
+  const factory AmazonProduct({
+    @JsonKey(name: 'item_name') required String itemName,
+    @JsonKey(name: 'brand_name') String? brandName,
+    @JsonKey(name: 'product_description') String? productDescription,
+    @JsonKey(name: 'bullet_point') List<String>? bulletPoint,
+    @JsonKey(name: 'generic_keyword') List<String>? genericKeyword,
+    String? color,
+    List<String>? material,
+  }) = _AmazonProduct;
+
+  factory AmazonProduct.fromJson(Map<String, dynamic> json) =>
+      _$AmazonProductFromJson(json);
+}
+
+/// eBay-formatted product data
+@freezed
+class EbayProduct with _$EbayProduct {
+  const factory EbayProduct({
+    required String title,
+    required String description,
+    required String condition,
+    String? conditionDescription,
+    String? brand,
+    Map<String, List<String>>? aspects,
+  }) = _EbayProduct;
+
+  factory EbayProduct.fromJson(Map<String, dynamic> json) =>
+      _$EbayProductFromJson(json);
 }
 
 // Frame

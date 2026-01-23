@@ -375,11 +375,102 @@ struct DownloadUrlsResponse: Decodable {
     let expiresIn: Int
     let frames: [FrameDownload]
     let commercialImages: [String: [String: String]]
+    /// Product metadata extracted from audio analysis (null if no audio or analysis failed)
+    let productMetadata: ProductMetadataOutput?
 }
 
 struct FrameDownload: Decodable {
     let frameId: String
     let downloadUrl: String
+}
+
+// MARK: - Product Metadata (from audio analysis)
+
+/// Complete product metadata output including platform-specific formats
+struct ProductMetadataOutput: Decodable {
+    /// Raw transcript from audio
+    let transcript: String
+    /// Universal product metadata
+    let product: ProductMetadata
+    /// Platform-specific formatted versions
+    let platforms: PlatformFormats
+    /// ISO timestamp when metadata was extracted
+    let extractedAt: String
+    /// Audio duration in seconds (if available)
+    let audioDuration: Double?
+    /// Pipeline version
+    let pipelineVersion: String
+}
+
+/// Universal product metadata
+struct ProductMetadata: Decodable {
+    let title: String
+    let description: String
+    let shortDescription: String?
+    let bulletPoints: [String]
+    let brand: String?
+    let category: String?
+    let subcategory: String?
+    let materials: [String]?
+    let color: String?
+    let colors: [String]?
+    let size: String?
+    let sizes: [String]?
+    let price: Double?
+    let currency: String?
+    let keywords: [String]?
+    let tags: [String]?
+    let condition: String?
+    let confidence: MetadataConfidence
+    let extractedFromAudio: Bool
+    let transcriptExcerpts: [String]?
+}
+
+/// Confidence scores for metadata fields
+struct MetadataConfidence: Decodable {
+    let overall: Int
+    let title: Int
+    let description: Int
+    let price: Int?
+    let attributes: Int?
+}
+
+/// Platform-specific formatted product data
+struct PlatformFormats: Decodable {
+    let shopify: ShopifyProduct
+    let amazon: AmazonProduct
+    let ebay: EbayProduct
+}
+
+/// Shopify-formatted product data
+struct ShopifyProduct: Decodable {
+    let title: String
+    let descriptionHtml: String
+    let productType: String?
+    let vendor: String?
+    let tags: [String]?
+    let status: String?
+}
+
+/// Amazon-formatted product data
+struct AmazonProduct: Decodable {
+    let item_name: String
+    let brand_name: String?
+    let product_description: String?
+    let bullet_point: [String]?
+    let generic_keyword: [String]?
+    let color: String?
+    let material: [String]?
+}
+
+/// eBay-formatted product data
+struct EbayProduct: Decodable {
+    let title: String
+    let description: String
+    let condition: String
+    let conditionDescription: String?
+    let brand: String?
+    let aspects: [String: [String]]?
 }
 
 // MARK: - Frame

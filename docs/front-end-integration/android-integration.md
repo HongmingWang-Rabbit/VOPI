@@ -297,12 +297,103 @@ data class DownloadUrlsResponse(
     val jobId: String,
     val expiresIn: Int,
     val frames: List<FrameDownload>,
-    val commercialImages: Map<String, Map<String, String>>
+    val commercialImages: Map<String, Map<String, String>>,
+    /** Product metadata extracted from audio analysis (null if no audio or analysis failed) */
+    val productMetadata: ProductMetadataOutput?
 )
 
 data class FrameDownload(
     val frameId: String,
     val downloadUrl: String
+)
+
+// Product Metadata (from audio analysis)
+
+/** Complete product metadata output including platform-specific formats */
+data class ProductMetadataOutput(
+    /** Raw transcript from audio */
+    val transcript: String,
+    /** Universal product metadata */
+    val product: ProductMetadata,
+    /** Platform-specific formatted versions */
+    val platforms: PlatformFormats,
+    /** ISO timestamp when metadata was extracted */
+    val extractedAt: String,
+    /** Audio duration in seconds (if available) */
+    val audioDuration: Double?,
+    /** Pipeline version */
+    val pipelineVersion: String
+)
+
+/** Universal product metadata */
+data class ProductMetadata(
+    val title: String,
+    val description: String,
+    val shortDescription: String?,
+    val bulletPoints: List<String>,
+    val brand: String?,
+    val category: String?,
+    val subcategory: String?,
+    val materials: List<String>?,
+    val color: String?,
+    val colors: List<String>?,
+    val size: String?,
+    val sizes: List<String>?,
+    val price: Double?,
+    val currency: String?,
+    val keywords: List<String>?,
+    val tags: List<String>?,
+    val condition: String?,
+    val confidence: MetadataConfidence,
+    val extractedFromAudio: Boolean,
+    val transcriptExcerpts: List<String>?
+)
+
+/** Confidence scores for metadata fields */
+data class MetadataConfidence(
+    val overall: Int,
+    val title: Int,
+    val description: Int,
+    val price: Int?,
+    val attributes: Int?
+)
+
+/** Platform-specific formatted product data */
+data class PlatformFormats(
+    val shopify: ShopifyProduct,
+    val amazon: AmazonProduct,
+    val ebay: EbayProduct
+)
+
+/** Shopify-formatted product data */
+data class ShopifyProduct(
+    val title: String,
+    val descriptionHtml: String,
+    val productType: String?,
+    val vendor: String?,
+    val tags: List<String>?,
+    val status: String?
+)
+
+/** Amazon-formatted product data */
+data class AmazonProduct(
+    @SerializedName("item_name") val itemName: String,
+    @SerializedName("brand_name") val brandName: String?,
+    @SerializedName("product_description") val productDescription: String?,
+    @SerializedName("bullet_point") val bulletPoint: List<String>?,
+    @SerializedName("generic_keyword") val genericKeyword: List<String>?,
+    val color: String?,
+    val material: List<String>?
+)
+
+/** eBay-formatted product data */
+data class EbayProduct(
+    val title: String,
+    val description: String,
+    val condition: String,
+    val conditionDescription: String?,
+    val brand: String?,
+    val aspects: Map<String, List<String>>?
 )
 
 data class JobListResponse(

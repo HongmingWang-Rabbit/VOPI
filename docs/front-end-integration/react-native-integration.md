@@ -295,6 +295,97 @@ export interface DownloadUrlsResponse {
     downloadUrl: string;
   }>;
   commercialImages: Record<string, Record<string, string>>;
+  /** Product metadata extracted from audio analysis (null if no audio or analysis failed) */
+  productMetadata: ProductMetadataOutput | null;
+}
+
+// Product Metadata (from audio analysis)
+
+/** Complete product metadata output including platform-specific formats */
+export interface ProductMetadataOutput {
+  /** Raw transcript from audio */
+  transcript: string;
+  /** Universal product metadata */
+  product: ProductMetadata;
+  /** Platform-specific formatted versions */
+  platforms: PlatformFormats;
+  /** ISO timestamp when metadata was extracted */
+  extractedAt: string;
+  /** Audio duration in seconds (if available) */
+  audioDuration?: number;
+  /** Pipeline version */
+  pipelineVersion: string;
+}
+
+/** Universal product metadata */
+export interface ProductMetadata {
+  title: string;
+  description: string;
+  shortDescription?: string;
+  bulletPoints: string[];
+  brand?: string;
+  category?: string;
+  subcategory?: string;
+  materials?: string[];
+  color?: string;
+  colors?: string[];
+  size?: string;
+  sizes?: string[];
+  price?: number;
+  currency?: string;
+  keywords?: string[];
+  tags?: string[];
+  condition?: 'new' | 'refurbished' | 'used' | 'open_box';
+  confidence: MetadataConfidence;
+  extractedFromAudio: boolean;
+  transcriptExcerpts?: string[];
+}
+
+/** Confidence scores for metadata fields */
+export interface MetadataConfidence {
+  overall: number;
+  title: number;
+  description: number;
+  price?: number;
+  attributes?: number;
+}
+
+/** Platform-specific formatted product data */
+export interface PlatformFormats {
+  shopify: ShopifyProduct;
+  amazon: AmazonProduct;
+  ebay: EbayProduct;
+}
+
+/** Shopify-formatted product data */
+export interface ShopifyProduct {
+  title: string;
+  descriptionHtml: string;
+  productType?: string;
+  vendor?: string;
+  tags?: string[];
+  status?: string;
+}
+
+/** Amazon-formatted product data */
+export interface AmazonProduct {
+  item_name: string;
+  brand_name?: string;
+  product_description?: string;
+  bullet_point?: string[];
+  generic_keyword?: string[];
+  color?: string;
+  material?: string[];
+}
+
+/** eBay-formatted product data */
+export interface EbayProduct {
+  title: string;
+  description: string;
+  condition: string;
+  conditionDescription?: string;
+  brand?: string;
+  aspects?: Record<string, string[]>;
 }
 
 // Frame
