@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VOPI (Video Object Processing Infrastructure) is a TypeScript backend service that extracts high-quality product photography frames from videos using frame scoring algorithms and AI classification (Gemini 2.0). It includes optional commercial image generation via Photoroom API.
+VOPI (Video Object Processing Infrastructure) is a TypeScript backend service that extracts high-quality product photography frames from videos using frame scoring algorithms and AI classification (Gemini 2.0). It includes commercial image generation via Stability AI (with Photoroom as fallback).
 
 ## Tech Stack
 
@@ -59,8 +59,9 @@ VOPI supports two pipeline strategies, controlled by `pipeline.strategy` global 
 5. **Extract Product** - Claid.ai background removal with selective object retention
 6. **Fill Holes** - Stability AI inpainting to fill gaps from obstruction removal
 7. **Center** - Center and pad product in frame
-8. **Generate** - Optional commercial image generation (Photoroom)
-9. **Upload** - Store results to S3, persist to database
+8. **Upscale** - Stability AI image upscaling (conservative/creative modes)
+9. **Generate** - Commercial image generation via Stability AI (transparent, solid, real, creative versions)
+10. **Upload** - Store results to S3, persist to database
 
 **Gemini Video Strategy**:
 1. **Download** - Fetch video from URL
@@ -70,8 +71,19 @@ VOPI supports two pipeline strategies, controlled by `pipeline.strategy` global 
 5. **Extract Product** - Claid.ai background removal with selective object retention
 6. **Fill Holes** - Stability AI inpainting to fill gaps from obstruction removal
 7. **Center** - Center and pad product in frame
-8. **Generate** - Optional commercial image generation (Photoroom)
-9. **Upload** - Store results to S3, persist to database
+8. **Upscale** - Stability AI image upscaling (conservative/creative modes)
+9. **Generate** - Commercial image generation via Stability AI
+10. **Upload** - Store results to S3, persist to database
+
+**Unified Video Analyzer Strategy** (most efficient):
+1. **Download** - Fetch video from URL
+2. **Unified Analysis** - Single Gemini call for audio transcription + video frame selection
+3. **Extract Product** - Claid.ai background removal
+4. **Fill Holes** - Stability AI inpainting
+5. **Center** - Center and pad product in frame
+6. **Upscale** - Stability AI image upscaling
+7. **Generate** - Commercial image generation via Stability AI
+8. **Upload** - Store results to S3, persist to database
 
 The API (`src/index.ts`) handles HTTP requests while workers (`src/workers/`) process queued jobs independently. This separation allows horizontal scaling of workers.
 
@@ -93,7 +105,7 @@ The pipeline is built on a modular processor stack architecture using a unified 
 - **Processors** declare their IO contracts using these paths
 - **Stacks** compose processors into pipelines with validated data flow
 - **Swapping** allows replacing processors with compatible IO contracts (e.g., `photoroom-bg-remove` ↔ `claid-bg-remove`)
-- **Templates** provide pre-defined stacks: `classic`, `gemini_video`, `minimal`, `frames_only`, `custom_bg_removal`
+- **Templates** provide pre-defined stacks: `classic`, `gemini_video`, `minimal`, `frames_only`, `custom_bg_removal`, `unified_video_analyzer`, `stability_bg_removal`
 - **Concurrency** is centralized in `src/processors/concurrency.ts` with documented defaults per processor type, overridable via `VOPI_CONCURRENCY_*` env vars
 
 See `src/processors/` for implementation details.
@@ -101,7 +113,8 @@ See `src/processors/` for implementation details.
 ### Key Directories
 - `src/processors/` - Composable processor stack architecture (registry, runner, implementations)
 - `src/services/` - Core business logic (one service per domain: video, scoring, gemini, photoroom, storage)
-- `src/providers/` - External service integrations (Gemini video analysis with HEVC transcoding)
+- `src/providers/` - External service integrations (Gemini video analysis, Stability AI, Claid.ai)
+- `src/providers/utils/` - Shared provider utilities (Stability API, Gemini utils)
 - `src/routes/` + `src/controllers/` - HTTP layer
 - `src/workers/` - BullMQ job processors
 - `src/db/schema.ts` - Drizzle ORM schema (api_keys, jobs, videos, frames, commercialImages, globalConfig)
@@ -194,15 +207,22 @@ score = sharpness - (alpha × motion × 255)
 ```
 - **Sharpness**: Laplacian variance (high = in-focus)
 - **Motion**: Pixel difference with previous frame (low = still moment)
+- **Minimum sharpness threshold**: Frames with sharpness < 5 are rejected (prevents blurry frames)
 - Temporal diversity enforced via minimum gap between selections
+
+The minimum sharpness threshold (default: 5) can be overridden via processor options:
+```typescript
+{ minSharpnessThreshold: 10 }  // Stricter - fewer frames
+{ minSharpnessThreshold: 0 }   // Disabled - old behavior
+```
 
 ## External Dependencies
 
 - **FFmpeg** must be installed and in PATH (configurable via `FFMPEG_PATH`, `FFPROBE_PATH`)
-- **Gemini API** for frame classification (configurable model via `GEMINI_MODEL`)
-- **Photoroom API** for commercial image generation (configurable hosts via `PHOTOROOM_*_HOST`)
-- **Claid API** (optional) for background removal (`CLAID_API_KEY`) - primary provider in classic stack
-- **Stability AI** (optional) for hole inpainting (`STABILITY_API_KEY`, `STABILITY_API_BASE`)
+- **Gemini API** for frame classification and video analysis (`GOOGLE_AI_API_KEY`)
+- **Stability AI** for commercial image generation, upscaling, and inpainting (`STABILITY_API_KEY`, `STABILITY_API_BASE`)
+- **Claid API** for background removal with object retention (`CLAID_API_KEY`) - primary provider
+- **Photoroom API** (optional, legacy) for commercial image generation (`PHOTOROOM_API_KEY`)
 
 ## Configuration
 
@@ -211,7 +231,19 @@ All configuration is via environment variables with sensible defaults. Key categ
 - **Queue**: Job retry and retention (`QUEUE_*`)
 - **Worker**: Concurrency, timeouts, rate limiting (`WORKER_*`, `API_*`)
 - **Audio**: Processing timeouts and retries (`AUDIO_PROCESSING_TIMEOUT_MS`, `AUDIO_POLLING_INTERVAL_MS`, `AUDIO_MAX_RETRIES`)
+- **Transcoding**: HEVC→H.264 conversion settings (`VOPI_TRANSCODE_*`, `VOPI_FFPROBE_*`)
+- **Concurrency**: Processor parallelism (`VOPI_CONCURRENCY_*`)
 - **Security**: CORS, auth skip paths, callback domains
+
+### Transcoding Configuration
+
+HEVC videos (common from iPhones) are automatically transcoded to H.264 for Gemini compatibility:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VOPI_TRANSCODE_HEIGHT` | `720` | Target video height (720p default) |
+| `VOPI_TRANSCODE_TIMEOUT_MS` | `600000` | Transcoding timeout (10 minutes) |
+| `VOPI_FFPROBE_TIMEOUT_MS` | `30000` | Codec detection timeout (30 seconds) |
 
 See `.env.example` for all available options.
 

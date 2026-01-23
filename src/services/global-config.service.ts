@@ -9,6 +9,7 @@ import { getDatabase, schema } from '../db/index.js';
 import { getConfig } from '../config/index.js';
 import {
   DEFAULT_CONFIG,
+  DEFAULT_GEMINI_MODEL,
   GlobalConfigKey,
   PipelineStrategy,
   ConfigCategory,
@@ -81,12 +82,13 @@ class GlobalConfigService {
 
   /**
    * Validate a pipeline strategy value
+   * Accepts any string since it's a stack template name
    */
   private validatePipelineStrategy(value: unknown): PipelineStrategy {
-    if (value === PipelineStrategy.CLASSIC || value === PipelineStrategy.GEMINI_VIDEO) {
+    if (typeof value === 'string' && value.trim().length > 0) {
       return value;
     }
-    logger.warn({ value }, 'Invalid pipeline strategy, using default');
+    logger.warn({ value }, 'Invalid pipeline strategy (must be a non-empty string), using default');
     return PipelineStrategy.CLASSIC;
   }
 
@@ -107,14 +109,14 @@ class GlobalConfigService {
       pipelineStrategy: this.validatePipelineStrategy(strategyValue),
       fps: getValue(GlobalConfigKey.PIPELINE_FPS, 10),
       batchSize: getValue(GlobalConfigKey.PIPELINE_BATCH_SIZE, 30),
-      geminiModel: getValue(GlobalConfigKey.AI_GEMINI_MODEL, 'gemini-2.0-flash'),
-      geminiVideoModel: getValue(GlobalConfigKey.AI_GEMINI_VIDEO_MODEL, 'gemini-2.0-flash'),
+      geminiModel: getValue(GlobalConfigKey.AI_GEMINI_MODEL, DEFAULT_GEMINI_MODEL),
+      geminiVideoModel: getValue(GlobalConfigKey.AI_GEMINI_VIDEO_MODEL, DEFAULT_GEMINI_MODEL),
       temperature: getValue(GlobalConfigKey.AI_TEMPERATURE, 0.2),
       topP: getValue(GlobalConfigKey.AI_TOP_P, 0.8),
       motionAlpha: getValue(GlobalConfigKey.SCORING_MOTION_ALPHA, 0.3),
       minTemporalGap: getValue(GlobalConfigKey.SCORING_MIN_TEMPORAL_GAP, 1.0),
       topKPercent: getValue(GlobalConfigKey.SCORING_TOP_K_PERCENT, 0.3),
-      commercialVersions: getValue(GlobalConfigKey.COMMERCIAL_VERSIONS, ['transparent', 'solid', 'real', 'creative']),
+      commercialVersions: getValue(GlobalConfigKey.COMMERCIAL_VERSIONS, ['transparent']),
       aiCleanup: getValue(GlobalConfigKey.COMMERCIAL_AI_CLEANUP, true),
       geminiVideoFps: getValue(GlobalConfigKey.GEMINI_VIDEO_FPS, 1),
       geminiVideoMaxFrames: getValue(GlobalConfigKey.GEMINI_VIDEO_MAX_FRAMES, 10),

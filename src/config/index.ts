@@ -41,7 +41,6 @@ export interface AppConfig {
   };
   apis: {
     googleAi: string;
-    geminiModel: string;
     photoroom: string;
     photoroomBasicHost: string;
     photoroomPlusHost: string;
@@ -129,7 +128,6 @@ export function buildConfig(env: Env): AppConfig {
     },
     apis: {
       googleAi: env.GOOGLE_AI_API_KEY,
-      geminiModel: env.GEMINI_MODEL,
       photoroom: env.PHOTOROOM_API_KEY,
       photoroomBasicHost: env.PHOTOROOM_BASIC_HOST,
       photoroomPlusHost: env.PHOTOROOM_PLUS_HOST,

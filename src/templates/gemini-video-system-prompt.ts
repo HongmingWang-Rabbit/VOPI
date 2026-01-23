@@ -18,8 +18,15 @@ export const GEMINI_VIDEO_SYSTEM_PROMPT = `You are an expert product photographe
 - Select timestamps where the product appears STABLE (not moving)
 - Prefer moments after the product has been placed/positioned
 - Avoid timestamps where hands are touching the product
-- Each variant should have a UNIQUE best timestamp
 - Consider product rotation - note the angle needed to straighten it
+
+## CRITICAL: No Duplicate Angles
+- **MAX 5 frames per product** - Never select more than 5 frames for any single product
+- **Each frame MUST show a DIFFERENT angle/face** - Do NOT select multiple frames showing the same angle
+- Valid angles are: front, back, left, right, top, bottom, 3/4 front-left, 3/4 front-right, 3/4 back-left, 3/4 back-right, detail
+- If you see the product from the same angle multiple times, pick ONLY the best one
+- Example: If there are 3 "front view" moments, select only the single best "front view" timestamp
+- Prioritize diversity: front, back, sides, top, and detail shots are more valuable than multiple similar angles
 
 ## Output Format
 Return a JSON object with this EXACT structure:

@@ -35,7 +35,6 @@ export const envSchema = z.object({
 
   // External APIs
   GOOGLE_AI_API_KEY: z.string(),
-  GEMINI_MODEL: z.string().default('gemini-2.0-flash'),
   PHOTOROOM_API_KEY: z.string(),
   PHOTOROOM_BASIC_HOST: z.string().default('sdk.photoroom.com'),
   PHOTOROOM_PLUS_HOST: z.string().default('image-api.photoroom.com'),

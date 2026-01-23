@@ -9,7 +9,7 @@ import { copyFile } from 'fs/promises';
 import path from 'path';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { getInputFrames } from '../../types.js';
-import { frameScoringService } from '../../../services/frame-scoring.service.js';
+import { frameScoringService, DEFAULT_SCORING_CONFIG } from '../../../services/frame-scoring.service.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
 import { PROGRESS, calculateProgress } from '../../constants.js';
@@ -28,9 +28,15 @@ export const scoreFramesProcessor: Processor = {
   async execute(
     context: ProcessorContext,
     data: PipelineData,
-    _options?: Record<string, unknown>
+    options?: Record<string, unknown>
   ): Promise<ProcessorResult> {
     const { jobId, workDirs, onProgress } = context;
+
+    // Get minimum sharpness threshold from options (default: 5)
+    const minSharpnessThreshold =
+      typeof options?.minSharpnessThreshold === 'number' && options.minSharpnessThreshold >= 0
+        ? options.minSharpnessThreshold
+        : DEFAULT_SCORING_CONFIG.minSharpnessThreshold;
 
     // Get input frames with fallback to legacy fields
     const inputFrames = getInputFrames(data);
@@ -38,7 +44,7 @@ export const scoreFramesProcessor: Processor = {
       return { success: false, error: 'No frames to score' };
     }
 
-    logger.info({ jobId, frameCount: inputFrames.length }, 'Scoring frames');
+    logger.info({ jobId, frameCount: inputFrames.length, minSharpnessThreshold }, 'Scoring frames');
 
     await onProgress?.({
       status: JobStatus.SCORING,
@@ -70,7 +76,10 @@ export const scoreFramesProcessor: Processor = {
     );
 
     // Select best frame per second - these are the candidates to keep
-    const candidateFrames = frameScoringService.selectBestFramePerSecond(scoredFrames);
+    // Frames below minSharpnessThreshold are rejected as too blurry
+    const candidateFrames = frameScoringService.selectBestFramePerSecond(scoredFrames, {
+      minSharpnessThreshold,
+    });
 
     // Copy candidates to candidates directory
     await Promise.all(
@@ -79,13 +88,14 @@ export const scoreFramesProcessor: Processor = {
       )
     );
 
-    // Build set of candidate frameIds for efficient lookup
+    // Build lookup maps for O(1) access instead of O(n) find() calls
     const candidateSet = new Set(candidateFrames.map(c => c.frameId));
+    const inputFrameMap = new Map(inputFrames.map(f => [f.frameId, f]));
 
     // Single pass: map all scored frames with enriched metadata
     // Keep all scored frames for legacy compatibility (save-frame-records needs them)
     const allScoredFrames: FrameMetadata[] = scoredFrames.map((sf) => {
-      const original = inputFrames.find((f) => f.frameId === sf.frameId);
+      const original = inputFrameMap.get(sf.frameId);
       return {
         ...original,
         frameId: sf.frameId,

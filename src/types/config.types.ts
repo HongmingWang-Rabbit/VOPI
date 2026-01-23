@@ -1,16 +1,30 @@
 import { z } from 'zod';
 
 /**
- * Pipeline strategy - determines how frames are selected
+ * Default Gemini model for AI operations
+ */
+export const DEFAULT_GEMINI_MODEL = 'gemini-3-pro-preview';
+
+/**
+ * Pipeline strategy - the name of a stack template to use
+ * Can be any valid stack template ID from stackTemplates or stagingStackTemplates
  */
 export const PipelineStrategy = {
   /** Classic: Extract all frames → Score → Classify with Gemini */
   CLASSIC: 'classic',
   /** Gemini Video: Upload video to Gemini → AI selects timestamps → Extract specific frames */
   GEMINI_VIDEO: 'gemini_video',
+  /** Unified Video Analyzer: Single Gemini call for audio + video analysis */
+  UNIFIED_VIDEO_ANALYZER: 'unified_video_analyzer',
 } as const;
 
-export type PipelineStrategy = (typeof PipelineStrategy)[keyof typeof PipelineStrategy];
+/**
+ * Pipeline strategy type - allows any stack template name
+ * Provides autocomplete for known strategies while accepting custom template names
+ */
+export type PipelineStrategy =
+  | (typeof PipelineStrategy)[keyof typeof PipelineStrategy]
+  | (string & Record<never, never>);
 
 /**
  * Global config categories for organization
@@ -117,7 +131,7 @@ export const DEFAULT_CONFIG: Record<string, GlobalConfigValue & { category: Conf
     value: PipelineStrategy.CLASSIC,
     type: ConfigValueType.STRING,
     category: ConfigCategory.PIPELINE,
-    description: 'Frame selection strategy: classic (score+classify) or gemini_video (AI video analysis)',
+    description: 'Stack template name: classic, gemini_video, unified_video_analyzer, etc.',
   },
   [GlobalConfigKey.PIPELINE_FPS]: {
     value: 10,
@@ -132,13 +146,13 @@ export const DEFAULT_CONFIG: Record<string, GlobalConfigValue & { category: Conf
     description: 'Batch size for Gemini classification',
   },
   [GlobalConfigKey.AI_GEMINI_MODEL]: {
-    value: 'gemini-2.0-flash',
+    value: DEFAULT_GEMINI_MODEL,
     type: ConfigValueType.STRING,
     category: ConfigCategory.AI,
     description: 'Gemini model for frame classification',
   },
   [GlobalConfigKey.AI_GEMINI_VIDEO_MODEL]: {
-    value: 'gemini-2.0-flash',
+    value: DEFAULT_GEMINI_MODEL,
     type: ConfigValueType.STRING,
     category: ConfigCategory.AI,
     description: 'Gemini model for video understanding',
@@ -174,10 +188,10 @@ export const DEFAULT_CONFIG: Record<string, GlobalConfigValue & { category: Conf
     description: 'Top percentage of frames to send to Gemini',
   },
   [GlobalConfigKey.COMMERCIAL_VERSIONS]: {
-    value: ['transparent', 'solid', 'real', 'creative'],
+    value: ['transparent'],
     type: ConfigValueType.JSON,
     category: ConfigCategory.COMMERCIAL,
-    description: 'Commercial image versions to generate',
+    description: 'Commercial image versions to generate (transparent, solid, real, creative)',
   },
   [GlobalConfigKey.COMMERCIAL_AI_CLEANUP]: {
     value: true,

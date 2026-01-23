@@ -89,8 +89,9 @@ describe('Stack Templates', () => {
         'claid-bg-remove',
         'fill-product-holes',
         'center-product',
+        'stability-commercial',  // Commercial first (at original resolution)
+        'stability-upscale',     // Upscale product images last
         'upload-frames',
-        'generate-commercial',
         'complete-job',
       ]);
     });
@@ -120,8 +121,9 @@ describe('Stack Templates', () => {
         'claid-bg-remove',
         'fill-product-holes',
         'center-product',
+        'stability-commercial',  // Commercial first (at original resolution)
+        'stability-upscale',     // Upscale product images last
         'upload-frames',
-        'generate-commercial',
         'complete-job',
       ]);
     });
@@ -144,6 +146,7 @@ describe('Stack Templates', () => {
     it('should not include commercial generation', () => {
       const processorIds = minimalStack.steps.map((s) => s.processor);
 
+      expect(processorIds).not.toContain('stability-commercial');
       expect(processorIds).not.toContain('generate-commercial');
       expect(processorIds).not.toContain('extract-products');
     });
@@ -214,7 +217,10 @@ describe('Stack Templates', () => {
       expect(ids).toContain('custom_bg_removal');
       expect(ids).toContain('full_product_analysis');
       expect(ids).toContain('audio_metadata_only');
-      expect(ids).toHaveLength(7);
+      expect(ids).toContain('stability_bg_removal');
+      expect(ids).toContain('unified_video_analyzer');
+      expect(ids).toContain('unified_video_analyzer_minimal');
+      expect(ids).toHaveLength(10);
     });
   });
 

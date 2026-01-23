@@ -399,23 +399,36 @@ export class VideoService {
 
   /**
    * Extract a single high-quality frame at exact timestamp
+   *
+   * @param videoPath - Path to the video file
+   * @param timestamp - Timestamp in seconds
+   * @param outputPath - Output path for the frame
+   * @param options.quality - Quality setting (1-31, lower is better, default 1)
+   * @param options.maxDimension - Max width/height in pixels (default 1536, keeps aspect ratio)
+   *                               Set to 1536 to ensure output stays under Claid's 10MB limit
    */
   async extractSingleFrame(
     videoPath: string,
     timestamp: number,
     outputPath: string,
-    options: { quality?: number } = {}
+    options: { quality?: number; maxDimension?: number } = {}
   ): Promise<string> {
     const config = getConfig();
-    const { quality = 1 } = options;
+    const { quality = 1, maxDimension = 1536 } = options;
 
     await mkdir(path.dirname(outputPath), { recursive: true });
 
     return new Promise((resolve, reject) => {
       const seekTime = Math.max(0, timestamp - 0.1).toFixed(3);
+
+      // Build filter for scaling - maintains aspect ratio, only downscales if larger than maxDimension
+      // force_original_aspect_ratio=decrease ensures aspect ratio is preserved
+      const scaleFilter = `scale=${maxDimension}:${maxDimension}:force_original_aspect_ratio=decrease`;
+
       const args = [
         '-ss', seekTime,
         '-i', videoPath,
+        '-vf', scaleFilter,
         '-vframes', '1',
         '-q:v', quality.toString(),
         '-y',

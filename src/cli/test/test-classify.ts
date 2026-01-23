@@ -47,7 +47,7 @@ export async function testClassify(): Promise<{
   }
 
   printSuccess('Gemini API key found');
-  printLabel('  Model', config.apis.geminiModel);
+  printLabel('  Model', 'gemini-3-pro-preview (default)');
   printDivider();
 
   // Get frames directory from user
@@ -88,7 +88,7 @@ export async function testClassify(): Promise<{
   printLabel('  Frames Dir', framesDir);
   printLabel('  Video Path', videoPath);
   printLabel('  Max Candidates', maxCandidates);
-  printLabel('  Model', config.apis.geminiModel);
+  printLabel('  Model', 'gemini-3-pro-preview');
   printDivider();
 
   const timer = new Timer();

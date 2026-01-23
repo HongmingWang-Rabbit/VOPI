@@ -60,7 +60,8 @@ export const DEFAULT_SCORING_CONFIG: Required<ScoringConfig> = {
   alpha: 0.2,
   topK: 24,
   minTemporalGap: 0.3,
-  minSharpnessThreshold: 0,
+  /** Minimum sharpness to accept a frame (rejects blurry frames) */
+  minSharpnessThreshold: 5,
   motionNormalizationFactor: 255,
 };
 
@@ -232,11 +233,26 @@ export class FrameScoringService {
 
   /**
    * Select the best frame from each second of video
+   * @param scoredFrames - All scored frames
+   * @param config - Optional config with minSharpnessThreshold to reject blurry frames
    */
-  selectBestFramePerSecond(scoredFrames: ScoredFrame[]): ScoredFrame[] {
+  selectBestFramePerSecond(scoredFrames: ScoredFrame[], config: ScoringConfig = {}): ScoredFrame[] {
+    const { minSharpnessThreshold } = { ...DEFAULT_SCORING_CONFIG, ...config };
+
+    // Filter out frames below minimum sharpness threshold
+    const usableFrames = scoredFrames.filter((f) => f.sharpness >= minSharpnessThreshold);
+    const rejectedCount = scoredFrames.length - usableFrames.length;
+
+    if (rejectedCount > 0) {
+      logger.info(
+        { rejected: rejectedCount, threshold: minSharpnessThreshold },
+        `Rejected ${rejectedCount} blurry frames (sharpness < ${minSharpnessThreshold})`
+      );
+    }
+
     const framesBySecond = new Map<number, ScoredFrame[]>();
 
-    for (const frame of scoredFrames) {
+    for (const frame of usableFrames) {
       const second = Math.floor(frame.timestamp);
       if (!framesBySecond.has(second)) {
         framesBySecond.set(second, []);
@@ -253,7 +269,7 @@ export class FrameScoringService {
     selected.sort((a, b) => a.timestamp - b.timestamp);
 
     logger.info(
-      { selected: selected.length, total: scoredFrames.length },
+      { selected: selected.length, usable: usableFrames.length, total: scoredFrames.length },
       'Best frame per second selected'
     );
     return selected;

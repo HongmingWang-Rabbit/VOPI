@@ -52,6 +52,9 @@ vi.mock('../config/index.js', () => ({
     configCache: {
       ttlMs: 60000,
     },
+    apis: {
+      geminiModel: 'gemini-2.0-flash',
+    },
   })),
 }));
 
@@ -191,14 +194,15 @@ describe('GlobalConfigService', () => {
       expect(config.pipelineStrategy).toBe(PipelineStrategy.GEMINI_VIDEO);
       expect(config.fps).toBe(5);
       expect(config.batchSize).toBe(30); // Default
-      expect(config.geminiModel).toBe('gemini-2.0-flash'); // Default
+      expect(config.geminiModel).toBe('gemini-3-pro-preview'); // Default
     });
 
-    it('should validate and fallback invalid pipeline strategy', async () => {
+    it('should validate and fallback non-string pipeline strategy', async () => {
       mockWhere.mockResolvedValueOnce([
         {
           key: GlobalConfigKey.PIPELINE_STRATEGY,
-          value: { value: 'invalid_strategy', type: ConfigValueType.STRING },
+          // Non-string value should fallback to default
+          value: { value: 123, type: ConfigValueType.NUMBER },
           isActive: true,
         },
       ]);
@@ -206,6 +210,21 @@ describe('GlobalConfigService', () => {
       const config = await globalConfigService.getEffectiveConfig();
 
       expect(config.pipelineStrategy).toBe(PipelineStrategy.CLASSIC);
+    });
+
+    it('should accept any non-empty string as pipeline strategy', async () => {
+      mockWhere.mockResolvedValueOnce([
+        {
+          key: GlobalConfigKey.PIPELINE_STRATEGY,
+          // Any valid stack template name should be accepted
+          value: { value: 'unified_video_analyzer', type: ConfigValueType.STRING },
+          isActive: true,
+        },
+      ]);
+
+      const config = await globalConfigService.getEffectiveConfig();
+
+      expect(config.pipelineStrategy).toBe('unified_video_analyzer');
     });
   });
 

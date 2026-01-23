@@ -32,6 +32,7 @@ export { scoreFramesProcessor } from './sharp/score-frames.js';
 export { geminiClassifyProcessor } from './gemini/gemini-classify.js';
 export { geminiVideoAnalysisProcessor } from './gemini/gemini-video-analysis.js';
 export { geminiAudioAnalysisProcessor } from './gemini/gemini-audio-analysis.js';
+export { geminiUnifiedVideoAnalyzerProcessor } from './gemini/gemini-unified-video-analyzer.js';
 
 // Photoroom API processors
 export { photoroomBgRemoveProcessor } from './photoroom/photoroom-bg-remove.js';
@@ -40,6 +41,11 @@ export { generateCommercialProcessor } from './photoroom/generate-commercial.js'
 
 // Claid API processors
 export { claidBgRemoveProcessor } from './claid/claid-bg-remove.js';
+
+// Stability AI processors
+export { stabilityBgRemoveProcessor } from './stability/stability-bg-remove.js';
+export { stabilityUpscaleProcessor } from './stability/stability-upscale.js';
+export { stabilityCommercialProcessor } from './stability/stability-commercial.js';
 
 // Database processors
 export { saveFrameRecordsProcessor } from './db/save-frame-records.js';
@@ -62,10 +68,14 @@ import { scoreFramesProcessor } from './sharp/score-frames.js';
 import { geminiClassifyProcessor } from './gemini/gemini-classify.js';
 import { geminiVideoAnalysisProcessor } from './gemini/gemini-video-analysis.js';
 import { geminiAudioAnalysisProcessor } from './gemini/gemini-audio-analysis.js';
+import { geminiUnifiedVideoAnalyzerProcessor } from './gemini/gemini-unified-video-analyzer.js';
 import { photoroomBgRemoveProcessor } from './photoroom/photoroom-bg-remove.js';
 import { extractProductsProcessor } from './photoroom/extract-products.js';
 import { generateCommercialProcessor } from './photoroom/generate-commercial.js';
 import { claidBgRemoveProcessor } from './claid/claid-bg-remove.js';
+import { stabilityBgRemoveProcessor } from './stability/stability-bg-remove.js';
+import { stabilityUpscaleProcessor } from './stability/stability-upscale.js';
+import { stabilityCommercialProcessor } from './stability/stability-commercial.js';
 import { saveFrameRecordsProcessor } from './db/save-frame-records.js';
 import { completeJobProcessor } from './db/complete-job.js';
 import { filterByScoreProcessor } from './util/filter-by-score.js';
@@ -90,12 +100,17 @@ export const allProcessors: Processor[] = [
   geminiClassifyProcessor,
   geminiVideoAnalysisProcessor,
   geminiAudioAnalysisProcessor,
+  geminiUnifiedVideoAnalyzerProcessor,
   // Photoroom
   photoroomBgRemoveProcessor,
   extractProductsProcessor,
   generateCommercialProcessor,
   // Claid
   claidBgRemoveProcessor,
+  // Stability AI
+  stabilityBgRemoveProcessor,
+  stabilityUpscaleProcessor,
+  stabilityCommercialProcessor,
   // Database
   saveFrameRecordsProcessor,
   completeJobProcessor,

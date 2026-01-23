@@ -231,6 +231,22 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
     }
   }
 
+  // Ask about commercial versions if stack includes commercial generation
+  const hasCommercialProcessor = stack.steps.some((s) =>
+    s.processor.includes('commercial') || s.processor.includes('generate')
+  );
+  let commercialVersions: string[] = ['transparent']; // Default to minimal
+
+  if (hasCommercialProcessor) {
+    const allVersions = await confirm({
+      message: 'Generate all commercial versions? (transparent, solid, real, creative)',
+      default: true,
+    });
+    if (allVersions) {
+      commercialVersions = ['transparent', 'solid', 'real', 'creative'];
+    }
+  }
+
   // Ask about processor options
   const configureOptions = await confirm({
     message: 'Configure processor options?',
@@ -269,7 +285,7 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
     config: {
       fps: 10,
       batchSize: 30,
-      commercialVersions: ['transparent', 'solid', 'real', 'creative'],
+      commercialVersions: commercialVersions as CommercialVersion[],
       aiCleanup: true,
       geminiModel: 'gemini-2.0-flash',
     },
@@ -310,14 +326,14 @@ async function runStackWithConfig(stack: StackTemplate): Promise<void> {
   const timer = new PipelineTimer(jobId);
   const overallTimer = new Timer();
 
-  // Create processor context
+  // Create processor context (override commercialVersions with user's choice)
   const context: ProcessorContext = {
     job: mockJob,
     jobId,
     config: {
       fps: effectiveConfig.fps,
       batchSize: effectiveConfig.batchSize,
-      commercialVersions: effectiveConfig.commercialVersions as CommercialVersion[],
+      commercialVersions: commercialVersions as CommercialVersion[],
       aiCleanup: effectiveConfig.aiCleanup,
       geminiModel: effectiveConfig.geminiModel,
     },

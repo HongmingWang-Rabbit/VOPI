@@ -27,6 +27,13 @@ Go through each frame and ask: "Is this a NEW unique view, or SIMILAR to one I'v
 - Only minor differences (slightly rotated, different moment of same view)
 - Would be redundant to keep both
 
+### CRITICAL: Frame Limits
+- **MAX 5 frames per product** - Never select more than 5 frames for any single product
+- **NO DUPLICATE ANGLES** - Each selected frame MUST show a DIFFERENT angle/face
+- Valid angles: front, back, left, right, top, bottom, 3/4 front-left, 3/4 front-right, 3/4 back-left, 3/4 back-right, detail
+- If multiple frames show the same angle, select ONLY the single best one
+- Prioritize diversity: front, back, sides, top views are more valuable than multiple similar angles
+
 ### QUALITY SCORING
 
 **Base score starts at 50, then adjust:**

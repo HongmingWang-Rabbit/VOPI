@@ -9,7 +9,11 @@ export { ClaidBackgroundRemovalProvider, claidBackgroundRemovalProvider } from '
 export { GeminiClassificationProvider, geminiClassificationProvider } from './gemini-classification.provider.js';
 export { GeminiVideoAnalysisProvider, geminiVideoAnalysisProvider } from './gemini-video-analysis.provider.js';
 export { GeminiAudioAnalysisProvider, geminiAudioAnalysisProvider } from './gemini-audio-analysis.provider.js';
+export { GeminiUnifiedVideoAnalyzerProvider, geminiUnifiedVideoAnalyzerProvider } from './gemini-unified-video-analyzer.provider.js';
 export { SharpImageTransformProvider, sharpImageTransformProvider } from './sharp-image-transform.provider.js';
 export { PhotoroomCommercialImageProvider, photoroomCommercialImageProvider } from './photoroom-commercial-image.provider.js';
 export { DefaultProductExtractionProvider } from './default-product-extraction.provider.js';
 export { FFmpegVideoExtractionProvider, ffmpegVideoExtractionProvider } from './ffmpeg-video-extraction.provider.js';
+export { StabilityBackgroundRemovalProvider, stabilityBackgroundRemovalProvider } from './stability-background-removal.provider.js';
+export { StabilityUpscaleProvider, stabilityUpscaleProvider } from './stability-upscale.provider.js';
+export { StabilityCommercialProvider, stabilityCommercialProvider } from './stability-commercial.provider.js';

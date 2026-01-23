@@ -220,7 +220,13 @@ export class ClaidBackgroundRemovalProvider implements BackgroundRemovalProvider
         const errorMessage = data.error?.message || `HTTP ${response.status}`;
         const fullError = `${errorType}: ${errorMessage}`;
 
-        logger.error({ status: response.status, errorType, errorMessage, attempt }, 'Claid API error response');
+        logger.error({
+          status: response.status,
+          errorType,
+          errorMessage,
+          attempt,
+          responseBody: JSON.stringify(data).slice(0, 500), // Log full response for debugging
+        }, 'Claid API error response');
 
         // Retry on rate limit or server errors
         if ((response.status === 429 || response.status >= 500) && attempt < CLAID_CONSTANTS.MAX_RETRIES) {

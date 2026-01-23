@@ -1,23 +1,23 @@
 /**
- * Claid Background Removal Processor
+ * Stability AI Background Removal Processor
  *
- * Removes background from images using Claid.ai API.
+ * Removes background from images using Stability AI's remove-background API.
  */
 
 import path from 'path';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult, FrameMetadata } from '../../types.js';
 import { getInputFrames } from '../../types.js';
-import { claidBackgroundRemovalProvider } from '../../../providers/implementations/index.js';
+import { stabilityBackgroundRemovalProvider } from '../../../providers/implementations/stability-background-removal.provider.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
 import { parallelMap, isParallelError } from '../../../utils/parallel.js';
 import { getConcurrency } from '../../concurrency.js';
 
-const logger = createChildLogger({ service: 'processor:claid-bg-remove' });
+const logger = createChildLogger({ service: 'processor:stability-bg-remove' });
 
-export const claidBgRemoveProcessor: Processor = {
-  id: 'claid-bg-remove',
-  displayName: 'Remove Background (Claid)',
+export const stabilityBgRemoveProcessor: Processor = {
+  id: 'stability-bg-remove',
+  displayName: 'Remove Background (Stability AI)',
   statusKey: JobStatus.EXTRACTING_PRODUCT,
   io: {
     requires: ['images', 'frames'],
@@ -37,46 +37,31 @@ export const claidBgRemoveProcessor: Processor = {
       return { success: false, error: 'No frames for background removal' };
     }
 
-    // Check if Claid provider is available
-    if (!claidBackgroundRemovalProvider.isAvailable()) {
-      logger.info({ jobId }, 'Claid provider not available (CLAID_API_KEY not set), skipping background removal');
+    // Check if Stability provider is available
+    if (!stabilityBackgroundRemovalProvider.isAvailable()) {
+      logger.info({ jobId }, 'Stability provider not available (STABILITY_API_KEY not set), skipping background removal');
       // Return success with no data changes - pipeline continues with next processor
-      // Note: Do NOT set skip: true here, as that would skip ALL remaining processors
       return {
         success: true,
         data: {}, // No changes, keep existing data
       };
     }
 
-    // Determine product description from options or pipeline data
-    // Priority: processor options > product description (actual name) > product type (category)
-    // productDescription contains actual product name like "AirPods case", "wireless earbuds"
-    // productType contains category like "electronics", "clothing"
-    const customPrompt = (options?.customPrompt as string) ||
-                         data.metadata?.productDescription ||
-                         data.metadata?.productType ||
-                         (data.productType as string | undefined) ||
-                         undefined;
-
     logger.info({
       jobId,
       frameCount: inputFrames.length,
-      customPrompt: customPrompt || '(default: product)',
-    }, 'Removing backgrounds with Claid');
+    }, 'Removing backgrounds with Stability AI');
 
     await onProgress?.({
       status: JobStatus.EXTRACTING_PRODUCT,
       percentage: 65,
-      message: 'Removing backgrounds (Claid)',
+      message: 'Removing backgrounds (Stability AI)',
     });
 
     const results = new Map<string, { success: boolean; outputPath?: string; rotationApplied: number; error?: string }>();
 
-    // Build provider options
-    const providerOptions = customPrompt ? { customPrompt } : {};
-
     // Process frames in parallel with concurrency limit (API rate limiting)
-    const concurrency = getConcurrency('CLAID_BG_REMOVE', options);
+    const concurrency = getConcurrency('STABILITY_BG_REMOVE', options);
     let processedCount = 0;
 
     const parallelResults = await parallelMap(
@@ -85,11 +70,11 @@ export const claidBgRemoveProcessor: Processor = {
         const outputPath = path.join(workDirs.extracted, `${frame.frameId}_transparent.png`);
 
         const result = await timer.timeOperation(
-          'claid_remove_background',
-          () => claidBackgroundRemovalProvider.removeBackground(
+          'stability_remove_background',
+          () => stabilityBackgroundRemovalProvider.removeBackground(
             frame.path,
             outputPath,
-            providerOptions
+            {}
           ),
           { frameId: frame.frameId }
         );
@@ -136,18 +121,18 @@ export const claidBgRemoveProcessor: Processor = {
     if (failedCount > 0) {
       const failures = [...results.entries()].filter(([, r]) => !r.success);
       for (const [frameId, result] of failures) {
-        logger.error({ jobId, frameId, error: result.error }, 'Claid background removal failed for frame');
+        logger.error({ jobId, frameId, error: result.error }, 'Stability background removal failed for frame');
       }
     }
 
-    logger.info({ jobId, success: successCount, failed: failedCount, total: inputFrames.length }, 'Claid background removal complete');
+    logger.info({ jobId, success: successCount, failed: failedCount, total: inputFrames.length }, 'Stability background removal complete');
 
     // If ALL frames failed, return error instead of silently passing through originals
     if (successCount === 0) {
       const firstError = [...results.values()].find((r) => r.error)?.error || 'All frames failed';
       return {
         success: false,
-        error: `Claid background removal failed: ${firstError}`,
+        error: `Stability background removal failed: ${firstError}`,
       };
     }
 

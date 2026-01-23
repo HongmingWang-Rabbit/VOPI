@@ -115,8 +115,8 @@ export class GeminiService {
    * Get model instance
    */
   private getModel(modelName?: string): GenerativeModel {
-    const config = getConfig();
-    const model = modelName || config.apis.geminiModel;
+    // Default model - should be passed from effectiveConfig by processor
+    const model = modelName || 'gemini-3-pro-preview';
     const client = this.init();
     return client.getGenerativeModel({
       model,
@@ -300,7 +300,7 @@ Return ONLY the JSON object. No additional text.`;
   ): Promise<GeminiResponse> {
     const config = getConfig();
     const {
-      model = config.apis.geminiModel,
+      model = 'gemini-3-pro-preview',
       maxRetries = 3,
       retryDelay = config.worker.apiRetryDelayMs,
     } = options;
@@ -338,7 +338,12 @@ Return ONLY the JSON object. No additional text.`;
         return this.parseResponse(text);
       } catch (e) {
         lastError = e as Error;
-        logger.error({ error: e, attempt }, 'Gemini classification attempt failed');
+        logger.error({
+          attempt,
+          errorMessage: lastError.message,
+          errorName: lastError.name,
+          errorStack: lastError.stack?.split('\n').slice(0, 3).join('\n'),
+        }, 'Gemini classification attempt failed');
 
         if (attempt < maxRetries) {
           logger.info({ delay: retryDelay }, 'Retrying Gemini classification');

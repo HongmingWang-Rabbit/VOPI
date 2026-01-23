@@ -31,14 +31,17 @@ const MAX_PIXELS = 4_000_000;
 /** Minimum dimension required by Stable Diffusion */
 const MIN_DIMENSION = 64;
 
+/** Erosion radius for shrinking mask to protect product edges (pixels) */
+const EROSION_RADIUS = 2;
+
 /** Dilation radius for expanding mask edges (pixels). Keep small (1-5) for performance. */
 const DILATION_RADIUS = 3;
 
 /** Gaussian blur sigma for mask edge feathering */
-const MASK_BLUR_SIGMA = 4;
+const MASK_BLUR_SIGMA = 2;
 
 /** API-side mask growth for smooth transitions (0-20 range) */
-const GROW_MASK_VALUE = '10';
+const GROW_MASK_VALUE = '5';
 
 /** Maximum retry attempts for transient API failures */
 const MAX_RETRIES = 3;
@@ -65,6 +68,45 @@ export interface InpaintOptions {
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+/**
+ * Apply morphological erosion to a grayscale mask buffer
+ * Shrinks white (255) areas by the specified radius - protects edges from bleeding
+ *
+ * @param mask - Input grayscale buffer (1 channel)
+ * @param width - Image width
+ * @param height - Image height
+ * @param radius - Erosion radius in pixels
+ * @returns New eroded buffer
+ */
+function erodeMask(mask: Buffer | Uint8Array, width: number, height: number, radius: number): Buffer {
+  const eroded = Buffer.alloc(width * height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      let minVal = mask[idx];
+
+      // Check all pixels within radius (square kernel)
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const ny = y + dy;
+          const nx = x + dx;
+          if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+            const nIdx = ny * width + nx;
+            minVal = Math.min(minVal, mask[nIdx]);
+          } else {
+            // Treat out-of-bounds as black (0) to erode edges
+            minVal = 0;
+          }
+        }
+      }
+      eroded[idx] = minVal;
+    }
+  }
+
+  return eroded;
+}
 
 /**
  * Apply morphological dilation to a grayscale mask buffer
@@ -203,7 +245,7 @@ export class StabilityService {
       .png()
       .toBuffer();
 
-    // Prepare mask: Resize, dilate, and blur for smooth feathered edges
+    // Prepare mask: Resize, erode (protect edges), dilate (smooth), and blur for feathering
     // WHITE (255) = inpaint, BLACK (0) = preserve
     const rawMask = await sharp(maskPath)
       .resize(resizedWidth, resizedHeight, { fit: 'fill' })
@@ -211,8 +253,11 @@ export class StabilityService {
       .raw()
       .toBuffer();
 
-    // Dilate mask to expand inpaint area for edge coverage
-    const dilatedMask = dilateMask(rawMask, resizedWidth, resizedHeight, DILATION_RADIUS);
+    // First ERODE mask to shrink it inward - this protects product edges from bleeding
+    const erodedMask = erodeMask(rawMask, resizedWidth, resizedHeight, EROSION_RADIUS);
+
+    // Then DILATE mask slightly to ensure smooth coverage of actual holes
+    const dilatedMask = dilateMask(erodedMask, resizedWidth, resizedHeight, DILATION_RADIUS);
 
     // Apply blur to the mask for feathered edges
     const maskBuffer = await sharp(dilatedMask, {
@@ -398,18 +443,20 @@ export class StabilityService {
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-      // Load mask with dilation for alpha restoration (no blur - that spreads too much)
+      // Load mask for alpha restoration - use EROSION to be conservative
+      // Only make pixels opaque in the inner hole area, not at edges
       const rawMaskForAlpha = await sharp(maskPath)
         .resize(resizedWidth, resizedHeight, { fit: 'fill' })
         .grayscale()
         .raw()
         .toBuffer();
 
-      // Apply dilation to match what we sent to API (using shared helper)
-      const dilatedMaskForAlpha = dilateMask(rawMaskForAlpha, resizedWidth, resizedHeight, DILATION_RADIUS);
+      // Use eroded mask (same as what we sent) for alpha restoration
+      // This ensures we only make the inner hole pixels opaque, preserving edge anti-aliasing
+      const erodedMaskForAlpha = erodeMask(rawMaskForAlpha, resizedWidth, resizedHeight, EROSION_RADIUS);
 
       // Create buffer with restored alpha
-      // Use dilated mask with threshold - holes become opaque, background stays transparent
+      // Use eroded mask with threshold - only inner holes become opaque, edges stay original
       const pixelCount = resizedWidth * resizedHeight;
       const restoredData = Buffer.alloc(pixelCount * 4);
       for (let i = 0; i < pixelCount; i++) {
@@ -418,8 +465,9 @@ export class StabilityService {
         restoredData[srcIdx + 1] = resultData[srcIdx + 1]; // G
         restoredData[srcIdx + 2] = resultData[srcIdx + 2]; // B
 
-        // If in dilated mask area, make opaque; otherwise restore original alpha
-        if (dilatedMaskForAlpha[i] > ALPHA_THRESHOLD) {
+        // If in eroded mask area (inner hole), make opaque; otherwise restore original alpha
+        // This preserves original edge anti-aliasing
+        if (erodedMaskForAlpha[i] > ALPHA_THRESHOLD) {
           restoredData[srcIdx + 3] = 255; // Filled hole -> opaque
         } else {
           restoredData[srcIdx + 3] = originalAlpha[i]; // Restore original alpha

@@ -7,6 +7,9 @@
  * Environment variable overrides:
  * - VOPI_CONCURRENCY_CLAID_BG_REMOVE
  * - VOPI_CONCURRENCY_STABILITY_INPAINT
+ * - VOPI_CONCURRENCY_STABILITY_BG_REMOVE
+ * - VOPI_CONCURRENCY_STABILITY_UPSCALE
+ * - VOPI_CONCURRENCY_STABILITY_COMMERCIAL
  * - VOPI_CONCURRENCY_SHARP_TRANSFORM
  * - VOPI_CONCURRENCY_PHOTOROOM_GENERATE
  * - VOPI_CONCURRENCY_FFMPEG_EXTRACT
@@ -48,6 +51,29 @@ export const PROCESSOR_CONCURRENCY = {
    * - Each request takes 3-8 seconds
    */
   STABILITY_INPAINT: getEnvConcurrency('STABILITY_INPAINT', 4),
+
+  /**
+   * Stability AI background removal API
+   * - External API with rate limits
+   * - Each request takes 2-5 seconds
+   */
+  STABILITY_BG_REMOVE: getEnvConcurrency('STABILITY_BG_REMOVE', 4),
+
+  /**
+   * Stability AI upscale API
+   * - External API with rate limits
+   * - Each request takes 3-10 seconds
+   * - Lower concurrency due to higher resource usage
+   */
+  STABILITY_UPSCALE: getEnvConcurrency('STABILITY_UPSCALE', 2),
+
+  /**
+   * Stability AI commercial image generation (Replace Background and Relight)
+   * - External API with rate limits
+   * - Each request takes 5-15 seconds (more complex than other operations)
+   * - Lower concurrency due to heavy processing
+   */
+  STABILITY_COMMERCIAL: getEnvConcurrency('STABILITY_COMMERCIAL', 2),
 
   /**
    * Sharp image transformations (centering, cropping)

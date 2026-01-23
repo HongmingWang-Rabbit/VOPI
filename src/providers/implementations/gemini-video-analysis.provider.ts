@@ -96,8 +96,8 @@ export class GeminiVideoAnalysisProvider implements VideoAnalysisProvider {
     temperature?: number;
     topP?: number;
   } = {}): GenerativeModel {
-    const config = getConfig();
-    const model = options.modelName || config.apis.geminiModel;
+    // Default model - should be passed from effectiveConfig by processor
+    const model = options.modelName || 'gemini-3-pro-preview';
     const { client } = this.init();
 
     return client.getGenerativeModel({
@@ -320,7 +320,7 @@ export class GeminiVideoAnalysisProvider implements VideoAnalysisProvider {
   ): Promise<VideoAnalysisResult> {
     const config = getConfig();
     const {
-      model = config.apis.geminiModel,
+      model = 'gemini-3-pro-preview',
       maxFrames = 10,
       maxRetries = 3,
       retryDelay = config.worker.apiRetryDelayMs,
@@ -373,7 +373,12 @@ export class GeminiVideoAnalysisProvider implements VideoAnalysisProvider {
           return this.convertToResult(parsed);
         } catch (e) {
           lastError = e as Error;
-          logger.error({ error: e, attempt }, 'Gemini video analysis attempt failed');
+          logger.error({
+            attempt,
+            errorMessage: lastError.message,
+            errorName: lastError.name,
+            errorStack: lastError.stack?.split('\n').slice(0, 3).join('\n'),
+          }, 'Gemini video analysis attempt failed');
 
           if (attempt < maxRetries) {
             logger.info({ delay: retryDelay }, 'Retrying video analysis');

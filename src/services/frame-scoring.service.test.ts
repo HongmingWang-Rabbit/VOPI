@@ -39,7 +39,7 @@ describe('FrameScoringService', () => {
       expect(DEFAULT_SCORING_CONFIG.alpha).toBe(0.2);
       expect(DEFAULT_SCORING_CONFIG.topK).toBe(24);
       expect(DEFAULT_SCORING_CONFIG.minTemporalGap).toBe(0.3);
-      expect(DEFAULT_SCORING_CONFIG.minSharpnessThreshold).toBe(0);
+      expect(DEFAULT_SCORING_CONFIG.minSharpnessThreshold).toBe(5);
       expect(DEFAULT_SCORING_CONFIG.motionNormalizationFactor).toBe(255);
     });
   });
@@ -179,6 +179,49 @@ describe('FrameScoringService', () => {
       expect(result[0].timestamp).toBe(0.5);
       expect(result[1].timestamp).toBe(1.5);
       expect(result[2].timestamp).toBe(2.5);
+    });
+
+    it('should filter out frames below minimum sharpness threshold', () => {
+      const frames: ScoredFrame[] = [
+        createScoredFrame(1, 0.0, 3), // Below threshold (sharpness=3)
+        createScoredFrame(2, 0.5, 10), // Above threshold, best in second 0
+        createScoredFrame(3, 1.0, 2), // Below threshold (sharpness=2)
+        createScoredFrame(4, 1.5, 4), // Below threshold (sharpness=4)
+        createScoredFrame(5, 2.0, 8), // Above threshold, best in second 2
+      ];
+
+      // With threshold of 5, frames with sharpness < 5 should be filtered out
+      const result = service.selectBestFramePerSecond(frames, { minSharpnessThreshold: 5 });
+
+      expect(result.length).toBe(2); // Only seconds 0 and 2 have usable frames
+      expect(result.find((f) => Math.floor(f.timestamp) === 0)?.score).toBe(10);
+      expect(result.find((f) => Math.floor(f.timestamp) === 2)?.score).toBe(8);
+      // Second 1 has no frames above threshold, so it's skipped
+      expect(result.find((f) => Math.floor(f.timestamp) === 1)).toBeUndefined();
+    });
+
+    it('should use default threshold when no config provided', () => {
+      const frames: ScoredFrame[] = [
+        createScoredFrame(1, 0.0, 3), // Below default threshold (5)
+        createScoredFrame(2, 0.5, 10), // Above threshold
+      ];
+
+      // Default threshold is 5, so frame with sharpness=3 should be filtered
+      const result = service.selectBestFramePerSecond(frames);
+
+      expect(result.length).toBe(1);
+      expect(result[0].score).toBe(10);
+    });
+
+    it('should accept all frames when threshold is 0', () => {
+      const frames: ScoredFrame[] = [
+        createScoredFrame(1, 0.0, 1), // Very low sharpness
+        createScoredFrame(2, 1.0, 2), // Very low sharpness
+      ];
+
+      const result = service.selectBestFramePerSecond(frames, { minSharpnessThreshold: 0 });
+
+      expect(result.length).toBe(2); // Both frames accepted
     });
   });
 

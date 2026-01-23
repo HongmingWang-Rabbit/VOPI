@@ -142,8 +142,11 @@ export interface PipelineMetadata {
   /** Variants discovered count */
   variantsDiscovered?: number;
 
-  /** Product type/category detected */
+  /** Product type/category detected (e.g., "electronics", "clothing") */
   productType?: string;
+
+  /** Product description for background removal targeting (e.g., "AirPods case", "wireless earbuds") */
+  productDescription?: string;
 
   /** Frame record count saved to DB */
   frameRecordCount?: number;

@@ -32,7 +32,7 @@ VOPI follows a distributed architecture with separate API and worker processes, 
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │                         Pipeline Service                                │ │
 │  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────┐  │ │
-│  │  │ Video   │  │ Scoring │  │ Gemini  │  │Photoroom│  │   Storage   │  │ │
+│  │  │ Video   │  │ Scoring │  │ Gemini  │  │Stability│  │   Storage   │  │ │
 │  │  │ Service │  │ Service │  │ Service │  │ Service │  │   Service   │  │ │
 │  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘  └─────────────┘  │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
@@ -119,7 +119,8 @@ Core business logic modules:
 | Video | `video.service.ts` | Video download, metadata extraction, frame extraction via FFmpeg |
 | Frame Scoring | `frame-scoring.service.ts` | Sharpness/motion calculation, candidate selection |
 | Gemini | `gemini.service.ts` | AI classification, variant discovery |
-| Photoroom | `photoroom.service.ts` | Background removal, commercial image generation |
+| Stability | `stability.service.ts` | Stability AI integration (inpainting, upscaling, commercial) |
+| Photoroom | `photoroom.service.ts` | Background removal, commercial image generation (legacy) |
 | Storage | `storage.service.ts` | S3 upload/download, presigned URLs |
 | Pipeline | `pipeline.service.ts` | Orchestrates the full processing pipeline |
 | Global Config | `global-config.service.ts` | Runtime configuration with database persistence |
@@ -149,8 +150,9 @@ The traditional approach that extracts all frames first, then uses AI for classi
 5. Remove background with Claid.ai (selective object retention)
 6. Fill holes with Stability AI inpainting (for obstruction removal artifacts)
 7. Center product in frame
-8. Generate commercial images
-9. Upload to S3
+8. Upscale with Stability AI (conservative/creative modes)
+9. Generate commercial images via Stability AI (transparent, solid, real, creative versions)
+10. Upload to S3
 
 Best for: Shorter videos, when you need fine-grained frame selection
 
@@ -164,12 +166,29 @@ Direct video analysis using Gemini's video understanding capabilities:
 6. Remove background with Claid.ai (selective object retention)
 7. Fill holes with Stability AI inpainting (for obstruction removal artifacts)
 8. Center product in frame
-9. Generate commercial images
-10. Upload to S3
+9. Upscale with Stability AI
+10. Generate commercial images via Stability AI
+11. Upload to S3
 
 Best for: Longer videos, when you want faster processing without extracting all frames
 
-**Note**: HEVC (H.265) videos from iPhones are automatically transcoded to H.264 since Gemini doesn't support HEVC.
+#### Unified Video Analyzer Strategy (most efficient)
+Single Gemini API call for combined audio + video analysis:
+1. Download video
+2. Unified Gemini analysis (audio transcription + frame selection in one call)
+3. Remove background with Claid.ai
+4. Fill holes with Stability AI inpainting
+5. Center product in frame
+6. Upscale with Stability AI
+7. Generate commercial images via Stability AI
+8. Upload to S3
+
+Best for: Maximum efficiency, when you need both audio metadata and frame selection
+
+**Note**: HEVC (H.265) videos from iPhones are automatically transcoded to H.264 since Gemini doesn't support HEVC. The transcoding is optimized for speed:
+- Uses `ultrafast` preset and 720p resolution for fast encoding
+- Attempts to copy audio stream (instant), falls back to AAC if incompatible
+- Includes timeout protection (10 min default, configurable via `VOPI_TRANSCODE_TIMEOUT_MS`)
 
 ### Pipeline Steps (Classic Strategy)
 
@@ -189,6 +208,7 @@ Best for: Longer videos, when you want faster processing without extracting all 
 │  3. SCORE (30-45%)                                                       │
 │     ├─ Calculate sharpness (Laplacian variance)                         │
 │     ├─ Calculate motion penalty (frame difference)                      │
+│     ├─ Filter out blurry frames (sharpness < threshold)                 │
 │     └─ Select best frame per second as candidates                       │
 │                                                                          │
 │  4. CLASSIFY (50-60%)                                                    │
@@ -273,8 +293,15 @@ Video URL
     │
     ▼
 ┌─────────────────┐
-│   Photoroom     │───────▶ /tmp/vopi/{jobId}/commercial/
-│   generate      │         hero_transparent.png, hero_solid.png, etc.
+│ Stability AI    │───────▶ /tmp/vopi/{jobId}/upscaled/
+│   upscale       │         hero_upscaled.png
+└─────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│ Stability AI    │───────▶ /tmp/vopi/{jobId}/commercial/
+│   commercial    │         hero_transparent.png, hero_solid.png,
+│                 │         hero_real.png, hero_creative.png
 └─────────────────┘
     │
     ▼
@@ -343,14 +370,18 @@ Any processor that outputs a data path can connect to any processor that require
 | filter-by-score | images, frames, frames.scores | images | Filters by score |
 | photoroom-bg-remove | images, frames | images | Background removal (Photoroom) |
 | claid-bg-remove | images, frames | images | Background removal (Claid) - swappable |
+| stability-bg-remove | images, frames | images | Background removal (Stability AI) |
 | center-product | images, frames | images | Centers product in frame |
 | rotate-image | images, frames | images | Rotates images |
 | fill-product-holes | images, frames | images | Fills transparent holes in products |
+| stability-upscale | images, frames | images | Image upscaling (Stability AI) |
 | extract-products | images, frames | images | Full product extraction |
 | upload-frames | images, frames | text, frames.s3Url | Uploads to S3 |
-| generate-commercial | images, frames | images, frames.version | Commercial image generation |
+| stability-commercial | images, frames | images, frames.version | Commercial image generation (Stability AI) |
+| generate-commercial | images, frames | images, frames.version | Commercial image generation (Photoroom - legacy) |
 | save-frame-records | frames | frames.dbId | Persists to database |
 | complete-job | - | - | Finalizes job, uploads metadata.json |
+| gemini-unified-video-analyzer | video | images, frames, frames.classifications, transcript, product.metadata | Combined audio + video analysis |
 
 ### Stack Configuration
 
@@ -382,11 +413,16 @@ interface StackConfig {
 
 | Stack ID | Description |
 |----------|-------------|
-| `classic` | Full pipeline: extract → score → classify → extract-products → generate |
+| `classic` | Full pipeline: extract → score → classify → extract-products → upscale → generate |
 | `gemini_video` | Direct video analysis with Gemini |
+| `unified_video_analyzer` | Single Gemini call for audio + video, most efficient |
+| `unified_video_analyzer_minimal` | Unified analysis without commercial generation |
 | `minimal` | Extract and upload without commercial generation |
 | `frames_only` | Extract frames with scoring, no AI classification |
 | `custom_bg_removal` | Configurable background removal provider |
+| `stability_bg_removal` | Uses Stability AI for background removal |
+| `full_product_analysis` | Audio-first approach with enhanced frame classification |
+| `audio_metadata_only` | Extract audio and generate metadata only |
 
 ### Stack Validation
 
@@ -403,6 +439,9 @@ Each processor has a configurable concurrency limit for parallel operations. Def
 |----------------|---------|-----------|
 | `CLAID_BG_REMOVE` | 5 | External API, 2-5s per request |
 | `STABILITY_INPAINT` | 4 | External API, 3-8s per request |
+| `STABILITY_BG_REMOVE` | 4 | External API, 2-5s per request |
+| `STABILITY_UPSCALE` | 4 | External API, 2-5s per request |
+| `STABILITY_COMMERCIAL` | 3 | External API, 3-10s per request (Replace Background + Relight) |
 | `SHARP_TRANSFORM` | 8 | CPU-bound local processing, ~50-200ms |
 | `PHOTOROOM_GENERATE` | 3 | External API, 2-4s per request |
 | `FFMPEG_EXTRACT` | 4 | I/O bound, balanced for disk throughput |
@@ -425,6 +464,8 @@ Each processor has a configurable concurrency limit for parallel operations. Def
 VOPI_CONCURRENCY_GEMINI_CLASSIFY=4
 VOPI_CONCURRENCY_S3_UPLOAD=10
 VOPI_CONCURRENCY_CLAID_BG_REMOVE=8
+VOPI_CONCURRENCY_STABILITY_COMMERCIAL=5
+VOPI_CONCURRENCY_STABILITY_UPSCALE=6
 ```
 
 ### Key Files
@@ -509,9 +550,9 @@ src/
 ### Bottlenecks
 
 1. **Gemini API**: Rate limited, batching helps
-2. **Photoroom API**: Rate limited, sequential per variant
+2. **Stability AI API**: Rate limited, concurrent requests help but watch limits
 3. **FFmpeg**: CPU-intensive, consider dedicated worker nodes
-4. **S3 uploads**: Network bound, parallelized where possible
+4. **S3 uploads**: Network bound, parallelized with keep-alive connections
 
 ## Global Configuration System
 
@@ -657,6 +698,22 @@ The pipeline generates a `metadata.json` file in S3:
 | `AUDIO_PROCESSING_TIMEOUT_MS` | 180000 | Gemini file processing timeout (3 minutes) |
 | `AUDIO_POLLING_INTERVAL_MS` | 3000 | Polling interval for processing status |
 | `AUDIO_MAX_RETRIES` | 3 | Max retries for audio analysis API calls |
+
+### Video Transcoding Configuration
+
+HEVC videos (common from iPhones) are automatically transcoded to H.264 for Gemini compatibility. The transcoding is optimized for speed over quality since the output is only used for AI analysis.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VOPI_TRANSCODE_HEIGHT` | 720 | Target video height (720p balances quality and speed) |
+| `VOPI_TRANSCODE_TIMEOUT_MS` | 600000 | Timeout for transcoding operations (10 minutes) |
+| `VOPI_FFPROBE_TIMEOUT_MS` | 30000 | Timeout for codec detection (30 seconds) |
+
+**Transcoding settings** (hardcoded for optimal speed):
+- **Preset**: `ultrafast` - Fastest software encoding (~3-5x faster than `fast`)
+- **CRF**: `28` - Acceptable quality for AI analysis
+- **Audio**: Attempts copy first, falls back to AAC 128k if incompatible
+- **Threads**: Uses all available CPU cores
 
 ### Edge Cases
 

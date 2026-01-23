@@ -36,8 +36,9 @@ export const classicStack: StackTemplate = {
     { processor: 'claid-bg-remove' },
     { processor: 'fill-product-holes' },
     { processor: 'center-product' },
+    { processor: 'stability-commercial' },           // Generate commercial images first (at original resolution)
+    { processor: 'stability-upscale' },              // Upscale product images to higher resolution
     { processor: 'upload-frames' },
-    { processor: 'generate-commercial' },
     { processor: 'complete-job' },
   ],
 };
@@ -61,8 +62,9 @@ export const geminiVideoStack: StackTemplate = {
     { processor: 'claid-bg-remove' },
     { processor: 'fill-product-holes' },
     { processor: 'center-product' },
+    { processor: 'stability-commercial' },           // Generate commercial images first (at original resolution)
+    { processor: 'stability-upscale' },              // Upscale product images to higher resolution
     { processor: 'upload-frames' },
-    { processor: 'generate-commercial' },
     { processor: 'complete-job' },
   ],
 };
@@ -150,8 +152,9 @@ export const fullProductAnalysisStack: StackTemplate = {
     { processor: 'claid-bg-remove' },
     { processor: 'fill-product-holes' },
     { processor: 'center-product' },
+    { processor: 'stability-commercial' },    // Generate commercial images first (at original resolution)
+    { processor: 'stability-upscale' },       // Upscale product images to higher resolution
     { processor: 'upload-frames' },
-    { processor: 'generate-commercial' },
     { processor: 'complete-job' },            // Also uploads metadata.json
   ],
 };
@@ -179,6 +182,86 @@ export const audioMetadataOnlyStack: StackTemplate = {
 };
 
 /**
+ * Stability AI Background Removal Test Stack
+ *
+ * Uses Stability AI's remove-background API instead of Claid.
+ * Good for testing Stability AI integration and comparing results.
+ *
+ * Flow: Download → Gemini Video Analysis → Stability BG Remove → Center → Upload → Complete
+ */
+export const stabilityBgRemovalStack: StackTemplate = {
+  id: 'stability_bg_removal',
+  name: 'Stability AI Background Removal',
+  description: 'Test pipeline using Stability AI for background removal',
+  steps: [
+    { processor: 'download' },
+    { processor: 'gemini-video-analysis' },
+    { processor: 'save-frame-records' },
+    { processor: 'stability-bg-remove' },
+    { processor: 'center-product' },
+    { processor: 'upload-frames' },
+    { processor: 'complete-job' },
+  ],
+};
+
+/**
+ * Unified Video Analyzer Stack
+ *
+ * Most efficient pipeline: combines audio + video analysis in a SINGLE Gemini API call.
+ * This replaces: extract-audio, gemini-audio-analysis, extract-frames, score-frames,
+ * gemini-classify, and save-frame-records with a single unified processor.
+ *
+ * Flow: Download → Unified Video Analyzer → Claid BG Remove → Fill Holes → Center → Upload → Generate Commercial → Complete
+ *
+ * Benefits:
+ * - Single API call for both audio transcription and frame selection
+ * - Cross-modal context (audio informs frame selection)
+ * - Only extracts selected frames (not all frames)
+ * - More cost-efficient (fewer API calls)
+ *
+ * Produces:
+ * - Product images (selected using audio + visual context)
+ * - metadata.json with e-commerce data (from audio transcription)
+ */
+export const unifiedVideoAnalyzerStack: StackTemplate = {
+  id: 'unified_video_analyzer',
+  name: 'Unified Video Analyzer Pipeline',
+  description: 'Single Gemini call for audio + video analysis, most efficient pipeline',
+  steps: [
+    { processor: 'download' },
+    { processor: 'gemini-unified-video-analyzer' },  // Combines 6 processors into 1
+    { processor: 'claid-bg-remove' },
+    { processor: 'fill-product-holes' },
+    { processor: 'center-product' },
+    { processor: 'stability-commercial' },           // Generate commercial images first (at original resolution)
+    { processor: 'stability-upscale' },              // Upscale product images to higher resolution
+    { processor: 'upload-frames' },
+    { processor: 'complete-job' },
+  ],
+};
+
+/**
+ * Unified Video Analyzer (Minimal) Stack
+ *
+ * Minimal version of unified pipeline - no commercial image generation.
+ *
+ * Flow: Download → Unified Video Analyzer → Claid BG Remove → Center → Upload → Complete
+ */
+export const unifiedVideoAnalyzerMinimalStack: StackTemplate = {
+  id: 'unified_video_analyzer_minimal',
+  name: 'Unified Video Analyzer (Minimal)',
+  description: 'Unified analysis without commercial image generation',
+  steps: [
+    { processor: 'download' },
+    { processor: 'gemini-unified-video-analyzer' },
+    { processor: 'claid-bg-remove' },
+    { processor: 'center-product' },
+    { processor: 'upload-frames' },
+    { processor: 'complete-job' },
+  ],
+};
+
+/**
  * All available stack templates
  */
 export const stackTemplates: Record<string, StackTemplate> = {
@@ -189,6 +272,9 @@ export const stackTemplates: Record<string, StackTemplate> = {
   custom_bg_removal: customBgRemovalStack,
   full_product_analysis: fullProductAnalysisStack,
   audio_metadata_only: audioMetadataOnlyStack,
+  stability_bg_removal: stabilityBgRemovalStack,
+  unified_video_analyzer: unifiedVideoAnalyzerStack,
+  unified_video_analyzer_minimal: unifiedVideoAnalyzerMinimalStack,
 };
 
 /**

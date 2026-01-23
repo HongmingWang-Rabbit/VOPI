@@ -11,7 +11,7 @@ The `/src/services/` directory contains the core business logic modules. Each se
 | **Gemini** | `gemini.service.ts` | AI classification via Google Gemini |
 | **Gemini Audio** | `gemini-audio-analysis.provider.ts` | Audio transcription and metadata extraction |
 | **Photoroom** | `photoroom.service.ts` | Background removal and image generation |
-| **Stability** | `stability.service.ts` | AI inpainting for hole filling |
+| **Stability** | `stability.service.ts` | AI inpainting, upscaling, and commercial image generation |
 | **Storage** | `storage.service.ts` | S3/MinIO file operations |
 | **Pipeline** | `pipeline.service.ts` | Orchestrates the full processing pipeline |
 | **Global Config** | `global-config.service.ts` | Runtime configuration with caching |
@@ -1172,3 +1172,268 @@ import { getConcurrency } from '../../concurrency.js';
 const concurrency = getConcurrency('CLAID_BG_REMOVE', options);
 const results = await parallelMap(frames, processFrame, { concurrency });
 ```
+
+---
+
+## Stability AI Providers
+
+VOPI includes multiple Stability AI providers for image processing tasks.
+
+### Stability Commercial Provider
+
+**File**: `src/providers/implementations/stability-commercial.provider.ts`
+
+Generates commercial images using Stability AI's Replace Background and Relight API.
+
+#### Purpose
+
+1. **AI-Generated Backgrounds**: Create realistic or creative backgrounds from text prompts
+2. **Lighting Control**: Adjust lighting direction and intensity
+3. **Solid Backgrounds**: Local Sharp-based processing for solid color backgrounds
+
+#### Methods
+
+##### `generateWithAIBackground(imagePath, outputPath, options): Promise<CommercialResult>`
+
+Generate commercial image with AI-generated background.
+
+**Options**:
+```typescript
+interface CommercialBackgroundOptions {
+  backgroundPrompt: string;         // Description of desired background
+  foregroundPrompt?: string;        // Description of product style
+  negativePrompt?: string;          // What to avoid
+  lightSourceDirection?: string;    // 'above' | 'below' | 'left' | 'right'
+  lightSourceStrength?: number;     // 0.0-1.0
+  preserveOriginalSubject?: number; // 0.0-1.0 (how much to preserve product)
+  seed?: number;
+  outputFormat?: 'png' | 'jpeg' | 'webp';
+}
+```
+
+##### `generateWithSolidBackground(imagePath, outputPath, options): Promise<CommercialResult>`
+
+Generate commercial image with solid color background (local processing).
+
+**Options**:
+```typescript
+interface SolidBackgroundOptions {
+  backgroundColor: string;  // Hex color (e.g., '#FFFFFF')
+  padding?: number;        // Padding ratio (default: 0.12)
+}
+```
+
+#### API Endpoint
+
+```
+POST /v2beta/stable-image/edit/replace-background-and-relight
+```
+
+The API is asynchronous - returns 202 with result ID, then polls for completion.
+
+### Stability Upscale Provider
+
+**File**: `src/providers/implementations/stability-upscale.provider.ts`
+
+Image upscaling using Stability AI's upscale APIs.
+
+#### Purpose
+
+1. **Conservative Upscale**: Fast 2x upscale preserving original details
+2. **Creative Upscale**: AI-enhanced upscale with optional prompt guidance
+
+#### Methods
+
+##### `upscale(imagePath, outputPath, options): Promise<UpscaleResult>`
+
+Upscale an image using Stability AI.
+
+**Options**:
+```typescript
+interface UpscaleOptions {
+  creativity?: number;      // 0.0-1.0 (>0.5 uses creative endpoint)
+  prompt?: string;          // Prompt for creative upscale
+  negativePrompt?: string;
+  seed?: number;
+  outputFormat?: 'png' | 'jpeg' | 'webp';
+}
+```
+
+**Returns**:
+```typescript
+interface UpscaleResult {
+  success: boolean;
+  outputPath?: string;
+  size?: number;
+  method?: string;  // 'stability-conservative-upscale' | 'stability-creative-upscale'
+  error?: string;
+}
+```
+
+#### API Endpoints
+
+| Endpoint | When Used |
+|----------|-----------|
+| `/v1/generation/esrgan-v1-x2plus/image-to-image` | `creativity <= 0.5` (conservative) |
+| `/v2beta/stable-image/upscale/creative` | `creativity > 0.5` (creative) |
+
+### Stability Background Removal Provider
+
+**File**: `src/providers/implementations/stability-background-removal.provider.ts`
+
+Background removal using Stability AI's remove-background API.
+
+#### Purpose
+
+Alternative to Claid for background removal when Stability AI is preferred.
+
+#### Methods
+
+##### `removeBackground(imagePath, outputPath): Promise<BackgroundRemovalResult>`
+
+Remove background from an image.
+
+#### API Endpoint
+
+```
+POST /v2beta/stable-image/edit/remove-background
+```
+
+### Shared Stability API Utilities
+
+**File**: `src/providers/utils/stability-api.ts`
+
+Shared utilities for all Stability AI API calls.
+
+#### Functions
+
+##### `makeStabilityRequest(options): Promise<Buffer>`
+
+Make synchronous API request with retry logic.
+
+**Options**:
+```typescript
+interface StabilityRequestOptions {
+  apiKey: string;
+  endpoint: string;
+  formData: FormData;
+  maxRetries?: number;      // Default: 3
+  retryDelayMs?: number;    // Default: 2000
+  operationName?: string;
+}
+```
+
+##### `makeStabilityAsyncRequest(options): Promise<Buffer>`
+
+Make async API request with polling for results.
+
+```typescript
+interface StabilityAsyncRequestOptions extends StabilityRequestOptions {
+  apiBase: string;
+  pollingIntervalMs?: number;    // Default: 3000
+  maxPollingAttempts?: number;   // Default: 60
+}
+```
+
+##### `parseHexColor(hex): { r, g, b, alpha }`
+
+Parse hex color string with validation.
+
+- Handles `#FFFFFF` and `FFFFFF` formats
+- Trims whitespace
+- Returns white `{ r: 255, g: 255, b: 255, alpha: 1 }` for invalid input
+
+##### `isWithinSizeLimit(sizeBytes): boolean`
+
+Check if file is within Stability AI's 10MB limit.
+
+##### `getFileSizeError(sizeBytes): string`
+
+Get human-readable error message for oversized files.
+
+#### Constants
+
+```typescript
+export const STABILITY_API_CONSTANTS = {
+  MAX_RETRIES: 3,
+  RETRY_DELAY_MS: 2000,
+  POLLING_INTERVAL_MS: 3000,
+  MAX_POLLING_ATTEMPTS: 60,
+  MAX_INPUT_SIZE_BYTES: 10 * 1024 * 1024,  // 10MB
+};
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STABILITY_API_KEY` | - | Stability AI API key (required) |
+| `STABILITY_API_BASE` | `https://api.stability.ai` | API base URL |
+
+---
+
+## Unified Video Analyzer Provider
+
+**File**: `src/providers/implementations/gemini-unified-video-analyzer.provider.ts`
+
+Combines audio transcription and video frame analysis in a single Gemini API call.
+
+### Purpose
+
+1. **Single API Call**: Audio + video analysis together (most efficient)
+2. **Cross-Modal Context**: Audio informs frame selection
+3. **Metadata Extraction**: Product metadata from audio transcription
+4. **Frame Selection**: Optimal timestamps for product photography
+
+### Methods
+
+#### `analyzeVideo(videoPath, options): Promise<UnifiedVideoAnalysisResult>`
+
+Analyze video with combined audio and visual understanding.
+
+**Returns**:
+```typescript
+interface UnifiedVideoAnalysisResult {
+  products: Array<{
+    productId: string;
+    description: string;
+    category?: string;
+  }>;
+  selectedFrames: Array<{
+    timestamp: number;
+    productId: string;
+    variantId: string;
+    angleEstimate: string;
+    qualityScore: number;
+    rotationAngleDeg: number;
+    obstructions: {...};
+    backgroundRecommendations: {...};
+  }>;
+  transcript: string;
+  productMetadata: ProductMetadata;
+  videoDuration: number;
+}
+```
+
+### Processor
+
+**File**: `src/processors/impl/gemini/gemini-unified-video-analyzer.ts`
+
+This processor replaces the combination of:
+- `extract-audio`
+- `gemini-audio-analysis`
+- `extract-frames`
+- `score-frames`
+- `gemini-classify`
+- `save-frame-records`
+
+With a single unified step that:
+1. Uploads video to Gemini Files API
+2. Sends combined prompt for audio + video analysis
+3. Extracts frames at selected timestamps
+4. Saves frame records to database
+5. Returns frames with classifications and product metadata
+
+### Configuration
+
+Uses the same Gemini configuration as other video analysis providers.
