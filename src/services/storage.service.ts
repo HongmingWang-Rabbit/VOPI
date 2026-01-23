@@ -8,6 +8,9 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import { Agent as HttpAgent } from 'http';
+import { Agent as HttpsAgent } from 'https';
 import { createReadStream, createWriteStream } from 'fs';
 import { mkdir, stat } from 'fs/promises';
 import path from 'path';
@@ -19,6 +22,23 @@ import { getConfig } from '../config/index.js';
 import { extractS3KeyFromUrl } from '../utils/s3-url.js';
 
 const logger = createChildLogger({ service: 'storage' });
+
+/**
+ * HTTP Agent configuration for S3 connections
+ * Tuned for parallel upload performance with connection reuse
+ */
+const HTTP_AGENT_CONFIG = {
+  /** Enable connection keep-alive for reuse */
+  keepAlive: true,
+  /** Maximum concurrent sockets (should match or exceed S3_UPLOAD concurrency) */
+  maxSockets: 25,
+  /** Keep-alive probe interval in milliseconds */
+  keepAliveMsecs: 3000,
+  /** Connection timeout in milliseconds */
+  connectionTimeout: 5000,
+  /** Socket timeout for requests in milliseconds */
+  socketTimeout: 30000,
+} as const;
 
 export interface UploadResult {
   key: string;
@@ -33,7 +53,7 @@ export class StorageService {
   private client: S3Client | null = null;
 
   /**
-   * Initialize S3 client
+   * Initialize S3 client with connection keep-alive for better performance
    */
   init(): S3Client {
     if (this.client) {
@@ -41,6 +61,20 @@ export class StorageService {
     }
 
     const config = getConfig();
+
+    // Create HTTP agents with keep-alive for connection reuse
+    // This significantly reduces latency for multiple uploads
+    const httpAgent = new HttpAgent({
+      keepAlive: HTTP_AGENT_CONFIG.keepAlive,
+      maxSockets: HTTP_AGENT_CONFIG.maxSockets,
+      keepAliveMsecs: HTTP_AGENT_CONFIG.keepAliveMsecs,
+    });
+
+    const httpsAgent = new HttpsAgent({
+      keepAlive: HTTP_AGENT_CONFIG.keepAlive,
+      maxSockets: HTTP_AGENT_CONFIG.maxSockets,
+      keepAliveMsecs: HTTP_AGENT_CONFIG.keepAliveMsecs,
+    });
 
     this.client = new S3Client({
       region: config.storage.region,
@@ -50,11 +84,17 @@ export class StorageService {
         secretAccessKey: config.storage.secretAccessKey,
       },
       forcePathStyle: config.storage.forcePathStyle,
+      requestHandler: new NodeHttpHandler({
+        httpAgent,
+        httpsAgent,
+        connectionTimeout: HTTP_AGENT_CONFIG.connectionTimeout,
+        socketTimeout: HTTP_AGENT_CONFIG.socketTimeout,
+      }),
     });
 
     logger.info(
       { region: config.storage.region, endpoint: config.storage.endpoint },
-      'S3 client initialized'
+      'S3 client initialized with keep-alive'
     );
 
     return this.client;

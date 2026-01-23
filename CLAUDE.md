@@ -94,7 +94,7 @@ The pipeline is built on a modular processor stack architecture using a unified 
 - **Stacks** compose processors into pipelines with validated data flow
 - **Swapping** allows replacing processors with compatible IO contracts (e.g., `photoroom-bg-remove` ↔ `claid-bg-remove`)
 - **Templates** provide pre-defined stacks: `classic`, `gemini_video`, `minimal`, `frames_only`, `custom_bg_removal`
-- **Concurrency** is centralized in `src/processors/concurrency.ts` with documented defaults per processor type
+- **Concurrency** is centralized in `src/processors/concurrency.ts` with documented defaults per processor type, overridable via `VOPI_CONCURRENCY_*` env vars
 
 See `src/processors/` for implementation details.
 

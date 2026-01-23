@@ -402,10 +402,12 @@ Each processor has a configurable concurrency limit for parallel operations. Def
 | Processor Type | Default | Rationale |
 |----------------|---------|-----------|
 | `CLAID_BG_REMOVE` | 5 | External API, 2-5s per request |
-| `STABILITY_INPAINT` | 3 | External API, 3-8s per request |
+| `STABILITY_INPAINT` | 4 | External API, 3-8s per request |
 | `SHARP_TRANSFORM` | 8 | CPU-bound local processing, ~50-200ms |
 | `PHOTOROOM_GENERATE` | 3 | External API, 2-4s per request |
 | `FFMPEG_EXTRACT` | 4 | I/O bound, balanced for disk throughput |
+| `GEMINI_CLASSIFY` | 2 | External API, 30-180s per batch |
+| `S3_UPLOAD` | 6 | Network I/O, connection reuse via keep-alive |
 
 **Override via processor options**:
 ```typescript
@@ -415,6 +417,14 @@ Each processor has a configurable concurrency limit for parallel operations. Def
     'claid-bg-remove': { concurrency: 10 }
   }
 }
+```
+
+**Override via environment variables**:
+```bash
+# All concurrency settings can be overridden via VOPI_CONCURRENCY_* env vars
+VOPI_CONCURRENCY_GEMINI_CLASSIFY=4
+VOPI_CONCURRENCY_S3_UPLOAD=10
+VOPI_CONCURRENCY_CLAID_BG_REMOVE=8
 ```
 
 ### Key Files

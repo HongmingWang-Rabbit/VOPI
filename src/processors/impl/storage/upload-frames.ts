@@ -13,6 +13,8 @@ import { storageService } from '../../../services/storage.service.js';
 import { getDatabase, schema } from '../../../db/index.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
+import { parallelMap, isParallelError } from '../../../utils/parallel.js';
+import { getConcurrency } from '../../concurrency.js';
 
 const logger = createChildLogger({ service: 'processor:upload-frames' });
 
@@ -50,49 +52,84 @@ export const uploadFramesProcessor: Processor = {
       message: 'Preparing final frames',
     });
 
+    // Upload frames in parallel for better throughput
+    const concurrency = getConcurrency('S3_UPLOAD', _options);
+    let uploadedCount = 0;
+
+    interface UploadResult {
+      frame: FrameMetadata;
+      url: string;
+      frameDbId?: string;
+    }
+
+    const uploadResults = await parallelMap(
+      inputFrames,
+      async (frame): Promise<UploadResult> => {
+        // Create final filename
+        const outputFilename = frame.recommendedType
+          ? `${frame.recommendedType}_${frame.frameId}_t${frame.timestamp.toFixed(2)}.png`
+          : `${frame.frameId}_t${frame.timestamp.toFixed(2)}.png`;
+
+        // Copy to final directory
+        const localPath = path.join(workDirs.final, outputFilename);
+        await copyFile(frame.path, localPath);
+
+        // Upload to S3
+        const s3Key = storageService.getJobKey(jobId, 'frames', outputFilename);
+        const { url } = await timer.timeOperation(
+          's3_upload_frame',
+          () => storageService.uploadFile(localPath, s3Key),
+          { frameId: frame.frameId }
+        );
+
+        // Update progress
+        uploadedCount++;
+        await onProgress?.({
+          status: JobStatus.GENERATING,
+          percentage: 70 + Math.round((uploadedCount / inputFrames.length) * 5),
+          message: `Uploading frame ${uploadedCount}/${inputFrames.length}`,
+        });
+
+        const frameDbId = frameRecords.get(frame.frameId) || frame.dbId;
+        return { frame: { ...frame, s3Url: url }, url, frameDbId };
+      },
+      { concurrency }
+    );
+
+    // Collect results maintaining order
     const finalFrameUrls: string[] = [];
     const updatedFrames: FrameMetadata[] = [];
+    const dbUpdates: Array<{ frameDbId: string; url: string }> = [];
 
     for (let i = 0; i < inputFrames.length; i++) {
-      const frame = inputFrames[i];
-      const progress = 70 + Math.round(((i + 1) / inputFrames.length) * 5);
+      const result = uploadResults.results[i];
 
-      await onProgress?.({
-        status: JobStatus.GENERATING,
-        percentage: progress,
-        message: `Uploading frame ${i + 1}/${inputFrames.length}`,
-      });
-
-      // Create final filename
-      const outputFilename = frame.recommendedType
-        ? `${frame.recommendedType}_${frame.frameId}_t${frame.timestamp.toFixed(2)}.png`
-        : `${frame.frameId}_t${frame.timestamp.toFixed(2)}.png`;
-
-      // Copy to final directory
-      const localPath = path.join(workDirs.final, outputFilename);
-      await copyFile(frame.path, localPath);
-
-      // Upload to S3
-      const s3Key = storageService.getJobKey(jobId, 'frames', outputFilename);
-      const { url } = await timer.timeOperation(
-        's3_upload_frame',
-        () => storageService.uploadFile(localPath, s3Key),
-        { frameId: frame.frameId }
-      );
-
-      finalFrameUrls.push(url);
-
-      // Update frame with s3Url
-      updatedFrames.push({ ...frame, s3Url: url });
-
-      // Update frame record with S3 URL
-      const frameDbId = frameRecords.get(frame.frameId) || frame.dbId;
-      if (frameDbId) {
-        await db
-          .update(schema.frames)
-          .set({ s3Url: url })
-          .where(eq(schema.frames.id, frameDbId));
+      if (isParallelError(result)) {
+        logger.error({ frameId: inputFrames[i].frameId, error: result.message }, 'Frame upload failed');
+        // Keep original frame without s3Url
+        updatedFrames.push(inputFrames[i]);
+        continue;
       }
+
+      finalFrameUrls.push(result.url);
+      updatedFrames.push(result.frame);
+
+      // Collect DB updates for batching
+      if (result.frameDbId) {
+        dbUpdates.push({ frameDbId: result.frameDbId, url: result.url });
+      }
+    }
+
+    // Batch DB updates in parallel for better performance
+    if (dbUpdates.length > 0) {
+      await Promise.all(
+        dbUpdates.map(({ frameDbId, url }) =>
+          db
+            .update(schema.frames)
+            .set({ s3Url: url })
+            .where(eq(schema.frames.id, frameDbId))
+        )
+      );
     }
 
     logger.info({ jobId, uploadedCount: finalFrameUrls.length }, 'Frames uploaded');
