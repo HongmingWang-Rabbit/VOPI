@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PipelineStrategy, ConfigCategory, ConfigValueType, GlobalConfigKey } from '../types/config.types.js';
+import { DEFAULT_PRICING_CONFIG } from '../types/credits.types.js';
 
 // Mock database
 const mockSelect = vi.fn();
@@ -194,7 +195,7 @@ describe('GlobalConfigService', () => {
       expect(config.pipelineStrategy).toBe(PipelineStrategy.GEMINI_VIDEO);
       expect(config.fps).toBe(5);
       expect(config.batchSize).toBe(30); // Default
-      expect(config.geminiModel).toBe('gemini-3-pro-preview'); // Default
+      expect(config.geminiModel).toBe('gemini-3-flash-preview'); // Default
     });
 
     it('should validate and fallback non-string pipeline strategy', async () => {
@@ -225,6 +226,79 @@ describe('GlobalConfigService', () => {
       const config = await globalConfigService.getEffectiveConfig();
 
       expect(config.pipelineStrategy).toBe('unified_video_analyzer');
+    });
+  });
+
+  describe('getPricingConfig', () => {
+    it('should return default pricing config when database is empty', async () => {
+      mockWhere.mockResolvedValueOnce([]);
+
+      const pricing = await globalConfigService.getPricingConfig();
+
+      expect(pricing.baseCredits).toBe(DEFAULT_PRICING_CONFIG.baseCredits);
+      expect(pricing.creditsPerSecond).toBe(DEFAULT_PRICING_CONFIG.creditsPerSecond);
+      expect(pricing.includedFrames).toBe(DEFAULT_PRICING_CONFIG.includedFrames);
+      expect(pricing.extraFrameCost).toBe(DEFAULT_PRICING_CONFIG.extraFrameCost);
+      expect(pricing.commercialVideoEnabled).toBe(DEFAULT_PRICING_CONFIG.commercialVideoEnabled);
+      expect(pricing.commercialVideoCost).toBe(DEFAULT_PRICING_CONFIG.commercialVideoCost);
+      expect(pricing.minJobCost).toBe(DEFAULT_PRICING_CONFIG.minJobCost);
+      expect(pricing.maxJobCost).toBe(DEFAULT_PRICING_CONFIG.maxJobCost);
+    });
+
+    it('should override pricing config with database values', async () => {
+      mockWhere.mockResolvedValueOnce([
+        { key: GlobalConfigKey.PRICING_BASE_CREDITS, value: { value: 2, type: ConfigValueType.NUMBER }, isActive: true },
+        { key: GlobalConfigKey.PRICING_CREDITS_PER_SECOND, value: { value: 0.1, type: ConfigValueType.NUMBER }, isActive: true },
+        { key: GlobalConfigKey.PRICING_INCLUDED_FRAMES, value: { value: 8, type: ConfigValueType.NUMBER }, isActive: true },
+      ]);
+
+      const pricing = await globalConfigService.getPricingConfig();
+
+      expect(pricing.baseCredits).toBe(2);
+      expect(pricing.creditsPerSecond).toBe(0.1);
+      expect(pricing.includedFrames).toBe(8);
+      // Non-overridden values should use defaults
+      expect(pricing.extraFrameCost).toBe(DEFAULT_PRICING_CONFIG.extraFrameCost);
+    });
+
+    it('should return all pricing fields', async () => {
+      mockWhere.mockResolvedValueOnce([]);
+
+      const pricing = await globalConfigService.getPricingConfig();
+
+      // Verify all fields are present
+      expect(pricing).toHaveProperty('baseCredits');
+      expect(pricing).toHaveProperty('creditsPerSecond');
+      expect(pricing).toHaveProperty('includedFrames');
+      expect(pricing).toHaveProperty('extraFrameCost');
+      expect(pricing).toHaveProperty('commercialVideoEnabled');
+      expect(pricing).toHaveProperty('commercialVideoCost');
+      expect(pricing).toHaveProperty('minJobCost');
+      expect(pricing).toHaveProperty('maxJobCost');
+    });
+
+    it('should handle commercial video addon pricing', async () => {
+      mockWhere.mockResolvedValueOnce([
+        { key: GlobalConfigKey.PRICING_COMMERCIAL_VIDEO_ENABLED, value: { value: true, type: ConfigValueType.BOOLEAN }, isActive: true },
+        { key: GlobalConfigKey.PRICING_COMMERCIAL_VIDEO_COST, value: { value: 5, type: ConfigValueType.NUMBER }, isActive: true },
+      ]);
+
+      const pricing = await globalConfigService.getPricingConfig();
+
+      expect(pricing.commercialVideoEnabled).toBe(true);
+      expect(pricing.commercialVideoCost).toBe(5);
+    });
+
+    it('should handle min and max job cost limits', async () => {
+      mockWhere.mockResolvedValueOnce([
+        { key: GlobalConfigKey.PRICING_MIN_JOB_COST, value: { value: 2, type: ConfigValueType.NUMBER }, isActive: true },
+        { key: GlobalConfigKey.PRICING_MAX_JOB_COST, value: { value: 100, type: ConfigValueType.NUMBER }, isActive: true },
+      ]);
+
+      const pricing = await globalConfigService.getPricingConfig();
+
+      expect(pricing.minJobCost).toBe(2);
+      expect(pricing.maxJobCost).toBe(100);
     });
   });
 

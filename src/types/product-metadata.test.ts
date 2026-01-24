@@ -473,19 +473,19 @@ describe('product-metadata types', () => {
       });
 
       it('should reject missing transcript', () => {
-        const { transcript, ...invalid } = validResponse;
+        const { transcript: _transcript, ...invalid } = validResponse;
         const result = geminiAudioAnalysisResponseSchema.safeParse(invalid);
         expect(result.success).toBe(false);
       });
 
       it('should reject missing product', () => {
-        const { product, ...invalid } = validResponse;
+        const { product: _product, ...invalid } = validResponse;
         const result = geminiAudioAnalysisResponseSchema.safeParse(invalid);
         expect(result.success).toBe(false);
       });
 
       it('should reject missing confidence', () => {
-        const { confidence, ...invalid } = validResponse;
+        const { confidence: _confidence, ...invalid } = validResponse;
         const result = geminiAudioAnalysisResponseSchema.safeParse(invalid);
         expect(result.success).toBe(false);
       });
@@ -501,13 +501,13 @@ describe('product-metadata types', () => {
       });
 
       it('should default empty relevantExcerpts', () => {
-        const { relevantExcerpts, ...partial } = validResponse;
+        const { relevantExcerpts: _relevantExcerpts, ...partial } = validResponse;
         const result = geminiAudioAnalysisResponseSchema.parse(partial);
         expect(result.relevantExcerpts).toEqual([]);
       });
 
       it('should default language to en', () => {
-        const { language, ...partial } = validResponse;
+        const { language: _language, ...partial } = validResponse;
         const result = geminiAudioAnalysisResponseSchema.parse(partial);
         expect(result.language).toBe('en');
       });

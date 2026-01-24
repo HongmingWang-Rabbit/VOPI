@@ -29,6 +29,7 @@ export const classicStack: StackTemplate = {
   description: 'Extract all frames, score them, classify with Gemini, extract products with Claid, generate commercial images',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'extract-frames' },
     { processor: 'score-frames' },
     { processor: 'gemini-classify' },
@@ -57,6 +58,7 @@ export const geminiVideoStack: StackTemplate = {
   description: 'Upload video to Gemini for AI analysis, extract products with Claid',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'gemini-video-analysis' },
     { processor: 'save-frame-records' },
     { processor: 'claid-bg-remove' },
@@ -78,6 +80,7 @@ export const minimalStack: StackTemplate = {
   description: 'Extract and upload frames without commercial image generation',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'extract-frames' },
     { processor: 'score-frames' },
     { processor: 'save-frame-records' },
@@ -95,6 +98,7 @@ export const framesOnlyStack: StackTemplate = {
   description: 'Extract frames with scoring, skip AI classification',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'extract-frames' },
     { processor: 'score-frames' },
     { processor: 'filter-by-score' },
@@ -114,6 +118,7 @@ export const customBgRemovalStack: StackTemplate = {
   description: 'Pipeline with configurable background removal provider',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'gemini-video-analysis' },
     { processor: 'photoroom-bg-remove' },  // Can be swapped with claid-bg-remove
     { processor: 'center-product' },
@@ -143,6 +148,7 @@ export const fullProductAnalysisStack: StackTemplate = {
   description: 'Extract audio first for context, then analyze video with enhanced AI classification',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'extract-audio' },           // Extract audio track
     { processor: 'gemini-audio-analysis' },   // Transcribe + extract metadata
     { processor: 'extract-frames' },          // Dense frame extraction
@@ -175,6 +181,7 @@ export const audioMetadataOnlyStack: StackTemplate = {
   description: 'Extract audio and generate product metadata without video processing',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'extract-audio' },
     { processor: 'gemini-audio-analysis' },
     { processor: 'complete-job' },
@@ -195,6 +202,7 @@ export const stabilityBgRemovalStack: StackTemplate = {
   description: 'Test pipeline using Stability AI for background removal',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'gemini-video-analysis' },
     { processor: 'save-frame-records' },
     { processor: 'stability-bg-remove' },
@@ -229,6 +237,7 @@ export const unifiedVideoAnalyzerStack: StackTemplate = {
   description: 'Single Gemini call for audio + video analysis, most efficient pipeline',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'gemini-unified-video-analyzer' },  // Combines 6 processors into 1
     { processor: 'claid-bg-remove' },
     { processor: 'fill-product-holes' },
@@ -253,6 +262,7 @@ export const unifiedVideoAnalyzerMinimalStack: StackTemplate = {
   description: 'Unified analysis without commercial image generation',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     { processor: 'gemini-unified-video-analyzer' },
     { processor: 'claid-bg-remove' },
     { processor: 'center-product' },
@@ -289,6 +299,7 @@ export const fullGeminiStack: StackTemplate = {
   description: 'Uses Gemini for video analysis AND image generation. No external APIs.',
   steps: [
     { processor: 'download' },
+    { processor: 'spend-credits' },
     {
       processor: 'gemini-unified-video-analyzer',
       options: { maxFrames: 8 },  // Extract up to 8 frames for more angle context

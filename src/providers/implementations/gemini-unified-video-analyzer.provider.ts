@@ -171,7 +171,7 @@ export class GeminiUnifiedVideoAnalyzerProvider implements UnifiedVideoAnalyzerP
     topP?: number;
   } = {}): GenerativeModel {
     // Default model - should be passed from effectiveConfig by processor
-    const model = options.modelName || 'gemini-3-pro-preview';
+    const model = options.modelName || 'gemini-3-flash-preview';
     const { client } = this.init();
 
     return client.getGenerativeModel({
@@ -276,7 +276,7 @@ export class GeminiUnifiedVideoAnalyzerProvider implements UnifiedVideoAnalyzerP
   ): Promise<UnifiedVideoAnalysisResult> {
     const config = getConfig();
     const {
-      model = 'gemini-3-pro-preview',
+      model = 'gemini-3-flash-preview',
       maxFrames = DEFAULT_MAX_FRAMES,
       maxRetries = 3,
       retryDelay = config.worker.apiRetryDelayMs,

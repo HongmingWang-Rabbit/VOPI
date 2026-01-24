@@ -86,6 +86,57 @@ export interface AppConfig {
   configCache: {
     ttlMs: number;
   };
+  jwt: {
+    secret?: string;
+    accessTokenExpiresIn: string;
+    refreshTokenExpiresIn: string;
+  };
+  googleOAuth: {
+    clientId?: string;
+    clientSecret?: string;
+  };
+  appleOAuth: {
+    clientId?: string;
+    teamId?: string;
+    keyId?: string;
+    privateKey?: string;
+  };
+  encryption: {
+    tokenKey?: string;
+  };
+  shopify: {
+    apiKey?: string;
+    apiSecret?: string;
+    scopes: string;
+  };
+  amazon: {
+    clientId?: string;
+    clientSecret?: string;
+  };
+  ebay: {
+    clientId?: string;
+    clientSecret?: string;
+    redirectUri?: string;
+    environment: 'sandbox' | 'production';
+  };
+  tokenRefresh: {
+    intervalMs: number;
+    thresholdMs: number;
+  };
+  stripe: {
+    secretKey?: string;
+    webhookSecret?: string;
+    priceIds: {
+      credit1?: string;
+      pack20?: string;
+      pack100?: string;
+      pack500?: string;
+    };
+  };
+  abusePrevention: {
+    signupGrantIpLimit: number;
+    signupGrantDeviceLimit: number;
+  };
 }
 
 /**
@@ -172,6 +223,57 @@ export function buildConfig(env: Env): AppConfig {
     },
     configCache: {
       ttlMs: env.CONFIG_CACHE_TTL_MS,
+    },
+    jwt: {
+      secret: env.JWT_SECRET,
+      accessTokenExpiresIn: env.JWT_ACCESS_TOKEN_EXPIRES_IN,
+      refreshTokenExpiresIn: env.JWT_REFRESH_TOKEN_EXPIRES_IN,
+    },
+    googleOAuth: {
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
+    },
+    appleOAuth: {
+      clientId: env.APPLE_CLIENT_ID,
+      teamId: env.APPLE_TEAM_ID,
+      keyId: env.APPLE_KEY_ID,
+      privateKey: env.APPLE_PRIVATE_KEY,
+    },
+    encryption: {
+      tokenKey: env.TOKEN_ENCRYPTION_KEY,
+    },
+    shopify: {
+      apiKey: env.SHOPIFY_API_KEY,
+      apiSecret: env.SHOPIFY_API_SECRET,
+      scopes: env.SHOPIFY_SCOPES,
+    },
+    amazon: {
+      clientId: env.AMAZON_CLIENT_ID,
+      clientSecret: env.AMAZON_CLIENT_SECRET,
+    },
+    ebay: {
+      clientId: env.EBAY_CLIENT_ID,
+      clientSecret: env.EBAY_CLIENT_SECRET,
+      redirectUri: env.EBAY_REDIRECT_URI,
+      environment: env.EBAY_ENVIRONMENT,
+    },
+    tokenRefresh: {
+      intervalMs: env.TOKEN_REFRESH_INTERVAL_MS,
+      thresholdMs: env.TOKEN_REFRESH_THRESHOLD_MS,
+    },
+    stripe: {
+      secretKey: env.STRIPE_SECRET_KEY,
+      webhookSecret: env.STRIPE_WEBHOOK_SECRET,
+      priceIds: {
+        credit1: env.STRIPE_PRICE_ID_CREDIT_1,
+        pack20: env.STRIPE_PRICE_ID_PACK_20,
+        pack100: env.STRIPE_PRICE_ID_PACK_100,
+        pack500: env.STRIPE_PRICE_ID_PACK_500,
+      },
+    },
+    abusePrevention: {
+      signupGrantIpLimit: env.SIGNUP_GRANT_IP_LIMIT,
+      signupGrantDeviceLimit: env.SIGNUP_GRANT_DEVICE_LIMIT,
     },
   };
 }

@@ -7,14 +7,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock logger before importing modules that use it
-vi.mock('../utils/logger.js', () => ({
-  createChildLogger: vi.fn(() => ({
+vi.mock('../utils/logger.js', () => {
+  const mockLogger: Record<string, unknown> = {
     info: vi.fn(),
     debug: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
-  })),
-}));
+  };
+  mockLogger.child = vi.fn(() => mockLogger);
+  return {
+    createChildLogger: vi.fn(() => mockLogger),
+    getLogger: vi.fn(() => mockLogger),
+  };
+});
 
 // Mock config
 vi.mock('../config/index.js', () => ({
@@ -67,6 +72,14 @@ vi.mock('../services/photoroom.service.js', () => ({
 vi.mock('../services/gemini.service.js', () => ({
   geminiService: {
     classifyFrames: vi.fn().mockResolvedValue([]),
+  },
+}));
+
+vi.mock('../services/credits.service.js', () => ({
+  creditsService: {
+    calculateJobCost: vi.fn().mockResolvedValue({ totalCredits: 1, breakdown: [] }),
+    calculateJobCostWithAffordability: vi.fn().mockResolvedValue({ totalCredits: 1, breakdown: [], canAfford: true }),
+    spendCredits: vi.fn().mockResolvedValue({ success: true, newBalance: 10, transactionId: 'test-tx' }),
   },
 }));
 
@@ -242,25 +255,31 @@ describe('Processor Integration', () => {
     // Frame metadata (frames, scores, classifications) are tracked via metadataProduces
 
     it('should track IO availability through classic stack', () => {
-      // After download
+      // After download (index 0)
       expect(stackRunner.getAvailableIO(classicStack, 0)).toContain('video');
 
-      // After extract-frames (produces images)
+      // After spend-credits (index 1) - still has video
       expect(stackRunner.getAvailableIO(classicStack, 1)).toContain('video');
-      expect(stackRunner.getAvailableIO(classicStack, 1)).toContain('images');
+
+      // After extract-frames (index 2) - produces images
+      expect(stackRunner.getAvailableIO(classicStack, 2)).toContain('video');
+      expect(stackRunner.getAvailableIO(classicStack, 2)).toContain('images');
       // 'frames' is now a metadata path, not an IO type
 
-      // After score-frames (still produces images)
-      expect(stackRunner.getAvailableIO(classicStack, 2)).toContain('images');
+      // After score-frames (index 3) - still produces images
+      expect(stackRunner.getAvailableIO(classicStack, 3)).toContain('images');
       // 'scores' is now a metadata path, not an IO type
     });
 
     it('should track IO availability through gemini video stack', () => {
-      // After download
+      // After download (index 0)
       expect(stackRunner.getAvailableIO(geminiVideoStack, 0)).toContain('video');
 
-      // After gemini-video-analysis (produces images)
-      expect(stackRunner.getAvailableIO(geminiVideoStack, 1)).toContain('images');
+      // After spend-credits (index 1) - still has video
+      expect(stackRunner.getAvailableIO(geminiVideoStack, 1)).toContain('video');
+
+      // After gemini-video-analysis (index 2) - produces images
+      expect(stackRunner.getAvailableIO(geminiVideoStack, 2)).toContain('images');
       // 'frames' and 'classifications' are now metadata paths, not IO types
     });
   });

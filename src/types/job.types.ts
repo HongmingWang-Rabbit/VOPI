@@ -75,6 +75,8 @@ export const createJobSchema = z.object({
   videoUrl: z.string().url(),
   config: jobConfigSchema.optional().default({}),
   callbackUrl: z.string().url().optional(),
+  /** Estimated video duration in seconds - used for cost estimation */
+  estimatedDurationSeconds: z.number().positive().optional(),
 });
 
 export type CreateJobRequest = z.infer<typeof createJobSchema>;

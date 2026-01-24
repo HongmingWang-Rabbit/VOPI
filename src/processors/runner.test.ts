@@ -80,7 +80,7 @@ function createMockContext(overrides?: Partial<ProcessorContext>): ProcessorCont
       batchSize: 30,
       geminiModel: 'gemini-2.0-flash',
       geminiVideoModel: 'gemini-2.0-flash',
-      geminiImageModel: 'gemini-3-pro-image-preview',
+      geminiImageModel: 'gemini-2.5-flash-image',
       temperature: 0.2,
       topP: 0.8,
       motionAlpha: 0.3,

@@ -74,7 +74,7 @@ export const envSchema = z.object({
   // Auth
   AUTH_SKIP_PATHS: z
     .string()
-    .default('/health,/ready,/docs')
+    .default('/health,/ready,/docs,/api/v1/auth,/api/v1/credits/webhook,/api/v1/credits/packs')
     .transform((val) => val.split(',').map((p) => p.trim()).filter(Boolean)),
 
   // Callback SSRF protection
@@ -99,6 +99,55 @@ export const envSchema = z.object({
 
   // Config cache
   CONFIG_CACHE_TTL_MS: z.coerce.number().default(60000), // 1 minute
+
+  // JWT Configuration
+  JWT_SECRET: z.string().min(32).optional(),
+  JWT_ACCESS_TOKEN_EXPIRES_IN: z.string().default('15m'),
+  JWT_REFRESH_TOKEN_EXPIRES_IN: z.string().default('7d'),
+
+  // Google OAuth
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+
+  // Apple OAuth
+  APPLE_CLIENT_ID: z.string().optional(),
+  APPLE_TEAM_ID: z.string().optional(),
+  APPLE_KEY_ID: z.string().optional(),
+  APPLE_PRIVATE_KEY: z.string().optional(),
+
+  // Token Encryption
+  TOKEN_ENCRYPTION_KEY: z.string().min(32).optional(),
+
+  // Shopify
+  SHOPIFY_API_KEY: z.string().optional(),
+  SHOPIFY_API_SECRET: z.string().optional(),
+  SHOPIFY_SCOPES: z.string().default('write_products,read_products'),
+
+  // Amazon SP-API
+  AMAZON_CLIENT_ID: z.string().optional(),
+  AMAZON_CLIENT_SECRET: z.string().optional(),
+
+  // eBay
+  EBAY_CLIENT_ID: z.string().optional(),
+  EBAY_CLIENT_SECRET: z.string().optional(),
+  EBAY_REDIRECT_URI: z.string().url().optional(),
+  EBAY_ENVIRONMENT: z.enum(['sandbox', 'production']).default('production'),
+
+  // Token refresh worker
+  TOKEN_REFRESH_INTERVAL_MS: z.coerce.number().default(300000), // 5 minutes
+  TOKEN_REFRESH_THRESHOLD_MS: z.coerce.number().default(900000), // 15 minutes before expiry
+
+  // Stripe (for credit purchases)
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_PRICE_ID_CREDIT_1: z.string().optional(),
+  STRIPE_PRICE_ID_PACK_20: z.string().optional(),
+  STRIPE_PRICE_ID_PACK_100: z.string().optional(),
+  STRIPE_PRICE_ID_PACK_500: z.string().optional(),
+
+  // Abuse prevention for signup grants
+  SIGNUP_GRANT_IP_LIMIT: z.coerce.number().default(3),
+  SIGNUP_GRANT_DEVICE_LIMIT: z.coerce.number().default(2),
 });
 
 export type Env = z.infer<typeof envSchema>;

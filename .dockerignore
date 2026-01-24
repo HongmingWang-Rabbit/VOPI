@@ -1,49 +1,47 @@
 # Dependencies
 node_modules
-npm-debug.log
 
-# Build output
+# Build output (we build in Docker)
 dist
 
-# Dev/Test
-*.test.ts
-*.spec.ts
-__tests__
-coverage
-.nyc_output
-
-# Environment
+# Development files
 .env
-.env.local
-.env.*.local
-
-# IDE
-.idea
-.vscode
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
+.env.*
+!.env.example
 
 # Git
 .git
 .gitignore
 
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+*.log
+logs
+
+# Test files
+coverage
+*.test.ts
+**/*.test.ts
+__tests__
+
 # Documentation
-README.md
 docs
-
-# Development files
 *.md
-.eslintrc*
-.prettierrc*
-drizzle.config.ts
+!README.md
 
-# Input/Output directories (for CLI tools)
-input
-output
+# Temporary files
+tmp
+.tmp
+/tmp
 
-# Claude
-.claude
+# OS files
+.DS_Store
+Thumbs.db
+
+# Scripts not needed in production
+scripts/test-*.ts

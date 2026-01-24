@@ -97,7 +97,7 @@ export class GeminiVideoAnalysisProvider implements VideoAnalysisProvider {
     topP?: number;
   } = {}): GenerativeModel {
     // Default model - should be passed from effectiveConfig by processor
-    const model = options.modelName || 'gemini-3-pro-preview';
+    const model = options.modelName || 'gemini-3-flash-preview';
     const { client } = this.init();
 
     return client.getGenerativeModel({
@@ -320,7 +320,7 @@ export class GeminiVideoAnalysisProvider implements VideoAnalysisProvider {
   ): Promise<VideoAnalysisResult> {
     const config = getConfig();
     const {
-      model = 'gemini-3-pro-preview',
+      model = 'gemini-3-flash-preview',
       maxFrames = 10,
       maxRetries = 3,
       retryDelay = config.worker.apiRetryDelayMs,

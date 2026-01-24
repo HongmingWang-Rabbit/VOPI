@@ -12,7 +12,12 @@ import { healthRoutes } from './routes/health.routes.js';
 import { jobsRoutes } from './routes/jobs.routes.js';
 import { framesRoutes } from './routes/frames.routes.js';
 import { configRoutes } from './routes/config.routes.js';
+import { authRoutes } from './routes/auth.routes.js';
+import { oauthRoutes } from './routes/oauth.routes.js';
+import { listingsRoutes } from './routes/listings.routes.js';
+import { creditsRoutes } from './routes/credits.routes.js';
 import { setupDefaultProviders } from './providers/setup.js';
+import { stateStoreService } from './services/state-store.service.js';
 
 /**
  * Build and configure Fastify application
@@ -24,11 +29,32 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Initialize providers
   setupDefaultProviders();
 
+  // Initialize state store for OAuth CSRF protection
+  await stateStoreService.initialize();
+
   const app = Fastify({
     logger: false, // We use our own Pino logger
     requestIdHeader: 'x-request-id',
     requestIdLogLabel: 'requestId',
   });
+
+  // Add custom content type parser to preserve raw body for webhook signature verification
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    (req, body, done) => {
+      // Store raw body for routes that need it (e.g., Stripe webhooks)
+      // With parseAs: 'buffer', body is always Buffer, but TypeScript types it as string | Buffer
+      const rawBody = Buffer.isBuffer(body) ? body : Buffer.from(body);
+      (req as typeof req & { rawBody: Buffer }).rawBody = rawBody;
+      try {
+        const json = JSON.parse(rawBody.toString());
+        done(null, json);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    }
+  );
 
   // Security plugins
   await app.register(helmet, {
@@ -89,9 +115,14 @@ export async function buildApp(): Promise<FastifyInstance> {
             name: 'x-api-key',
             in: 'header',
           },
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+          },
         },
       },
-      security: [{ apiKey: [] }],
+      security: [{ apiKey: [] }, { bearerAuth: [] }],
     },
   });
 
@@ -141,6 +172,10 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Register routes
   await app.register(healthRoutes);
+  await app.register(authRoutes, { prefix: '/api/v1' });
+  await app.register(oauthRoutes, { prefix: '/api/v1' });
+  await app.register(listingsRoutes, { prefix: '/api/v1' });
+  await app.register(creditsRoutes, { prefix: '/api/v1' });
   await app.register(jobsRoutes, { prefix: '/api/v1' });
   await app.register(framesRoutes, { prefix: '/api/v1' });
   await app.register(configRoutes, { prefix: '/api/v1' });

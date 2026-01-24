@@ -5,14 +5,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock logger before importing modules that use it
-vi.mock('../utils/logger.js', () => ({
-  createChildLogger: vi.fn(() => ({
+vi.mock('../utils/logger.js', () => {
+  const mockLogger: Record<string, unknown> = {
     info: vi.fn(),
     debug: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
-  })),
-}));
+  };
+  mockLogger.child = vi.fn(() => mockLogger);
+  return {
+    createChildLogger: vi.fn(() => mockLogger),
+    getLogger: vi.fn(() => mockLogger),
+  };
+});
 
 // Mock config
 vi.mock('../config/index.js', () => ({
@@ -65,6 +70,14 @@ vi.mock('../services/photoroom.service.js', () => ({
 vi.mock('../services/gemini.service.js', () => ({
   geminiService: {
     classifyFrames: vi.fn().mockResolvedValue([]),
+  },
+}));
+
+vi.mock('../services/credits.service.js', () => ({
+  creditsService: {
+    calculateJobCost: vi.fn().mockResolvedValue({ totalCredits: 1, breakdown: [] }),
+    calculateJobCostWithAffordability: vi.fn().mockResolvedValue({ totalCredits: 1, breakdown: [], canAfford: true }),
+    spendCredits: vi.fn().mockResolvedValue({ success: true, newBalance: 10, transactionId: 'test-tx' }),
   },
 }));
 

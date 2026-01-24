@@ -1,17 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authMiddleware, shouldSkipAuth } from './auth.middleware.js';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { ApiKey } from '../db/schema.js';
 
-// Mock the config module
+// Mock the config module - must be before auth.middleware.js import
 vi.mock('../config/index.js', () => ({
   getConfig: vi.fn(() => ({
     auth: {
       apiKeys: ['valid-config-key'],
       skipPaths: ['/health', '/ready', '/docs'],
     },
+    server: {
+      env: 'test',
+    },
+    abusePrevention: {
+      signupGrantIpLimit: 3,
+      signupGrantDeviceLimit: 2,
+    },
   })),
 }));
+
+// Mock the logger module
+vi.mock('../utils/logger.js', () => {
+  const mockLogger: Record<string, unknown> = {
+    info: vi.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  };
+  mockLogger.child = vi.fn(() => mockLogger);
+  return {
+    createChildLogger: vi.fn(() => mockLogger),
+    getLogger: vi.fn(() => mockLogger),
+  };
+});
 
 // Mock the database module
 const mockLimit = vi.fn().mockResolvedValue([] as ApiKey[]);
@@ -29,6 +50,9 @@ vi.mock('../db/index.js', () => ({
     },
   },
 }));
+
+// Import after mocks
+import { authMiddleware, shouldSkipAuth } from './auth.middleware.js';
 
 describe('auth.middleware', () => {
   describe('shouldSkipAuth', () => {
@@ -98,7 +122,7 @@ describe('auth.middleware', () => {
       expect(mockReply.status).toHaveBeenCalledWith(401);
       expect(mockReply.send).toHaveBeenCalledWith({
         error: 'UNAUTHORIZED',
-        message: 'Missing API key',
+        message: 'Authentication required',
       });
     });
 
@@ -110,7 +134,7 @@ describe('auth.middleware', () => {
       expect(mockReply.status).toHaveBeenCalledWith(401);
       expect(mockReply.send).toHaveBeenCalledWith({
         error: 'UNAUTHORIZED',
-        message: 'Invalid API key',
+        message: 'Authentication required',
       });
     });
 

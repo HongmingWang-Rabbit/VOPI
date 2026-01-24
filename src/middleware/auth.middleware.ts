@@ -4,13 +4,60 @@ import { and, isNull, or, gt, eq } from 'drizzle-orm';
 import { getConfig } from '../config/index.js';
 import { getDatabase, schema } from '../db/index.js';
 import { UnauthorizedError } from '../utils/errors.js';
-import type { ApiKey } from '../db/schema.js';
+import { authService } from '../services/auth.service.js';
+import type { ApiKey, User } from '../db/schema.js';
+import type { AuthContext } from '../types/auth.types.js';
 
-// Extend FastifyRequest to include apiKey
+/**
+ * API Key cache for reducing database lookups
+ * Uses a short TTL to balance performance and security
+ */
+interface CachedApiKey {
+  key: ApiKey;
+  cachedAt: number;
+}
+
+const API_KEY_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const API_KEY_CACHE_MAX_SIZE = 100;
+const apiKeyCache = new Map<string, CachedApiKey>();
+
+// Cleanup stale cache entries periodically
+let cacheCleanupInterval: NodeJS.Timeout | null = null;
+
+function startCacheCleanup(): void {
+  if (cacheCleanupInterval) return;
+
+  cacheCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [key, cached] of apiKeyCache.entries()) {
+      if (now - cached.cachedAt > API_KEY_CACHE_TTL_MS) {
+        apiKeyCache.delete(key);
+      }
+    }
+  }, 60 * 1000); // Cleanup every minute
+
+  // Allow process to exit cleanly
+  cacheCleanupInterval.unref?.();
+}
+
+startCacheCleanup();
+
+// Extend FastifyRequest to include apiKey and user
 declare module 'fastify' {
   interface FastifyRequest {
     apiKey?: ApiKey;
+    user?: User;
+    authContext?: AuthContext;
   }
+}
+
+/**
+ * Auth context for API key authentication
+ * Note: userId is undefined for API key auth since there's no associated user
+ */
+interface ApiKeyAuthContext extends AuthContext {
+  apiKeyId: string;
+  apiKeyName?: string;
 }
 
 /**
@@ -29,26 +76,75 @@ function safeCompare(a: string, b: string): boolean {
 }
 
 /**
- * API key authentication middleware
- * Validates x-api-key header against database API keys
+ * Try to authenticate using JWT Bearer token
+ * Returns true if successful, false if no Bearer token present
  */
-export async function authMiddleware(
-  request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> {
-  const apiKeyHeader = request.headers['x-api-key'];
+async function tryJwtAuth(request: FastifyRequest): Promise<boolean> {
+  const authHeader = request.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return false;
+  }
 
+  const token = authHeader.slice(7); // Remove 'Bearer ' prefix
+
+  try {
+    const payload = authService.verifyAccessToken(token);
+    const user = await authService.getUserById(payload.sub);
+
+    if (!user) {
+      return false;
+    }
+
+    request.user = user;
+    request.authContext = {
+      userId: user.id,
+      email: user.email,
+      tokenType: 'access',
+    };
+
+    return true;
+  } catch {
+    // JWT verification failed
+    return false;
+  }
+}
+
+/**
+ * Try to authenticate using API key
+ * Returns true if successful, false if no API key or invalid
+ * Uses a short-lived cache to reduce database load
+ */
+async function tryApiKeyAuth(request: FastifyRequest): Promise<boolean> {
+  const apiKeyHeader = request.headers['x-api-key'];
   if (!apiKeyHeader || typeof apiKeyHeader !== 'string') {
-    const error = new UnauthorizedError('Missing API key');
-    reply.status(401).send({
-      error: error.code,
-      message: error.message,
-    });
-    return;
+    return false;
+  }
+
+  const now = Date.now();
+
+  // Check cache first
+  const cached = apiKeyCache.get(apiKeyHeader);
+  if (cached && now - cached.cachedAt < API_KEY_CACHE_TTL_MS) {
+    // Verify the cached key is still valid (not expired)
+    const expiresAt = cached.key.expiresAt?.getTime();
+    if (!expiresAt || expiresAt > now) {
+      request.apiKey = cached.key;
+      const apiKeyContext: ApiKeyAuthContext = {
+        userId: '',
+        email: `apikey:${cached.key.name || cached.key.id}`,
+        tokenType: 'api_key',
+        apiKeyId: cached.key.id,
+        apiKeyName: cached.key.name ?? undefined,
+      };
+      request.authContext = apiKeyContext;
+      return true;
+    }
+    // Key expired, remove from cache
+    apiKeyCache.delete(apiKeyHeader);
   }
 
   const db = getDatabase();
-  const now = new Date();
+  const nowDate = new Date();
 
   // Query for the specific API key directly (not revoked and not expired)
   const [matchedKey] = await db
@@ -58,31 +154,78 @@ export async function authMiddleware(
       and(
         eq(schema.apiKeys.key, apiKeyHeader),
         isNull(schema.apiKeys.revokedAt),
-        or(isNull(schema.apiKeys.expiresAt), gt(schema.apiKeys.expiresAt, now))
+        or(isNull(schema.apiKeys.expiresAt), gt(schema.apiKeys.expiresAt, nowDate))
       )
     )
     .limit(1);
 
-  if (!matchedKey) {
-    // Fall back to config-based keys for backwards compatibility
-    const config = getConfig();
-    const validKeys = config.auth.apiKeys;
-    const isValidConfigKey = validKeys.some((validKey) => safeCompare(apiKeyHeader, validKey));
-
-    if (!isValidConfigKey) {
-      const error = new UnauthorizedError('Invalid API key');
-      reply.status(401).send({
-        error: error.code,
-        message: error.message,
-      });
-      return;
+  if (matchedKey) {
+    // Add to cache (with size limit)
+    if (apiKeyCache.size >= API_KEY_CACHE_MAX_SIZE) {
+      // Remove oldest entry
+      const oldestKey = apiKeyCache.keys().next().value;
+      if (oldestKey) apiKeyCache.delete(oldestKey);
     }
-    // Config-based key - no tracking available
+    apiKeyCache.set(apiKeyHeader, { key: matchedKey, cachedAt: now });
+
+    request.apiKey = matchedKey;
+    // Note: API key auth has no associated user - use apiKeyId for tracking
+    const apiKeyContext: ApiKeyAuthContext = {
+      userId: '', // Empty string indicates API key auth (no user)
+      email: `apikey:${matchedKey.name || matchedKey.id}`,
+      tokenType: 'api_key',
+      apiKeyId: matchedKey.id,
+      apiKeyName: matchedKey.name ?? undefined,
+    };
+    request.authContext = apiKeyContext;
+    return true;
+  }
+
+  // Fall back to config-based keys for backwards compatibility
+  const config = getConfig();
+  const validKeys = config.auth.apiKeys;
+  const isValidConfigKey = validKeys.some((validKey) => safeCompare(apiKeyHeader, validKey));
+
+  if (isValidConfigKey) {
+    const configKeyContext: ApiKeyAuthContext = {
+      userId: '', // Empty string indicates API key auth (no user)
+      email: 'apikey:config',
+      tokenType: 'api_key',
+      apiKeyId: 'config',
+      apiKeyName: 'config',
+    };
+    request.authContext = configKeyContext;
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Combined authentication middleware
+ * Supports both JWT Bearer tokens and API keys
+ * Priority: JWT > API Key
+ */
+export async function authMiddleware(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  // Try JWT auth first
+  if (await tryJwtAuth(request)) {
     return;
   }
 
-  // Store the API key record on the request for later use
-  request.apiKey = matchedKey;
+  // Fall back to API key auth
+  if (await tryApiKeyAuth(request)) {
+    return;
+  }
+
+  // No valid authentication found
+  const error = new UnauthorizedError('Authentication required');
+  reply.status(401).send({
+    error: error.code,
+    message: error.message,
+  });
 }
 
 /**
@@ -118,9 +261,53 @@ export async function requireAdmin(
   reply: FastifyReply
 ): Promise<void> {
   if (!isAdminRequest(request)) {
-    reply.status(403).send({
+    return reply.status(403).send({
       error: 'FORBIDDEN',
       message: 'Admin access required for this operation',
     });
+  }
+}
+
+/**
+ * Middleware to require user (JWT) authentication
+ * Rejects API key auth - only allows logged-in users
+ */
+export async function requireUserAuth(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  if (!request.user || request.authContext?.tokenType !== 'access') {
+    return reply.status(401).send({
+      error: 'UNAUTHORIZED',
+      message: 'User authentication required. Please log in.',
+    });
+  }
+}
+
+/**
+ * Optional auth middleware - authenticates if credentials provided but doesn't require it
+ * Useful for endpoints that work with or without auth
+ */
+export async function optionalAuth(request: FastifyRequest): Promise<void> {
+  // Try JWT auth first
+  if (await tryJwtAuth(request)) {
+    return;
+  }
+
+  // Try API key auth
+  await tryApiKeyAuth(request);
+  // Don't throw error - auth is optional
+}
+
+/**
+ * Clear the API key cache
+ * Call this when an API key is revoked or modified to ensure
+ * the changes take effect immediately
+ */
+export function clearApiKeyCache(apiKey?: string): void {
+  if (apiKey) {
+    apiKeyCache.delete(apiKey);
+  } else {
+    apiKeyCache.clear();
   }
 }

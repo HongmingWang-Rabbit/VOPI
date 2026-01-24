@@ -656,6 +656,290 @@ curl -X POST http://localhost:3000/api/v1/jobs \
 
 ---
 
+## Credits Endpoints
+
+Endpoints for managing user credits and Stripe checkout.
+
+### GET /api/v1/credits/balance
+
+Get current credit balance and recent transactions. Requires JWT authentication.
+
+**Query Parameters**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `includeHistory` | boolean | `true` | Include transaction history |
+| `limit` | number | `20` | Number of transactions (1-100) |
+
+**Response** `200 OK`
+```json
+{
+  "balance": 25,
+  "transactions": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "creditsDelta": 5,
+      "type": "signup_grant",
+      "description": "Welcome bonus: 5 free credits",
+      "createdAt": "2025-01-23T10:00:00.000Z",
+      "jobId": null
+    },
+    {
+      "id": "660e8400-e29b-41d4-a716-446655440001",
+      "creditsDelta": 20,
+      "type": "purchase",
+      "description": "Purchased 20 Credit Pack",
+      "createdAt": "2025-01-23T11:00:00.000Z",
+      "jobId": null
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/v1/credits/packs
+
+Get available credit packs with pricing. No authentication required.
+
+**Response** `200 OK`
+```json
+{
+  "packs": [
+    {
+      "packType": "CREDIT_1",
+      "credits": 1,
+      "priceUsd": 0.99,
+      "name": "Single Credit",
+      "available": true
+    },
+    {
+      "packType": "PACK_20",
+      "credits": 20,
+      "priceUsd": 14.99,
+      "name": "20 Credit Pack",
+      "available": true
+    },
+    {
+      "packType": "PACK_100",
+      "credits": 100,
+      "priceUsd": 59,
+      "name": "100 Credit Pack",
+      "available": true
+    },
+    {
+      "packType": "PACK_500",
+      "credits": 500,
+      "priceUsd": 199,
+      "name": "500 Credit Pack",
+      "available": true
+    }
+  ],
+  "stripeConfigured": true
+}
+```
+
+---
+
+### GET /api/v1/credits/pricing
+
+Get current pricing configuration for job cost calculations.
+
+**Response** `200 OK`
+```json
+{
+  "baseCredits": 1,
+  "creditsPerSecond": 0.05,
+  "includedFrames": 4,
+  "extraFrameCost": 0.25,
+  "addOns": [
+    {
+      "id": "extra_frames",
+      "name": "Extra Frames",
+      "description": "Extract additional frames beyond the default",
+      "cost": 0.25,
+      "enabled": true
+    },
+    {
+      "id": "commercial_video",
+      "name": "Commercial Video Generation",
+      "description": "Generate commercial-quality video from extracted frames",
+      "cost": 2,
+      "enabled": false
+    }
+  ],
+  "minJobCost": 1,
+  "maxJobCost": 0
+}
+```
+
+---
+
+### POST /api/v1/credits/estimate
+
+Estimate credit cost for a job based on video duration and options.
+
+**Request Body**
+```json
+{
+  "videoDurationSeconds": 30,
+  "frameCount": 8,
+  "addOns": ["extra_frames"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `videoDurationSeconds` | number | Yes | Video duration in seconds (max 1800) |
+| `frameCount` | number | No | Number of frames to extract |
+| `addOns` | array | No | Add-on services: `extra_frames`, `commercial_video` |
+
+**Response** `200 OK`
+```json
+{
+  "totalCredits": 3,
+  "breakdown": [
+    {
+      "type": "base",
+      "description": "Base job cost",
+      "credits": 1
+    },
+    {
+      "type": "duration",
+      "description": "30 seconds of video",
+      "credits": 1.5,
+      "details": { "seconds": 30, "rate": 0.05 }
+    },
+    {
+      "type": "extra_frames",
+      "description": "4 extra frames beyond included 4",
+      "credits": 1,
+      "details": { "extraFrames": 4, "rate": 0.25 }
+    }
+  ],
+  "canAfford": true,
+  "currentBalance": 25
+}
+```
+
+**Note**: `canAfford` and `currentBalance` are only included when the user is authenticated.
+
+---
+
+### POST /api/v1/credits/checkout
+
+Create a Stripe checkout session to purchase credits. Requires JWT authentication.
+
+**Request Body**
+```json
+{
+  "packType": "PACK_20",
+  "successUrl": "https://your-app.com/purchase/success",
+  "cancelUrl": "https://your-app.com/purchase/cancel"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `packType` | string | Yes | Pack type: `CREDIT_1`, `PACK_20`, `PACK_100`, `PACK_500` |
+| `successUrl` | string | Yes | URL to redirect after successful payment |
+| `cancelUrl` | string | Yes | URL to redirect if payment is cancelled |
+
+**Response** `200 OK`
+```json
+{
+  "checkoutUrl": "https://checkout.stripe.com/c/pay/cs_xxx...",
+  "sessionId": "cs_xxx..."
+}
+```
+
+**Response** `503 Service Unavailable` (Stripe not configured)
+```json
+{
+  "error": "STRIPE_NOT_CONFIGURED",
+  "message": "Payment processing is not available"
+}
+```
+
+---
+
+### POST /api/v1/credits/webhook
+
+Stripe webhook endpoint for processing payment events. This endpoint is automatically called by Stripe.
+
+**Note**: This endpoint requires a valid Stripe signature header and is excluded from normal authentication.
+
+**Response** `200 OK`
+```json
+{
+  "received": true
+}
+```
+
+---
+
+### POST /api/v1/credits/spend
+
+Spend credits (idempotent via idempotencyKey). Requires JWT authentication.
+
+**Request Body**
+```json
+{
+  "amount": 3,
+  "idempotencyKey": "job-123-spend",
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "description": "Video processing (30s)"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `amount` | number | Yes | Credits to spend (minimum 1) |
+| `idempotencyKey` | string | Yes | Unique key to prevent duplicate spends |
+| `jobId` | string | No | Associated job ID |
+| `description` | string | No | Human-readable description |
+
+**Response** `200 OK`
+```json
+{
+  "success": true,
+  "newBalance": 22,
+  "transactionId": "770e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Response** `402 Payment Required` (insufficient credits)
+```json
+{
+  "success": false,
+  "newBalance": 2,
+  "error": "Insufficient credits"
+}
+```
+
+---
+
+### POST /api/v1/credits/recalculate (Admin Only)
+
+Recalculate a user's cached balance from the ledger. Requires admin API key.
+
+**Request Body**
+```json
+{
+  "userId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Response** `200 OK`
+```json
+{
+  "userId": "550e8400-e29b-41d4-a716-446655440000",
+  "previousBalance": 25,
+  "calculatedBalance": 25
+}
+```
+
+---
+
 ## Config Endpoints
 
 Endpoints for managing runtime configuration. Write operations require admin API keys.

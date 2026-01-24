@@ -210,7 +210,7 @@ Key config values:
 - `pipeline.strategy`: `classic`, `gemini_video`, `unified_video_analyzer`, or `full_gemini`
 - `ai.geminiModel`: Model for frame classification
 - `ai.geminiVideoModel`: Model for video analysis
-- `ai.geminiImageModel`: Model for native image generation (default: `gemini-3-pro-image-preview`)
+- `ai.geminiImageModel`: Model for native image generation (default: `gemini-2.5-flash-image`)
 - `scoring.motionAlpha`: Motion penalty weight (0-1)
 
 ## Frame Scoring Algorithm

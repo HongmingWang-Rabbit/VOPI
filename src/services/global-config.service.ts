@@ -19,6 +19,7 @@ import {
   type EffectiveConfig,
   type UpsertConfigRequest,
 } from '../types/config.types.js';
+import { DEFAULT_PRICING_CONFIG, type PricingConfig } from '../types/credits.types.js';
 
 const logger = createChildLogger({ service: 'global-config' });
 
@@ -404,6 +405,29 @@ class GlobalConfigService {
   invalidateCache(): void {
     this.cache = null;
     logger.debug('Config cache invalidated');
+  }
+
+  /**
+   * Get pricing configuration for credit calculations
+   */
+  async getPricingConfig(): Promise<PricingConfig> {
+    const config = await this.getAllConfig();
+
+    const getValue = <T>(key: string, defaultValue: T): T => {
+      const entry = config.get(key);
+      return (entry?.value as T) ?? defaultValue;
+    };
+
+    return {
+      baseCredits: getValue(GlobalConfigKey.PRICING_BASE_CREDITS, DEFAULT_PRICING_CONFIG.baseCredits),
+      creditsPerSecond: getValue(GlobalConfigKey.PRICING_CREDITS_PER_SECOND, DEFAULT_PRICING_CONFIG.creditsPerSecond),
+      includedFrames: getValue(GlobalConfigKey.PRICING_INCLUDED_FRAMES, DEFAULT_PRICING_CONFIG.includedFrames),
+      extraFrameCost: getValue(GlobalConfigKey.PRICING_EXTRA_FRAME_COST, DEFAULT_PRICING_CONFIG.extraFrameCost),
+      commercialVideoEnabled: getValue(GlobalConfigKey.PRICING_COMMERCIAL_VIDEO_ENABLED, DEFAULT_PRICING_CONFIG.commercialVideoEnabled),
+      commercialVideoCost: getValue(GlobalConfigKey.PRICING_COMMERCIAL_VIDEO_COST, DEFAULT_PRICING_CONFIG.commercialVideoCost),
+      minJobCost: getValue(GlobalConfigKey.PRICING_MIN_JOB_COST, DEFAULT_PRICING_CONFIG.minJobCost),
+      maxJobCost: getValue(GlobalConfigKey.PRICING_MAX_JOB_COST, DEFAULT_PRICING_CONFIG.maxJobCost),
+    };
   }
 
   /**

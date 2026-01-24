@@ -6,6 +6,7 @@ import { getLogger } from '../utils/logger.js';
 import { initDatabase, closeDatabase } from '../db/index.js';
 import { initRedis, closeRedis } from '../queues/redis.js';
 import { startPipelineWorker, stopPipelineWorker } from './pipeline.worker.js';
+import { startTokenRefreshWorker, stopTokenRefreshWorker } from './token-refresh.worker.js';
 import { videoService } from '../services/video.service.js';
 import { setupDefaultProviders } from '../providers/setup.js';
 import { setupProcessors } from '../processors/setup.js';
@@ -41,12 +42,13 @@ async function main(): Promise<void> {
   await initDatabase();
   initRedis();
 
-  // Start worker
+  // Start workers
   startPipelineWorker();
+  startTokenRefreshWorker();
 
   logger.info(
     { concurrency: config.worker.concurrency },
-    'Worker started successfully'
+    'Workers started successfully'
   );
 
   // Graceful shutdown
@@ -55,6 +57,7 @@ async function main(): Promise<void> {
 
     try {
       await stopPipelineWorker();
+      await stopTokenRefreshWorker();
       await closeRedis();
       await closeDatabase();
       logger.info('Graceful shutdown completed');

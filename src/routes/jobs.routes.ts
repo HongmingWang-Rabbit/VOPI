@@ -6,6 +6,7 @@ import { createJobSchema, jobListQuerySchema } from '../types/job.types.js';
 import { storageService } from '../services/storage.service.js';
 import { getConfig } from '../config/index.js';
 import { extractS3KeyFromUrl } from '../utils/s3-url.js';
+import { requireUserAuth } from '../middleware/auth.middleware.js';
 import { z } from 'zod';
 
 const jobIdParamsSchema = z.object({
@@ -56,6 +57,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
     '/jobs',
     {
+      preHandler: [requireUserAuth],
       schema: {
         description: 'Create a new pipeline job',
         tags: ['Jobs'],
@@ -97,7 +99,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const validated = createJobSchema.parse(request.body);
-      const job = await jobsController.createJob(validated, request.apiKey);
+      const job = await jobsController.createJob(validated, request.user!, request.apiKey);
       return reply.status(201).send(job);
     }
   );
@@ -108,6 +110,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/jobs',
     {
+      preHandler: [requireUserAuth],
       schema: {
         description: 'List jobs with optional filtering',
         tags: ['Jobs'],
@@ -159,7 +162,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const query = jobListQuerySchema.parse(request.query);
-      const result = await jobsController.listJobs(query);
+      const result = await jobsController.listJobs(request.user!.id, query);
       return reply.send(result);
     }
   );
@@ -170,6 +173,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/jobs/:id',
     {
+      preHandler: [requireUserAuth],
       schema: {
         description: 'Get job details by ID',
         tags: ['Jobs'],
@@ -202,7 +206,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = jobIdParamsSchema.parse(request.params);
-      const job = await jobsController.getJob(id);
+      const job = await jobsController.getJob(id, request.user!.id);
       return reply.send(job);
     }
   );
@@ -213,6 +217,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/jobs/:id/status',
     {
+      preHandler: [requireUserAuth],
       schema: {
         description: 'Get job status (lightweight endpoint)',
         tags: ['Jobs'],
@@ -239,7 +244,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = jobIdParamsSchema.parse(request.params);
-      const status = await jobsController.getJobStatus(id);
+      const status = await jobsController.getJobStatus(id, request.user!.id);
       return reply.send(status);
     }
   );
@@ -250,6 +255,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.delete(
     '/jobs/:id',
     {
+      preHandler: [requireUserAuth],
       schema: {
         description: 'Cancel a pending job',
         tags: ['Jobs'],
@@ -274,7 +280,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = jobIdParamsSchema.parse(request.params);
-      const job = await jobsController.cancelJob(id);
+      const job = await jobsController.cancelJob(id, request.user!.id);
       return reply.send({
         id: job.id,
         status: job.status,
@@ -290,6 +296,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/jobs/:id/download-urls',
     {
+      preHandler: [requireUserAuth],
       schema: {
         description: 'Get presigned download URLs for job assets (frames and commercial images)',
         tags: ['Jobs'],
@@ -351,8 +358,8 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
       const { id } = jobIdParamsSchema.parse(request.params);
       const { expiresIn } = downloadPresignQuerySchema.parse(request.query);
 
-      // Get job to verify it exists and is complete
-      const job = await jobsController.getJob(id);
+      // Get job to verify it exists, is complete, and belongs to user
+      const job = await jobsController.getJob(id, request.user!.id);
       if (!job.result) {
         return reply.status(400).send({
           error: 'BAD_REQUEST',
@@ -429,6 +436,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/jobs/:id/metadata',
     {
+      preHandler: [requireUserAuth],
       schema: {
         description: 'Get product metadata for a job',
         tags: ['Jobs'],
@@ -470,7 +478,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = jobIdParamsSchema.parse(request.params);
-      const metadata = await jobsController.getProductMetadata(id);
+      const metadata = await jobsController.getProductMetadata(id, request.user!.id);
 
       if (!metadata) {
         return reply.status(404).send({
@@ -490,6 +498,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.patch(
     '/jobs/:id/metadata',
     {
+      preHandler: [requireUserAuth],
       schema: {
         description: 'Update product metadata for a job. Users can edit AI-extracted fields before uploading to e-commerce platforms.',
         tags: ['Jobs'],
@@ -573,7 +582,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      const updatedMetadata = await jobsController.updateProductMetadata(id, updates);
+      const updatedMetadata = await jobsController.updateProductMetadata(id, request.user!.id, updates);
       return reply.send(updatedMetadata);
     }
   );
@@ -584,6 +593,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
     '/uploads/presign',
     {
+      preHandler: [requireUserAuth],
       schema: {
         description: 'Get a presigned URL for uploading a video',
         tags: ['Uploads'],

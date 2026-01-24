@@ -1,15 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { JobsController } from './jobs.controller.js';
 import { createJobSchema, type CreateJobRequest } from '../types/job.types.js';
-import type { ApiKey } from '../db/schema.js';
+import type { ApiKey, User } from '../db/schema.js';
 
 // Mock database - needs to be a proper chain
 const createChainMock = () => {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
-  const methods = ['insert', 'values', 'returning', 'select', 'from', 'where', 'orderBy', 'limit', 'offset', 'update', 'set', 'delete'];
+  const methods = ['insert', 'values', 'returning', 'select', 'from', 'where', 'orderBy', 'limit', 'offset', 'update', 'set', 'delete', 'transaction'];
 
   methods.forEach(method => {
     chain[method] = vi.fn().mockReturnValue(chain);
+  });
+
+  // Make transaction pass through the callback and return its result
+  chain.transaction = vi.fn().mockImplementation(async (callback) => {
+    return callback(chain);
   });
 
   return chain;
@@ -45,13 +50,32 @@ vi.mock('../utils/url-validator.js', () => ({
 }));
 
 // Mock logger
-vi.mock('../utils/logger.js', () => ({
-  createChildLogger: vi.fn(() => ({
+vi.mock('../utils/logger.js', () => {
+  const mockLogger: Record<string, unknown> = {
     info: vi.fn(),
     debug: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
-  })),
+  };
+  mockLogger.child = vi.fn(() => mockLogger);
+  return {
+    createChildLogger: vi.fn(() => mockLogger),
+    getLogger: vi.fn(() => mockLogger),
+  };
+});
+
+// Mock credits service
+vi.mock('../services/credits.service.js', () => ({
+  creditsService: {
+    calculateJobCost: vi.fn().mockResolvedValue({ totalCredits: 1, breakdown: [] }),
+    calculateJobCostWithAffordability: vi.fn().mockResolvedValue({
+      totalCredits: 1,
+      breakdown: [],
+      canAfford: true,
+      currentBalance: 10,
+    }),
+    spendCredits: vi.fn().mockResolvedValue({ success: true, newBalance: 10, transactionId: 'test-tx' }),
+  },
 }));
 
 import { addPipelineJob } from '../queues/pipeline.queue.js';
@@ -60,13 +84,35 @@ import { validateCallbackUrlComprehensive } from '../utils/url-validator.js';
 describe('JobsController', () => {
   let controller: JobsController;
 
+  // Mock user for all tests
+  const mockUser: User = {
+    id: 'user-123',
+    email: 'test@example.com',
+    emailVerified: true,
+    name: 'Test User',
+    avatarUrl: null,
+    creditsBalance: 0,
+    stripeCustomerId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    lastLoginAt: null,
+    deletedAt: null,
+  };
+
   beforeEach(() => {
     controller = new JobsController();
     vi.clearAllMocks();
 
     // Reset mock chains - each method returns the chain
     Object.keys(mockDb).forEach(key => {
-      mockDb[key].mockReturnValue(mockDb);
+      if (key !== 'transaction') {
+        mockDb[key].mockReturnValue(mockDb);
+      }
+    });
+
+    // Ensure transaction passes through
+    mockDb.transaction.mockImplementation(async (callback) => {
+      return callback(mockDb);
     });
   });
 
@@ -86,7 +132,7 @@ describe('JobsController', () => {
       const createJobRequest: CreateJobRequest = createJobSchema.parse({
         videoUrl: 'https://example.com/video.mp4',
       });
-      const result = await controller.createJob(createJobRequest);
+      const result = await controller.createJob(createJobRequest, mockUser);
 
       expect(result.id).toBe('job-123');
       expect(addPipelineJob).toHaveBeenCalledWith('job-123');
@@ -109,7 +155,7 @@ describe('JobsController', () => {
         videoUrl: 'https://example.com/video.mp4',
         callbackUrl: 'https://callback.example.com/webhook',
       });
-      await controller.createJob(createJobRequest);
+      await controller.createJob(createJobRequest, mockUser);
 
       expect(validateCallbackUrlComprehensive).toHaveBeenCalledWith(
         'https://callback.example.com/webhook'
@@ -127,7 +173,7 @@ describe('JobsController', () => {
         callbackUrl: 'https://evil.com/webhook',
       });
       await expect(
-        controller.createJob(createJobRequest)
+        controller.createJob(createJobRequest, mockUser)
       ).rejects.toThrow('Invalid domain');
     });
 
@@ -164,7 +210,7 @@ describe('JobsController', () => {
       const createJobRequest: CreateJobRequest = createJobSchema.parse({
         videoUrl: 'https://example.com/video.mp4',
       });
-      const result = await controller.createJob(createJobRequest, mockApiKey);
+      const result = await controller.createJob(createJobRequest, mockUser, mockApiKey);
 
       expect(result.id).toBe('job-123');
       expect(mockDb.update).toHaveBeenCalled();
@@ -189,7 +235,7 @@ describe('JobsController', () => {
         videoUrl: 'https://example.com/video.mp4',
       });
       await expect(
-        controller.createJob(createJobRequest, mockApiKey)
+        controller.createJob(createJobRequest, mockUser, mockApiKey)
       ).rejects.toThrow('API key usage limit exceeded');
     });
 
@@ -212,7 +258,7 @@ describe('JobsController', () => {
         videoUrl: 'https://example.com/video.mp4',
       });
       await expect(
-        controller.createJob(createJobRequest, mockApiKey)
+        controller.createJob(createJobRequest, mockUser, mockApiKey)
       ).rejects.toThrow('API key usage limit exceeded');
     });
   });
@@ -238,7 +284,7 @@ describe('JobsController', () => {
         return mockDb;
       });
 
-      const result = await controller.listJobs({
+      const result = await controller.listJobs(mockUser.id, {
         limit: 10,
         offset: 0,
       });
@@ -258,7 +304,7 @@ describe('JobsController', () => {
         return mockDb;
       });
 
-      await controller.listJobs({
+      await controller.listJobs(mockUser.id, {
         limit: 10,
         offset: 0,
         status: 'completed',
@@ -279,7 +325,7 @@ describe('JobsController', () => {
 
       mockDb.limit.mockResolvedValue([mockJob]);
 
-      const result = await controller.getJob('job-123');
+      const result = await controller.getJob('job-123', mockUser.id);
 
       expect(result.id).toBe('job-123');
     });
@@ -287,7 +333,7 @@ describe('JobsController', () => {
     it('should throw NotFoundError when job not found', async () => {
       mockDb.limit.mockResolvedValue([]);
 
-      await expect(controller.getJob('nonexistent')).rejects.toThrow('Job nonexistent not found');
+      await expect(controller.getJob('nonexistent', mockUser.id)).rejects.toThrow('Job nonexistent not found');
     });
   });
 
@@ -303,7 +349,7 @@ describe('JobsController', () => {
 
       mockDb.limit.mockResolvedValue([mockStatus]);
 
-      const result = await controller.getJobStatus('job-123');
+      const result = await controller.getJobStatus('job-123', mockUser.id);
 
       expect(result.id).toBe('job-123');
       expect(result.status).toBe('processing');
@@ -313,7 +359,7 @@ describe('JobsController', () => {
     it('should throw NotFoundError when job not found', async () => {
       mockDb.limit.mockResolvedValue([]);
 
-      await expect(controller.getJobStatus('nonexistent')).rejects.toThrow(
+      await expect(controller.getJobStatus('nonexistent', mockUser.id)).rejects.toThrow(
         'Job nonexistent not found'
       );
     });
@@ -329,7 +375,7 @@ describe('JobsController', () => {
 
       mockDb.returning.mockResolvedValue([mockCancelledJob]);
 
-      const result = await controller.cancelJob('job-123');
+      const result = await controller.cancelJob('job-123', mockUser.id);
 
       expect(result.status).toBe('cancelled');
     });
@@ -338,25 +384,25 @@ describe('JobsController', () => {
       mockDb.returning.mockResolvedValue([]);
       mockDb.limit.mockResolvedValue([]);
 
-      await expect(controller.cancelJob('nonexistent')).rejects.toThrow(
+      await expect(controller.cancelJob('nonexistent', mockUser.id)).rejects.toThrow(
         'Job nonexistent not found'
       );
     });
 
     it('should throw BadRequestError when job is not pending', async () => {
       mockDb.returning.mockResolvedValue([]);
-      mockDb.limit.mockResolvedValue([{ id: 'job-123', status: 'processing' }]);
+      mockDb.limit.mockResolvedValue([{ id: 'job-123', status: 'processing', userId: mockUser.id }]);
 
-      await expect(controller.cancelJob('job-123')).rejects.toThrow(
+      await expect(controller.cancelJob('job-123', mockUser.id)).rejects.toThrow(
         'Cannot cancel job in processing status'
       );
     });
 
     it('should throw BadRequestError when job is completed', async () => {
       mockDb.returning.mockResolvedValue([]);
-      mockDb.limit.mockResolvedValue([{ id: 'job-123', status: 'completed' }]);
+      mockDb.limit.mockResolvedValue([{ id: 'job-123', status: 'completed', userId: mockUser.id }]);
 
-      await expect(controller.cancelJob('job-123')).rejects.toThrow(
+      await expect(controller.cancelJob('job-123', mockUser.id)).rejects.toThrow(
         'Cannot cancel job in completed status'
       );
     });
@@ -371,7 +417,7 @@ describe('JobsController', () => {
       mockDb.where.mockReturnValue(mockDb);
       mockDb.limit.mockImplementation(() => Promise.resolve([mockJob]));
 
-      await expect(controller.deleteJob('job-123')).resolves.not.toThrow();
+      await expect(controller.deleteJob('job-123', mockUser.id)).resolves.not.toThrow();
       expect(mockDb.delete).toHaveBeenCalled();
     });
 
@@ -379,7 +425,7 @@ describe('JobsController', () => {
       mockDb.where.mockReturnValue(mockDb);
       mockDb.limit.mockImplementation(() => Promise.resolve([]));
 
-      await expect(controller.deleteJob('nonexistent')).rejects.toThrow(
+      await expect(controller.deleteJob('nonexistent', mockUser.id)).rejects.toThrow(
         'Job nonexistent not found'
       );
     });

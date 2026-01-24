@@ -70,7 +70,7 @@ export class GeminiAudioAnalysisProvider implements AudioAnalysisProvider {
     topP?: number;
   } = {}): GenerativeModel {
     // Default model - should be passed from effectiveConfig by processor
-    const model = options.modelName || 'gemini-3-pro-preview';
+    const model = options.modelName || 'gemini-3-flash-preview';
     const { client } = this.init();
 
     return client.getGenerativeModel({
@@ -203,7 +203,7 @@ export class GeminiAudioAnalysisProvider implements AudioAnalysisProvider {
   ): Promise<AudioAnalysisResult> {
     const config = getConfig();
     const {
-      model = 'gemini-3-pro-preview',
+      model = 'gemini-3-flash-preview',
       maxBulletPoints = 5,
       maxRetries = config.audio.maxRetries,
       retryDelay = config.worker.apiRetryDelayMs,

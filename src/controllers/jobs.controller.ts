@@ -4,6 +4,7 @@ import { createChildLogger } from '../utils/logger.js';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors.js';
 import { addPipelineJob } from '../queues/pipeline.queue.js';
 import { validateCallbackUrlComprehensive } from '../utils/url-validator.js';
+import { creditsService } from '../services/credits.service.js';
 import {
   jobConfigSchema,
   type CreateJobRequest,
@@ -11,7 +12,7 @@ import {
   type JobConfig,
   type JobProgress,
 } from '../types/job.types.js';
-import type { Job, NewJob, ApiKey } from '../db/schema.js';
+import type { Job, NewJob, ApiKey, User } from '../db/schema.js';
 import type { MetadataFileOutput, ProductMetadata } from '../types/product-metadata.types.js';
 
 const logger = createChildLogger({ service: 'jobs-controller' });
@@ -23,42 +24,13 @@ export class JobsController {
   /**
    * Create a new job
    * @param data - Job creation request data
+   * @param user - Authenticated user who owns this job
    * @param apiKey - Optional API key record for usage tracking
    */
-  async createJob(data: CreateJobRequest, apiKey?: ApiKey): Promise<Job> {
+  async createJob(data: CreateJobRequest, user: User, apiKey?: ApiKey): Promise<Job> {
     const db = getDatabase();
 
-    // Atomically increment API key usage count if provided
-    if (apiKey) {
-      // Single atomic update with optimistic locking - no separate check needed
-      const [updated] = await db
-        .update(schema.apiKeys)
-        .set({
-          usedCount: sql`${schema.apiKeys.usedCount} + 1`,
-        })
-        .where(
-          and(
-            eq(schema.apiKeys.id, apiKey.id),
-            lt(schema.apiKeys.usedCount, apiKey.maxUses)
-          )
-        )
-        .returning();
-
-      if (!updated) {
-        // Usage limit reached (either already at limit or race condition)
-        throw new ForbiddenError(
-          `API key usage limit exceeded (limit: ${apiKey.maxUses}). Please contact support.`,
-          'USAGE_LIMIT_EXCEEDED'
-        );
-      }
-
-      logger.info(
-        { apiKeyId: apiKey.id, usedCount: updated.usedCount, maxUses: apiKey.maxUses },
-        'API key usage incremented'
-      );
-    }
-
-    // Validate callback URL for SSRF protection
+    // Validate callback URL for SSRF protection before starting transaction
     if (data.callbackUrl) {
       const validation = validateCallbackUrlComprehensive(data.callbackUrl);
       if (!validation.valid) {
@@ -69,38 +41,104 @@ export class JobsController {
     // Data is already validated by route, just parse config defaults
     const config = jobConfigSchema.parse(data.config || {});
 
-    const [job] = await db
-      .insert(schema.jobs)
-      .values({
-        videoUrl: data.videoUrl,
-        config: config as JobConfig,
-        callbackUrl: data.callbackUrl,
-        status: 'pending',
-        apiKeyId: apiKey?.id,
-      } satisfies NewJob)
-      .returning();
+    // Check affordability if estimated duration is provided
+    // This is a pre-check - actual charge happens during processing when we know real duration
+    if (data.estimatedDurationSeconds) {
+      const costEstimate = await creditsService.calculateJobCostWithAffordability(user.id, {
+        videoDurationSeconds: data.estimatedDurationSeconds,
+      });
 
-    logger.info({ jobId: job.id, videoUrl: job.videoUrl, apiKeyId: apiKey?.id }, 'Job created');
+      if (!costEstimate.canAfford) {
+        throw new ForbiddenError(
+          `Insufficient credits. Estimated cost: ${costEstimate.totalCredits}, available: ${costEstimate.currentBalance}. Please purchase more credits.`,
+          'INSUFFICIENT_CREDITS'
+        );
+      }
 
-    // Add to queue
+      logger.info(
+        {
+          userId: user.id,
+          estimatedDuration: data.estimatedDurationSeconds,
+          estimatedCost: costEstimate.totalCredits,
+          currentBalance: costEstimate.currentBalance,
+        },
+        'Job affordability pre-check passed'
+      );
+    }
+
+    // Use transaction to ensure API key increment and job creation are atomic
+    const job = await db.transaction(async (tx) => {
+      // Atomically increment API key usage count if provided
+      if (apiKey) {
+        // Single atomic update with optimistic locking - no separate check needed
+        const [updated] = await tx
+          .update(schema.apiKeys)
+          .set({
+            usedCount: sql`${schema.apiKeys.usedCount} + 1`,
+          })
+          .where(
+            and(
+              eq(schema.apiKeys.id, apiKey.id),
+              lt(schema.apiKeys.usedCount, apiKey.maxUses)
+            )
+          )
+          .returning();
+
+        if (!updated) {
+          // Usage limit reached (either already at limit or race condition)
+          // Transaction will be rolled back automatically
+          throw new ForbiddenError(
+            `API key usage limit exceeded (limit: ${apiKey.maxUses}). Please contact support.`,
+            'USAGE_LIMIT_EXCEEDED'
+          );
+        }
+
+        logger.info(
+          { apiKeyId: apiKey.id, usedCount: updated.usedCount, maxUses: apiKey.maxUses },
+          'API key usage incremented'
+        );
+      }
+
+      // Create the job within the same transaction
+      const [createdJob] = await tx
+        .insert(schema.jobs)
+        .values({
+          videoUrl: data.videoUrl,
+          config: config as JobConfig,
+          callbackUrl: data.callbackUrl,
+          status: 'pending',
+          userId: user.id,
+          apiKeyId: apiKey?.id,
+        } satisfies NewJob)
+        .returning();
+
+      return createdJob;
+    });
+
+    logger.info({ jobId: job.id, videoUrl: job.videoUrl, userId: user.id, apiKeyId: apiKey?.id }, 'Job created');
+
+    // Add to queue (outside transaction - queue operations shouldn't be rolled back)
     await addPipelineJob(job.id);
 
     return job;
   }
 
   /**
-   * List jobs with optional filtering
+   * List jobs for a specific user with optional filtering
+   * @param userId - The user ID to filter jobs by
+   * @param query - Query parameters for filtering and pagination
    */
-  async listJobs(query: JobListQuery): Promise<{ jobs: Job[]; total: number }> {
+  async listJobs(userId: string, query: JobListQuery): Promise<{ jobs: Job[]; total: number }> {
     const db = getDatabase();
     // Data is already validated by route
-    const conditions: SQL[] = [];
+    // Always filter by userId to ensure users only see their own jobs
+    const conditions: SQL[] = [eq(schema.jobs.userId, userId)];
 
     if (query.status) {
       conditions.push(eq(schema.jobs.status, query.status));
     }
 
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const whereClause = and(...conditions);
 
     const [jobs, countResult] = await Promise.all([
       db
@@ -124,14 +162,16 @@ export class JobsController {
 
   /**
    * Get job by ID
+   * @param jobId - The job ID to retrieve
+   * @param userId - The user ID to verify ownership
    */
-  async getJob(jobId: string): Promise<Job> {
+  async getJob(jobId: string, userId: string): Promise<Job> {
     const db = getDatabase();
 
     const [job] = await db
       .select()
       .from(schema.jobs)
-      .where(eq(schema.jobs.id, jobId))
+      .where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.userId, userId)))
       .limit(1);
 
     if (!job) {
@@ -143,8 +183,10 @@ export class JobsController {
 
   /**
    * Get job status (lightweight)
+   * @param jobId - The job ID to retrieve status for
+   * @param userId - The user ID to verify ownership
    */
-  async getJobStatus(jobId: string): Promise<{
+  async getJobStatus(jobId: string, userId: string): Promise<{
     id: string;
     status: string;
     progress: JobProgress | null;
@@ -162,7 +204,7 @@ export class JobsController {
         updatedAt: schema.jobs.updatedAt,
       })
       .from(schema.jobs)
-      .where(eq(schema.jobs.id, jobId))
+      .where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.userId, userId)))
       .limit(1);
 
     if (!job) {
@@ -175,29 +217,31 @@ export class JobsController {
   /**
    * Cancel a job
    * Uses atomic update with status check to prevent race conditions
+   * @param jobId - The job ID to cancel
+   * @param userId - The user ID to verify ownership
    */
-  async cancelJob(jobId: string): Promise<Job> {
+  async cancelJob(jobId: string, userId: string): Promise<Job> {
     const db = getDatabase();
 
-    // Atomic update: only cancel if status is 'pending'
+    // Atomic update: only cancel if status is 'pending' and belongs to user
     const [updated] = await db
       .update(schema.jobs)
       .set({
         status: 'cancelled',
         updatedAt: new Date(),
       })
-      .where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.status, 'pending')))
+      .where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.userId, userId), eq(schema.jobs.status, 'pending')))
       .returning();
 
     if (!updated) {
-      // Check if job exists to provide appropriate error
+      // Check if job exists and belongs to user to provide appropriate error
       const [job] = await db
-        .select({ id: schema.jobs.id, status: schema.jobs.status })
+        .select({ id: schema.jobs.id, status: schema.jobs.status, userId: schema.jobs.userId })
         .from(schema.jobs)
         .where(eq(schema.jobs.id, jobId))
         .limit(1);
 
-      if (!job) {
+      if (!job || job.userId !== userId) {
         throw new NotFoundError(`Job ${jobId} not found`);
       }
 
@@ -206,21 +250,23 @@ export class JobsController {
       );
     }
 
-    logger.info({ jobId }, 'Job cancelled');
+    logger.info({ jobId, userId }, 'Job cancelled');
 
     return updated;
   }
 
   /**
    * Delete a job and its associated data
+   * @param jobId - The job ID to delete
+   * @param userId - The user ID to verify ownership
    */
-  async deleteJob(jobId: string): Promise<void> {
+  async deleteJob(jobId: string, userId: string): Promise<void> {
     const db = getDatabase();
 
     const [job] = await db
       .select()
       .from(schema.jobs)
-      .where(eq(schema.jobs.id, jobId))
+      .where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.userId, userId)))
       .limit(1);
 
     if (!job) {
@@ -230,24 +276,28 @@ export class JobsController {
     // Delete job (cascades to related records)
     await db.delete(schema.jobs).where(eq(schema.jobs.id, jobId));
 
-    logger.info({ jobId }, 'Job deleted');
+    logger.info({ jobId, userId }, 'Job deleted');
   }
 
   /**
    * Update product metadata for a completed job
    * Allows users to edit AI-extracted metadata before e-commerce upload
+   * @param jobId - The job ID to update
+   * @param userId - The user ID to verify ownership
+   * @param updates - The metadata fields to update
    */
   async updateProductMetadata(
     jobId: string,
+    userId: string,
     updates: Partial<ProductMetadata>
   ): Promise<MetadataFileOutput> {
     const db = getDatabase();
 
-    // Get existing job
+    // Get existing job (filtered by userId for ownership verification)
     const [job] = await db
       .select()
       .from(schema.jobs)
-      .where(eq(schema.jobs.id, jobId))
+      .where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.userId, userId)))
       .limit(1);
 
     if (!job) {
@@ -304,14 +354,16 @@ export class JobsController {
 
   /**
    * Get product metadata for a job
+   * @param jobId - The job ID to retrieve metadata for
+   * @param userId - The user ID to verify ownership
    */
-  async getProductMetadata(jobId: string): Promise<MetadataFileOutput | null> {
+  async getProductMetadata(jobId: string, userId: string): Promise<MetadataFileOutput | null> {
     const db = getDatabase();
 
     const [job] = await db
       .select({ productMetadata: schema.jobs.productMetadata })
       .from(schema.jobs)
-      .where(eq(schema.jobs.id, jobId))
+      .where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.userId, userId)))
       .limit(1);
 
     if (!job) {

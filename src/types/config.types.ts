@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Default Gemini model for AI operations
  */
-export const DEFAULT_GEMINI_MODEL = 'gemini-3-pro-preview';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
 
 /**
  * Pipeline strategy - the name of a stack template to use
@@ -34,6 +34,7 @@ export const ConfigCategory = {
   AI: 'ai',
   SCORING: 'scoring',
   COMMERCIAL: 'commercial',
+  PRICING: 'pricing',
   SYSTEM: 'system',
   DEBUG: 'debug',
 } as const;
@@ -64,7 +65,7 @@ export interface GlobalConfigValue {
  * Default Gemini model for image generation
  * Note: This model supports native image generation
  */
-export const DEFAULT_GEMINI_IMAGE_MODEL = 'gemini-3-pro-image-preview';
+export const DEFAULT_GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 /**
  * Default global config keys with their types
@@ -97,6 +98,16 @@ export const GlobalConfigKey = {
 
   // Debug settings
   DEBUG_ENABLED: 'debug.enabled',
+
+  // Pricing settings
+  PRICING_BASE_CREDITS: 'pricing.base_credits',
+  PRICING_CREDITS_PER_SECOND: 'pricing.credits_per_second',
+  PRICING_INCLUDED_FRAMES: 'pricing.included_frames',
+  PRICING_EXTRA_FRAME_COST: 'pricing.extra_frame_cost',
+  PRICING_COMMERCIAL_VIDEO_ENABLED: 'pricing.commercial_video_enabled',
+  PRICING_COMMERCIAL_VIDEO_COST: 'pricing.commercial_video_cost',
+  PRICING_MIN_JOB_COST: 'pricing.min_job_cost',
+  PRICING_MAX_JOB_COST: 'pricing.max_job_cost',
 } as const;
 
 export type GlobalConfigKey = (typeof GlobalConfigKey)[keyof typeof GlobalConfigKey];
@@ -116,7 +127,7 @@ export const upsertConfigSchema = z.object({
   key: z.string().min(1).max(100),
   value: z.union([z.string(), z.number(), z.boolean(), z.array(z.unknown()), z.record(z.unknown())]),
   type: z.enum(['string', 'number', 'boolean', 'json']).optional(),
-  category: z.enum(['pipeline', 'ai', 'scoring', 'commercial', 'system', 'debug']).optional(),
+  category: z.enum(['pipeline', 'ai', 'scoring', 'commercial', 'pricing', 'system', 'debug']).optional(),
   description: z.string().max(500).optional(),
   isActive: z.boolean().optional(),
 });
@@ -168,7 +179,7 @@ export const DEFAULT_CONFIG: Record<string, GlobalConfigValue & { category: Conf
     value: DEFAULT_GEMINI_IMAGE_MODEL,
     type: ConfigValueType.STRING,
     category: ConfigCategory.AI,
-    description: 'Gemini model for image generation (e.g., gemini-3-pro-image-preview)',
+    description: 'Gemini model for image generation (e.g., gemini-2.5-flash-image)',
   },
   [GlobalConfigKey.AI_TEMPERATURE]: {
     value: 0.2,
@@ -229,6 +240,56 @@ export const DEFAULT_CONFIG: Record<string, GlobalConfigValue & { category: Conf
     type: ConfigValueType.BOOLEAN,
     category: ConfigCategory.DEBUG,
     description: 'Enable debug mode (preserves temp files and S3 uploads for inspection)',
+  },
+
+  // Pricing defaults
+  [GlobalConfigKey.PRICING_BASE_CREDITS]: {
+    value: 1,
+    type: ConfigValueType.NUMBER,
+    category: ConfigCategory.PRICING,
+    description: 'Base cost per job in credits',
+  },
+  [GlobalConfigKey.PRICING_CREDITS_PER_SECOND]: {
+    value: 0.05,
+    type: ConfigValueType.NUMBER,
+    category: ConfigCategory.PRICING,
+    description: 'Additional credits per second of video duration (0.05 = 1 credit per 20 seconds)',
+  },
+  [GlobalConfigKey.PRICING_INCLUDED_FRAMES]: {
+    value: 4,
+    type: ConfigValueType.NUMBER,
+    category: ConfigCategory.PRICING,
+    description: 'Default number of frames included in base price',
+  },
+  [GlobalConfigKey.PRICING_EXTRA_FRAME_COST]: {
+    value: 0.25,
+    type: ConfigValueType.NUMBER,
+    category: ConfigCategory.PRICING,
+    description: 'Cost per extra frame beyond included amount',
+  },
+  [GlobalConfigKey.PRICING_COMMERCIAL_VIDEO_ENABLED]: {
+    value: false,
+    type: ConfigValueType.BOOLEAN,
+    category: ConfigCategory.PRICING,
+    description: 'Whether commercial video generation add-on is available (coming soon)',
+  },
+  [GlobalConfigKey.PRICING_COMMERCIAL_VIDEO_COST]: {
+    value: 2,
+    type: ConfigValueType.NUMBER,
+    category: ConfigCategory.PRICING,
+    description: 'Cost for commercial video generation add-on',
+  },
+  [GlobalConfigKey.PRICING_MIN_JOB_COST]: {
+    value: 1,
+    type: ConfigValueType.NUMBER,
+    category: ConfigCategory.PRICING,
+    description: 'Minimum job cost (floor)',
+  },
+  [GlobalConfigKey.PRICING_MAX_JOB_COST]: {
+    value: 0,
+    type: ConfigValueType.NUMBER,
+    category: ConfigCategory.PRICING,
+    description: 'Maximum job cost (ceiling, 0 = no limit)',
   },
 };
 

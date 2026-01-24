@@ -211,7 +211,14 @@ describe('envSchema', () => {
       });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.AUTH_SKIP_PATHS).toEqual(['/health', '/ready', '/docs']);
+        expect(result.data.AUTH_SKIP_PATHS).toEqual([
+          '/health',
+          '/ready',
+          '/docs',
+          '/api/v1/auth',
+          '/api/v1/credits/webhook',
+          '/api/v1/credits/packs',
+        ]);
       }
     });
   });

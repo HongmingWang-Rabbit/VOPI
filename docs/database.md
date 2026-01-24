@@ -5,24 +5,56 @@ VOPI uses PostgreSQL 16 with Drizzle ORM for database operations.
 ## Schema Overview
 
 ```
-┌─────────────────┐
-│    api_keys     │
-│─────────────────│
-│ id (PK)         │
-│ key             │
-│ name            │
-│ maxUses         │
-│ usedCount       │
-│ timestamps      │
-└────────┬────────┘
+┌─────────────────┐       ┌─────────────────┐
+│    api_keys     │       │     users       │
+│─────────────────│       │─────────────────│
+│ id (PK)         │       │ id (PK)         │
+│ key             │       │ email           │
+│ name            │       │ creditsBalance  │
+│ maxUses         │       │ stripeCustomerId│
+│ usedCount       │       │ timestamps      │
+│ timestamps      │       └────────┬────────┘
+└────────┬────────┘                │
+         │                         │ 1:N
+         │ 1:N                     ▼
+         │              ┌─────────────────────┐
+         │              │credit_transactions  │
+         │              │─────────────────────│
+         │              │ id (PK)             │
+         │              │ userId (FK)         │
+         │              │ creditsDelta        │
+         │              │ type                │
+         │              │ idempotencyKey      │
+         │              │ stripePaymentIntent │
+         │              │ jobId (FK)          │
+         │              └─────────────────────┘
          │
-         │ 1:N
+         │              ┌─────────────────────┐
+         │              │   stripe_events     │
+         │              │─────────────────────│
+         │              │ id (PK)             │
+         │              │ eventId (unique)    │
+         │              │ eventType           │
+         │              │ processed           │
+         │              │ error               │
+         │              └─────────────────────┘
+         │
+         │              ┌─────────────────────┐
+         │              │   signup_grants     │
+         │              │─────────────────────│
+         │              │ id (PK)             │
+         │              │ userId (FK, unique) │
+         │              │ ipAddress           │
+         │              │ deviceFingerprint   │
+         │              │ transactionId (FK)  │
+         │              └─────────────────────┘
          ▼
 ┌─────────────────┐
 │      jobs       │
 │─────────────────│
 │ id (PK)         │
 │ apiKeyId (FK)   │
+│ userId (FK)     │◄────── (jobs can belong to API key OR user)
 │ status          │
 │ videoUrl        │
 │ config          │
@@ -329,11 +361,153 @@ Generated commercial product images.
 
 ---
 
+### users
+
+User accounts for OAuth-based authentication and credit tracking.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | No | `gen_random_uuid()` | Primary key |
+| `email` | VARCHAR(255) | No | - | User email (unique) |
+| `email_verified` | BOOLEAN | No | `false` | Email verification status |
+| `name` | VARCHAR(255) | Yes | - | Display name |
+| `avatar_url` | TEXT | Yes | - | Profile image URL |
+| `credits_balance` | INTEGER | No | `0` | Cached credit balance |
+| `stripe_customer_id` | VARCHAR(255) | Yes | - | Stripe customer ID |
+| `created_at` | TIMESTAMP | No | `NOW()` | Creation timestamp |
+| `updated_at` | TIMESTAMP | No | `NOW()` | Last update timestamp |
+| `last_login_at` | TIMESTAMP | Yes | - | Last login timestamp |
+| `deleted_at` | TIMESTAMP | Yes | - | Soft delete timestamp |
+
+**Indexes:**
+- Primary key on `id`
+- Unique index on `email`
+
+**Notes:**
+- `credits_balance` is a cached value; the authoritative balance is calculated from `credit_transactions`
+- Users can authenticate via OAuth providers (Google, Apple)
+
+---
+
+### credit_transactions
+
+Ledger table for all credit changes. The user's balance is calculated as `SUM(credits_delta)`.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | No | `gen_random_uuid()` | Primary key |
+| `user_id` | UUID | No | - | FK to users (CASCADE DELETE) |
+| `credits_delta` | INTEGER | No | - | Credit change (+/-) |
+| `type` | VARCHAR(30) | No | - | Transaction type |
+| `idempotency_key` | VARCHAR(255) | Yes | - | Unique key for deduplication |
+| `stripe_payment_intent_id` | VARCHAR(255) | Yes | - | Stripe Payment Intent ID |
+| `stripe_checkout_session_id` | VARCHAR(255) | Yes | - | Stripe Checkout Session ID |
+| `job_id` | UUID | Yes | - | FK to jobs (SET NULL) |
+| `description` | TEXT | Yes | - | Human-readable description |
+| `metadata` | JSONB | Yes | - | Additional metadata |
+| `created_at` | TIMESTAMP | No | `NOW()` | Creation timestamp |
+
+**Transaction Types:**
+- `signup_grant` - Free credits on signup (5 credits)
+- `purchase` - Credits purchased via Stripe
+- `spend` - Credits spent on job processing
+- `refund` - Credits refunded
+- `admin_adjustment` - Manual admin adjustment
+
+**Indexes:**
+- Primary key on `id`
+- Unique index on `idempotency_key`
+- Index on `user_id`
+- Index on `type`
+- Index on `created_at`
+
+**Metadata Schema** (JSONB):
+```typescript
+{
+  packType?: 'CREDIT_1' | 'PACK_20' | 'PACK_100' | 'PACK_500';
+  priceUsd?: number;
+  stripeEventId?: string;
+  adminReason?: string;
+  videoDurationSeconds?: number;
+  frameCount?: number;
+  costBreakdown?: CostBreakdownItem[];
+}
+```
+
+---
+
+### stripe_events
+
+Webhook idempotency tracking to prevent double-processing of Stripe events.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | No | `gen_random_uuid()` | Primary key |
+| `event_id` | VARCHAR(255) | No | - | Stripe event ID (unique) |
+| `event_type` | VARCHAR(100) | No | - | Event type (e.g., `checkout.session.completed`) |
+| `processed` | BOOLEAN | No | `false` | Processing status |
+| `processed_at` | TIMESTAMP | Yes | - | When processing completed |
+| `error` | TEXT | Yes | - | Error message if failed |
+| `created_at` | TIMESTAMP | No | `NOW()` | Creation timestamp |
+
+**Indexes:**
+- Primary key on `id`
+- Unique index on `event_id`
+
+---
+
+### signup_grants
+
+Abuse prevention tracking for free signup credits.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | No | `gen_random_uuid()` | Primary key |
+| `user_id` | UUID | No | - | FK to users (unique, CASCADE DELETE) |
+| `ip_address` | VARCHAR(45) | Yes | - | IP address at signup |
+| `device_fingerprint` | VARCHAR(255) | Yes | - | Device fingerprint |
+| `email` | VARCHAR(255) | No | - | Email for logging |
+| `granted_at` | TIMESTAMP | No | `NOW()` | Grant timestamp |
+| `transaction_id` | UUID | Yes | - | FK to credit_transactions |
+
+**Indexes:**
+- Primary key on `id`
+- Unique index on `user_id` (one grant per user)
+- Index on `ip_address`
+- Index on `device_fingerprint`
+
+**Abuse Prevention:**
+- Limits grants per IP address (configurable via `SIGNUP_GRANT_IP_LIMIT`)
+- Limits grants per device fingerprint (configurable via `SIGNUP_GRANT_DEVICE_LIMIT`)
+
+---
+
 ## Relations
 
 Drizzle ORM relations are defined for easy querying:
 
 ```typescript
+// User has many credit transactions
+usersRelations: users.id → creditTransactions.userId (one-to-many)
+
+// User has one signup grant
+usersRelations: users.id → signupGrants.userId (one-to-one)
+
+// User has many jobs
+usersRelations: users.id → jobs.userId (one-to-many)
+
+// Credit transaction belongs to a user
+creditTransactionsRelations: creditTransactions.userId → users.id
+
+// Credit transaction optionally belongs to a job
+creditTransactionsRelations: creditTransactions.jobId → jobs.id
+
+// Signup grant belongs to a user
+signupGrantsRelations: signupGrants.userId → users.id
+
+// Signup grant references a credit transaction
+signupGrantsRelations: signupGrants.transactionId → creditTransactions.id
+
 // Job has one video
 jobsRelations: jobs.id → videos.jobId (one-to-one)
 
@@ -350,7 +524,10 @@ videosRelations: videos.id → frames.videoId (one-to-many)
 framesRelations: frames.id → commercialImages.frameId (one-to-many)
 ```
 
-All foreign keys use `CASCADE DELETE` - deleting a job removes all related records.
+**Foreign Key Behaviors:**
+- Most foreign keys use `CASCADE DELETE` - deleting a parent removes related records
+- `jobs.userId` uses `SET NULL` - deleting a user keeps the job but nullifies the reference
+- `creditTransactions.jobId` uses `SET NULL` - keeps transaction history when jobs are deleted
 
 ---
 

@@ -844,7 +844,7 @@ Clear the in-memory cache.
 | `pipeline.batchSize` | number | 30 | Frames per Gemini batch |
 | `ai.geminiModel` | string | `gemini-2.0-flash` | Model for classification |
 | `ai.geminiVideoModel` | string | `gemini-2.0-flash` | Model for video analysis |
-| `ai.geminiImageModel` | string | `gemini-3-pro-image-preview` | Model for image generation |
+| `ai.geminiImageModel` | string | `gemini-2.5-flash-image` | Model for image generation |
 | `ai.temperature` | number | 0.2 | AI temperature |
 | `ai.topP` | number | 0.8 | AI top-p |
 | `scoring.motionAlpha` | number | 0.3 | Motion penalty weight |
@@ -1518,7 +1518,7 @@ When `referenceFramePaths` is provided:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `ai.geminiImageModel` | `gemini-3-pro-image-preview` | Model for image generation |
+| `ai.geminiImageModel` | `gemini-2.5-flash-image` | Model for image generation |
 
 ### Processor
 

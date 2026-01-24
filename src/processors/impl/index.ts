@@ -9,7 +9,9 @@
  * - gemini/   - Google Gemini AI
  * - photoroom/ - Photoroom API
  * - claid/    - Claid API
+ * - stability/ - Stability AI API
  * - db/       - Database operations
+ * - credits/  - Credit management
  * - util/     - Pure logic utilities
  */
 
@@ -56,6 +58,9 @@ export { completeJobProcessor } from './db/complete-job.js';
 // Utility processors
 export { filterByScoreProcessor } from './util/filter-by-score.js';
 
+// Credit management processors
+export { spendCreditsProcessor } from './credits/spend-credits.js';
+
 // Import all for registration
 import type { Processor } from '../types.js';
 import { downloadProcessor } from './storage/download.js';
@@ -83,6 +88,7 @@ import { stabilityCommercialProcessor } from './stability/stability-commercial.j
 import { saveFrameRecordsProcessor } from './db/save-frame-records.js';
 import { completeJobProcessor } from './db/complete-job.js';
 import { filterByScoreProcessor } from './util/filter-by-score.js';
+import { spendCreditsProcessor } from './credits/spend-credits.js';
 
 /**
  * All processor implementations
@@ -122,4 +128,6 @@ export const allProcessors: Processor[] = [
   completeJobProcessor,
   // Utility
   filterByScoreProcessor,
+  // Credits
+  spendCreditsProcessor,
 ];

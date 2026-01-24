@@ -51,6 +51,13 @@ vi.mock('../../providers/implementations/gemini-video-analysis.provider.js', () 
   GeminiVideoAnalysisProvider: vi.fn(),
   geminiVideoAnalysisProvider: {},
 }));
+vi.mock('../../services/credits.service.js', () => ({
+  creditsService: {
+    calculateJobCost: vi.fn(),
+    calculateJobCostWithAffordability: vi.fn(),
+    spendCredits: vi.fn(),
+  },
+}));
 
 describe('Stack Templates', () => {
   describe('stackTemplates', () => {
@@ -82,6 +89,7 @@ describe('Stack Templates', () => {
 
       expect(processorIds).toEqual([
         'download',
+        'spend-credits',
         'extract-frames',
         'score-frames',
         'gemini-classify',
@@ -116,6 +124,7 @@ describe('Stack Templates', () => {
 
       expect(processorIds).toEqual([
         'download',
+        'spend-credits',
         'gemini-video-analysis',
         'save-frame-records',
         'claid-bg-remove',

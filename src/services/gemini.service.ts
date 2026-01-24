@@ -116,7 +116,7 @@ export class GeminiService {
    */
   private getModel(modelName?: string): GenerativeModel {
     // Default model - should be passed from effectiveConfig by processor
-    const model = modelName || 'gemini-3-pro-preview';
+    const model = modelName || 'gemini-3-flash-preview';
     const client = this.init();
     return client.getGenerativeModel({
       model,
@@ -300,7 +300,7 @@ Return ONLY the JSON object. No additional text.`;
   ): Promise<GeminiResponse> {
     const config = getConfig();
     const {
-      model = 'gemini-3-pro-preview',
+      model = 'gemini-3-flash-preview',
       maxRetries = 3,
       retryDelay = config.worker.apiRetryDelayMs,
     } = options;
