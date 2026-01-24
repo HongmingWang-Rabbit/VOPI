@@ -44,6 +44,729 @@ Swagger UI is available at `/docs` when the server is running.
 
 ---
 
+## Production API
+
+**Base URL**: `https://api.vopi.24rabbit.com`
+
+---
+
+## Auth Endpoints (User Authentication)
+
+VOPI supports two authentication methods:
+1. **JWT Authentication** (for end users) - OAuth login via Google/Apple, returns access + refresh tokens
+2. **API Key Authentication** (for server-to-server) - Static keys for backend integrations
+
+### Authentication Header
+
+```bash
+# JWT Authentication (user apps)
+Authorization: Bearer <access_token>
+
+# API Key Authentication (server integrations)
+x-api-key: <api_key>
+```
+
+Most endpoints accept either authentication method. User-specific endpoints (credits, profile) require JWT.
+
+---
+
+### GET /api/v1/auth/providers
+
+Check which OAuth providers are available/configured.
+
+**Authentication**: None required
+
+**Response** `200 OK`
+```json
+{
+  "google": true,
+  "apple": true
+}
+```
+
+---
+
+### POST /api/v1/auth/oauth/init
+
+Initialize OAuth flow and get authorization URL. The client redirects the user to this URL.
+
+**Authentication**: None required
+
+**Request Body**
+```json
+{
+  "provider": "google",
+  "redirectUri": "com.yourapp://oauth/callback",
+  "state": "optional-csrf-token",
+  "codeChallenge": "optional-pkce-challenge",
+  "codeChallengeMethod": "S256"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | string | Yes | `google` or `apple` |
+| `redirectUri` | string (URL) | Yes | Your app's callback URL (see integration guides) |
+| `state` | string | No | CSRF token (generated if not provided) |
+| `codeChallenge` | string | No | PKCE code challenge (generated if not provided) |
+| `codeChallengeMethod` | string | No | `S256` (recommended) or `plain` |
+
+**Response** `200 OK`
+```json
+{
+  "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth?client_id=...&redirect_uri=...&state=...",
+  "state": "abc123...",
+  "codeVerifier": "xyz789..."
+}
+```
+
+**Important**:
+- `codeVerifier` is only returned if the server generated PKCE (when you didn't provide `codeChallenge`)
+- Store `state` and `codeVerifier` securely - you'll need them for the callback
+
+---
+
+### POST /api/v1/auth/oauth/callback
+
+Exchange OAuth authorization code for access and refresh tokens. Call this after the user completes OAuth.
+
+**Authentication**: None required
+
+**Request Body**
+```json
+{
+  "provider": "google",
+  "code": "authorization_code_from_oauth",
+  "redirectUri": "com.yourapp://oauth/callback",
+  "state": "abc123...",
+  "codeVerifier": "xyz789...",
+  "deviceInfo": {
+    "deviceId": "unique-device-id",
+    "deviceName": "iPhone 15 Pro"
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | string | Yes | `google` or `apple` |
+| `code` | string | Yes | Authorization code from OAuth redirect |
+| `redirectUri` | string (URL) | Yes | Must match the one used in init |
+| `state` | string | No | The state from init (validated against stored state) |
+| `codeVerifier` | string | No | PKCE verifier (from init or your own) |
+| `deviceInfo` | object | No | Device identification for token tracking |
+
+**Response** `200 OK`
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4...",
+  "expiresIn": 3600,
+  "tokenType": "Bearer",
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "avatarUrl": "https://lh3.googleusercontent.com/...",
+    "creditsBalance": 5
+  }
+}
+```
+
+**Notes**:
+- `accessToken` expires in 1 hour (3600 seconds)
+- `refreshToken` expires in 30 days
+- New users automatically receive 5 signup credits (one-time, abuse-protected)
+
+**Error Responses**:
+
+`400 Bad Request` - Invalid state
+```json
+{
+  "error": "INVALID_STATE",
+  "message": "Invalid or expired state parameter"
+}
+```
+
+`400 Bad Request` - Provider mismatch
+```json
+{
+  "error": "PROVIDER_MISMATCH",
+  "message": "OAuth provider does not match state"
+}
+```
+
+---
+
+### POST /api/v1/auth/refresh
+
+Refresh an expired access token using the refresh token.
+
+**Authentication**: None required (refresh token in body)
+
+**Request Body**
+```json
+{
+  "refreshToken": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4..."
+}
+```
+
+**Response** `200 OK`
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "bmV3IHJlZnJlc2ggdG9rZW4...",
+  "expiresIn": 3600,
+  "tokenType": "Bearer"
+}
+```
+
+**Note**: A new refresh token is returned. Store it and discard the old one.
+
+**Error Response** `401 Unauthorized`
+```json
+{
+  "error": "INVALID_TOKEN",
+  "message": "Refresh token is invalid or expired"
+}
+```
+
+---
+
+### POST /api/v1/auth/logout
+
+Revoke refresh token(s) to logout.
+
+**Authentication**: Optional (required for `allDevices: true`)
+
+**Request Body**
+```json
+{
+  "refreshToken": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4...",
+  "allDevices": false
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `refreshToken` | string | No* | Specific token to revoke |
+| `allDevices` | boolean | No | Revoke all refresh tokens for user (requires auth) |
+
+*Either `refreshToken` or `allDevices: true` must be provided.
+
+**Response** `200 OK`
+```json
+{
+  "success": true,
+  "message": "Logged out successfully"
+}
+```
+
+Or for all devices:
+```json
+{
+  "success": true,
+  "message": "Logged out from all devices"
+}
+```
+
+---
+
+### GET /api/v1/auth/me
+
+Get current authenticated user's profile.
+
+**Authentication**: Required (JWT)
+
+**Response** `200 OK`
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "email": "user@example.com",
+  "emailVerified": true,
+  "name": "John Doe",
+  "avatarUrl": "https://lh3.googleusercontent.com/...",
+  "createdAt": "2025-01-23T10:00:00.000Z",
+  "lastLoginAt": "2025-01-23T15:30:00.000Z"
+}
+```
+
+---
+
+## Frontend Integration Guides
+
+### Mobile App Integration (iOS / Android)
+
+#### 1. Configure OAuth Redirect URI
+
+Register a custom URL scheme for your app:
+
+**iOS** (Info.plist):
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>com.yourapp</string>
+    </array>
+  </dict>
+</array>
+```
+
+**Android** (AndroidManifest.xml):
+```xml
+<intent-filter>
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data android:scheme="com.yourapp" android:host="oauth" android:pathPrefix="/callback" />
+</intent-filter>
+```
+
+#### 2. OAuth Login Flow
+
+```typescript
+// Step 1: Initialize OAuth
+const initResponse = await fetch('https://api.vopi.24rabbit.com/api/v1/auth/oauth/init', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    provider: 'google', // or 'apple'
+    redirectUri: 'com.yourapp://oauth/callback',
+  }),
+});
+
+const { authorizationUrl, state, codeVerifier } = await initResponse.json();
+
+// Store state and codeVerifier securely (e.g., Keychain/Keystore)
+await SecureStorage.set('oauth_state', state);
+await SecureStorage.set('oauth_code_verifier', codeVerifier);
+
+// Step 2: Open OAuth URL in browser/WebView
+// iOS: ASWebAuthenticationSession
+// Android: Custom Tabs
+await openAuthSession(authorizationUrl);
+
+// Step 3: Handle callback (when app receives redirect)
+// URL: com.yourapp://oauth/callback?code=xxx&state=yyy
+function handleOAuthCallback(url: string) {
+  const params = new URLSearchParams(url.split('?')[1]);
+  const code = params.get('code');
+  const returnedState = params.get('state');
+
+  // Retrieve stored values
+  const storedState = await SecureStorage.get('oauth_state');
+  const codeVerifier = await SecureStorage.get('oauth_code_verifier');
+
+  // Validate state matches
+  if (returnedState !== storedState) {
+    throw new Error('State mismatch - possible CSRF attack');
+  }
+
+  // Exchange code for tokens
+  const tokenResponse = await fetch('https://api.vopi.24rabbit.com/api/v1/auth/oauth/callback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'google',
+      code,
+      redirectUri: 'com.yourapp://oauth/callback',
+      state: storedState,
+      codeVerifier,
+      deviceInfo: {
+        deviceId: await getDeviceId(),
+        deviceName: await getDeviceName(),
+      },
+    }),
+  });
+
+  const { accessToken, refreshToken, user } = await tokenResponse.json();
+
+  // Store tokens securely
+  await SecureStorage.set('access_token', accessToken);
+  await SecureStorage.set('refresh_token', refreshToken);
+
+  // Clean up OAuth state
+  await SecureStorage.delete('oauth_state');
+  await SecureStorage.delete('oauth_code_verifier');
+
+  return user;
+}
+```
+
+#### 3. Token Refresh (with automatic retry)
+
+```typescript
+let isRefreshing = false;
+let refreshPromise: Promise<string> | null = null;
+
+async function getValidAccessToken(): Promise<string> {
+  const accessToken = await SecureStorage.get('access_token');
+
+  // Check if token is expired (decode JWT and check exp)
+  if (!isTokenExpired(accessToken)) {
+    return accessToken;
+  }
+
+  // Prevent concurrent refresh requests
+  if (isRefreshing) {
+    return refreshPromise!;
+  }
+
+  isRefreshing = true;
+  refreshPromise = refreshAccessToken();
+
+  try {
+    return await refreshPromise;
+  } finally {
+    isRefreshing = false;
+    refreshPromise = null;
+  }
+}
+
+async function refreshAccessToken(): Promise<string> {
+  const refreshToken = await SecureStorage.get('refresh_token');
+
+  const response = await fetch('https://api.vopi.24rabbit.com/api/v1/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  if (!response.ok) {
+    // Refresh token expired - user needs to login again
+    await clearTokens();
+    throw new Error('Session expired. Please login again.');
+  }
+
+  const { accessToken, refreshToken: newRefreshToken } = await response.json();
+
+  await SecureStorage.set('access_token', accessToken);
+  await SecureStorage.set('refresh_token', newRefreshToken);
+
+  return accessToken;
+}
+
+// Use in API calls
+async function apiRequest(url: string, options: RequestInit = {}) {
+  const accessToken = await getValidAccessToken();
+
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      'Authorization': `Bearer ${accessToken}`,
+    },
+  });
+}
+```
+
+---
+
+### Web App Integration (React / Next.js)
+
+#### 1. Configure OAuth Redirect URI
+
+Use your web domain with a callback route:
+```
+https://yourapp.com/auth/callback
+```
+
+Register this URL in Google Cloud Console and Apple Developer portal.
+
+#### 2. OAuth Login Flow (React)
+
+```typescript
+// components/LoginButton.tsx
+export function LoginButton({ provider }: { provider: 'google' | 'apple' }) {
+  const handleLogin = async () => {
+    // Step 1: Initialize OAuth
+    const response = await fetch('https://api.vopi.24rabbit.com/api/v1/auth/oauth/init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider,
+        redirectUri: `${window.location.origin}/auth/callback`,
+      }),
+    });
+
+    const { authorizationUrl, state, codeVerifier } = await response.json();
+
+    // Store in sessionStorage (cleared when browser closes)
+    sessionStorage.setItem('oauth_state', state);
+    sessionStorage.setItem('oauth_code_verifier', codeVerifier || '');
+    sessionStorage.setItem('oauth_provider', provider);
+
+    // Redirect to OAuth provider
+    window.location.href = authorizationUrl;
+  };
+
+  return (
+    <button onClick={handleLogin}>
+      Continue with {provider === 'google' ? 'Google' : 'Apple'}
+    </button>
+  );
+}
+```
+
+```typescript
+// pages/auth/callback.tsx (or app/auth/callback/page.tsx for App Router)
+import { useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+
+export default function AuthCallback() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    async function handleCallback() {
+      const code = searchParams.get('code');
+      const returnedState = searchParams.get('state');
+
+      // Retrieve stored values
+      const storedState = sessionStorage.getItem('oauth_state');
+      const codeVerifier = sessionStorage.getItem('oauth_code_verifier');
+      const provider = sessionStorage.getItem('oauth_provider');
+
+      // Validate state
+      if (returnedState !== storedState) {
+        console.error('State mismatch');
+        router.push('/login?error=invalid_state');
+        return;
+      }
+
+      try {
+        // Exchange code for tokens
+        const response = await fetch('https://api.vopi.24rabbit.com/api/v1/auth/oauth/callback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider,
+            code,
+            redirectUri: `${window.location.origin}/auth/callback`,
+            state: storedState,
+            codeVerifier: codeVerifier || undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Token exchange failed');
+        }
+
+        const { accessToken, refreshToken, user } = await response.json();
+
+        // Store tokens (use httpOnly cookies in production for security)
+        localStorage.setItem('access_token', accessToken);
+        localStorage.setItem('refresh_token', refreshToken);
+
+        // Clear OAuth state
+        sessionStorage.removeItem('oauth_state');
+        sessionStorage.removeItem('oauth_code_verifier');
+        sessionStorage.removeItem('oauth_provider');
+
+        // Redirect to app
+        router.push('/dashboard');
+      } catch (error) {
+        console.error('Auth error:', error);
+        router.push('/login?error=auth_failed');
+      }
+    }
+
+    handleCallback();
+  }, [searchParams, router]);
+
+  return <div>Completing sign in...</div>;
+}
+```
+
+#### 3. Auth Context (React)
+
+```typescript
+// contexts/AuthContext.tsx
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+
+interface User {
+  id: string;
+  email: string;
+  name?: string;
+  avatarUrl?: string;
+  creditsBalance: number;
+}
+
+interface AuthContextType {
+  user: User | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  login: (provider: 'google' | 'apple') => void;
+  logout: () => Promise<void>;
+  getAccessToken: () => Promise<string | null>;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load user on mount
+  useEffect(() => {
+    async function loadUser() {
+      const accessToken = localStorage.getItem('access_token');
+      if (!accessToken) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const response = await fetch('https://api.vopi.24rabbit.com/api/v1/auth/me', {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+
+        if (response.ok) {
+          const userData = await response.json();
+          setUser(userData);
+        } else if (response.status === 401) {
+          // Try to refresh token
+          const newToken = await refreshToken();
+          if (newToken) {
+            const retryResponse = await fetch('https://api.vopi.24rabbit.com/api/v1/auth/me', {
+              headers: { 'Authorization': `Bearer ${newToken}` },
+            });
+            if (retryResponse.ok) {
+              setUser(await retryResponse.json());
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load user:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadUser();
+  }, []);
+
+  const refreshToken = useCallback(async (): Promise<string | null> => {
+    const refreshTokenValue = localStorage.getItem('refresh_token');
+    if (!refreshTokenValue) return null;
+
+    try {
+      const response = await fetch('https://api.vopi.24rabbit.com/api/v1/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: refreshTokenValue }),
+      });
+
+      if (!response.ok) {
+        // Refresh failed - clear tokens
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        setUser(null);
+        return null;
+      }
+
+      const { accessToken, refreshToken: newRefreshToken } = await response.json();
+      localStorage.setItem('access_token', accessToken);
+      localStorage.setItem('refresh_token', newRefreshToken);
+      return accessToken;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const getAccessToken = useCallback(async (): Promise<string | null> => {
+    const accessToken = localStorage.getItem('access_token');
+    if (!accessToken) return null;
+
+    // Check if expired
+    try {
+      const payload = JSON.parse(atob(accessToken.split('.')[1]));
+      if (payload.exp * 1000 < Date.now()) {
+        return await refreshToken();
+      }
+    } catch {
+      return await refreshToken();
+    }
+
+    return accessToken;
+  }, [refreshToken]);
+
+  const logout = useCallback(async () => {
+    const refreshTokenValue = localStorage.getItem('refresh_token');
+
+    if (refreshTokenValue) {
+      await fetch('https://api.vopi.24rabbit.com/api/v1/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: refreshTokenValue }),
+      });
+    }
+
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    setUser(null);
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      isLoading,
+      isAuthenticated: !!user,
+      login: (provider) => { /* trigger OAuth flow */ },
+      logout,
+      getAccessToken,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  return context;
+};
+```
+
+---
+
+### Apple Sign In Notes
+
+1. **Web**: Apple requires HTTPS for redirect URIs
+2. **iOS**: Use `AuthenticationServices` framework with `ASAuthorizationAppleIDProvider`
+3. **First Login**: Apple only sends user's name on first authorization. Store it!
+4. **Private Email**: User may choose to hide email (uses Apple relay address)
+
+```swift
+// iOS Native Apple Sign In
+import AuthenticationServices
+
+class LoginViewController: UIViewController, ASAuthorizationControllerDelegate {
+    func startAppleSignIn() {
+        let provider = ASAuthorizationAppleIDProvider()
+        let request = provider.createRequest()
+        request.requestedScopes = [.fullName, .email]
+
+        let controller = ASAuthorizationController(authorizationRequests: [request])
+        controller.delegate = self
+        controller.presentationContextProvider = self
+        controller.performRequests()
+    }
+
+    func authorizationController(controller: ASAuthorizationController,
+                                  didCompleteWithAuthorization authorization: ASAuthorization) {
+        if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            let authCode = String(data: credential.authorizationCode!, encoding: .utf8)!
+            // Send authCode to /api/v1/auth/oauth/callback with provider: 'apple'
+        }
+    }
+}
+```
+
+---
+
 ## Health Endpoints
 
 ### GET /health
