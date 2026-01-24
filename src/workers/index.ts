@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import http from 'node:http';
 
 import { parseEnv } from '../config/env.js';
 import { getConfig } from '../config/index.js';
@@ -10,6 +11,43 @@ import { startTokenRefreshWorker, stopTokenRefreshWorker } from './token-refresh
 import { videoService } from '../services/video.service.js';
 import { setupDefaultProviders } from '../providers/setup.js';
 import { setupProcessors } from '../processors/setup.js';
+
+// Simple health check server for container orchestration
+let healthServer: http.Server | null = null;
+
+/**
+ * Start a simple HTTP server for health checks
+ * This allows container orchestrators like Railway to verify the worker is running
+ */
+function startHealthServer(port: number): void {
+  healthServer = http.createServer((req, res) => {
+    if (req.url === '/health' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', service: 'worker' }));
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+
+  healthServer.listen(port, () => {
+    const logger = getLogger();
+    logger.info({ port }, 'Worker health server started');
+  });
+}
+
+/**
+ * Stop the health server
+ */
+async function stopHealthServer(): Promise<void> {
+  return new Promise((resolve) => {
+    if (healthServer) {
+      healthServer.close(() => resolve());
+    } else {
+      resolve();
+    }
+  });
+}
 
 /**
  * Worker entry point
@@ -46,8 +84,12 @@ async function main(): Promise<void> {
   startPipelineWorker();
   startTokenRefreshWorker();
 
+  // Start health check server for container orchestration (Railway, K8s, etc.)
+  const healthPort = config.server.port;
+  startHealthServer(healthPort);
+
   logger.info(
-    { concurrency: config.worker.concurrency },
+    { concurrency: config.worker.concurrency, healthPort },
     'Workers started successfully'
   );
 
@@ -56,6 +98,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Received shutdown signal');
 
     try {
+      await stopHealthServer();
       await stopPipelineWorker();
       await stopTokenRefreshWorker();
       await closeRedis();
