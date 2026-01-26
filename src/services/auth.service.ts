@@ -289,6 +289,20 @@ class AuthService {
       throw new UserDeletedError(decoded.sub);
     }
 
+    // Validate user has required fields for token generation
+    if (!user.id || !user.email) {
+      logger.error(
+        { userId: decoded.sub, hasId: !!user.id, hasEmail: !!user.email },
+        'User missing required fields for token generation'
+      );
+      throw new Error('User data incomplete - cannot generate tokens');
+    }
+
+    logger.debug(
+      { userId: user.id, email: user.email },
+      'Refreshing tokens for user'
+    );
+
     // Revoke old refresh token (rotation)
     await db
       .update(schema.refreshTokens)
@@ -298,6 +312,11 @@ class AuthService {
     // Generate new tokens
     const accessToken = this.generateAccessToken(user);
     const newRefreshToken = await this.generateRefreshToken(user, deviceInfo);
+
+    logger.info(
+      { userId: user.id, accessTokenLength: accessToken.length },
+      'Generated new tokens via refresh'
+    );
 
     const expiresIn = Math.floor(
       parseDuration(config.jwt.accessTokenExpiresIn) / 1000
