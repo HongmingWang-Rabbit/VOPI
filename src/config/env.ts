@@ -105,9 +105,16 @@ export const envSchema = z.object({
   JWT_ACCESS_TOKEN_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_TOKEN_EXPIRES_IN: z.string().default('7d'),
 
-  // Google OAuth
+  // Google OAuth - Web Client (for backend)
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_REDIRECT_URI: z.string().url().optional(),
+
+  // Google OAuth - Mobile Clients (for token verification)
+  GOOGLE_IOS_CLIENT_ID: z.string().optional(),
+  GOOGLE_IOS_BUNDLE_ID: z.string().optional(),
+  GOOGLE_ANDROID_CLIENT_ID: z.string().optional(),
+  GOOGLE_ANDROID_PACKAGE_NAME: z.string().optional(),
 
   // Apple OAuth
   APPLE_CLIENT_ID: z.string().optional(),

@@ -94,6 +94,16 @@ export interface AppConfig {
   googleOAuth: {
     clientId?: string;
     clientSecret?: string;
+    redirectUri?: string;
+    // Mobile clients for token verification
+    ios?: {
+      clientId?: string;
+      bundleId?: string;
+    };
+    android?: {
+      clientId?: string;
+      packageName?: string;
+    };
   };
   appleOAuth: {
     clientId?: string;
@@ -232,6 +242,15 @@ export function buildConfig(env: Env): AppConfig {
     googleOAuth: {
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
+      redirectUri: env.GOOGLE_REDIRECT_URI,
+      ios: {
+        clientId: env.GOOGLE_IOS_CLIENT_ID,
+        bundleId: env.GOOGLE_IOS_BUNDLE_ID,
+      },
+      android: {
+        clientId: env.GOOGLE_ANDROID_CLIENT_ID,
+        packageName: env.GOOGLE_ANDROID_PACKAGE_NAME,
+      },
     },
     appleOAuth: {
       clientId: env.APPLE_CLIENT_ID,

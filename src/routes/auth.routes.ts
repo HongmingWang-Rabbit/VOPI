@@ -16,6 +16,7 @@ import {
   logoutRequestSchema,
   OAuthProvider,
   type OAuthCallbackRequest,
+  type ClientPlatformType,
 } from '../types/auth.types.js';
 
 const logger = getLogger().child({ service: 'auth-routes' });
@@ -84,10 +85,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           required: ['provider', 'redirectUri'],
           properties: {
             provider: { type: 'string', enum: ['google', 'apple'] },
-            redirectUri: { type: 'string', format: 'uri' },
+            redirectUri: { type: 'string' }, // Allow custom schemes for mobile
             state: { type: 'string' },
             codeChallenge: { type: 'string' },
             codeChallengeMethod: { type: 'string', enum: ['S256', 'plain'] },
+            platform: { type: 'string', enum: ['ios', 'android', 'web'], default: 'web' },
           },
         },
         response: {
@@ -135,11 +137,16 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
             codeVerifier = pkce.codeVerifier;
           }
 
+          // Use platform-specific client ID
+          const platform = body.platform as ClientPlatformType ?? 'web';
+          logger.info({ platform, redirectUri: body.redirectUri }, 'Initializing Google OAuth');
+
           authorizationUrl = googleOAuthProvider.getAuthorizationUrl({
             redirectUri: body.redirectUri,
             state,
             codeChallenge,
             codeChallengeMethod: body.codeChallengeMethod ?? 'S256',
+            platform,
           });
           break;
         }
@@ -176,11 +183,12 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           });
       }
 
-      // Store state for validation
+      // Store state for validation (including platform for callback)
       const stateData: OAuthStateData = {
         provider: body.provider,
         redirectUri: body.redirectUri,
         codeVerifier,
+        platform: body.platform as 'ios' | 'android' | 'web' ?? 'web',
         expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
       };
       await stateStoreService.set(state, stateData);
@@ -214,9 +222,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           properties: {
             provider: { type: 'string', enum: ['google', 'apple'] },
             code: { type: 'string' },
-            redirectUri: { type: 'string', format: 'uri' },
+            redirectUri: { type: 'string' }, // Allow custom schemes for mobile
             state: { type: 'string' },
             codeVerifier: { type: 'string' },
+            platform: { type: 'string', enum: ['ios', 'android', 'web'], default: 'web' },
             deviceInfo: {
               type: 'object',
               properties: {
@@ -253,6 +262,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
       // Validate state if provided
       let codeVerifier = body.codeVerifier;
+      let platform: ClientPlatformType = body.platform ?? 'web';
+
       if (body.state) {
         const storedState = await stateStoreService.get(body.state, true); // deleteAfterGet
         if (!storedState) {
@@ -273,6 +284,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         if (!codeVerifier && storedState.codeVerifier) {
           codeVerifier = storedState.codeVerifier;
         }
+
+        // Use stored platform (takes precedence over body to ensure consistency)
+        if (storedState.platform) {
+          platform = storedState.platform;
+        }
       }
 
       // Get device info
@@ -285,11 +301,14 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
       switch (body.provider) {
         case OAuthProvider.GOOGLE: {
-          // Exchange code for tokens
+          logger.info({ platform, redirectUri: body.redirectUri }, 'Processing Google OAuth callback');
+
+          // Exchange code for tokens (using platform-specific client ID)
           const tokens = await googleOAuthProvider.exchangeCode(
             body.code,
             body.redirectUri,
-            codeVerifier
+            codeVerifier,
+            platform
           );
 
           // Get user profile

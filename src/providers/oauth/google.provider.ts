@@ -5,6 +5,7 @@ import type {
   OAuthUserProfile,
   OAuthTokens,
   GoogleProviderData,
+  ClientPlatformType,
 } from '../../types/auth.types.js';
 
 const logger = getLogger().child({ provider: 'google-oauth' });
@@ -20,6 +21,7 @@ interface GoogleAuthOptions {
   codeChallengeMethod?: 'S256' | 'plain';
   accessType?: 'online' | 'offline';
   prompt?: 'none' | 'consent' | 'select_account';
+  platform?: ClientPlatformType; // ios, android, or web
 }
 
 interface GoogleTokenResponse {
@@ -48,19 +50,60 @@ interface GoogleUserInfo {
  */
 class GoogleOAuthProvider {
   /**
-   * Get Google OAuth configuration
+   * Get Google OAuth configuration for a specific platform
+   *
+   * @param platform - 'ios', 'android', or 'web' (default)
+   * @returns Client ID and Client Secret (secret only for web)
    */
-  private getConfig() {
+  private getConfigForPlatform(platform: ClientPlatformType = 'web') {
     const config = getConfig();
 
+    // Web client (has client secret, used for backend token exchange)
     if (!config.googleOAuth.clientId || !config.googleOAuth.clientSecret) {
-      throw new Error('Google OAuth is not configured');
+      throw new Error('Google OAuth Web client is not configured');
     }
 
-    return {
-      clientId: config.googleOAuth.clientId,
-      clientSecret: config.googleOAuth.clientSecret,
-    };
+    switch (platform) {
+      case 'ios': {
+        const iosClientId = config.googleOAuth.ios?.clientId;
+        if (!iosClientId) {
+          throw new Error('Google OAuth iOS client is not configured (GOOGLE_IOS_CLIENT_ID)');
+        }
+        return {
+          clientId: iosClientId,
+          // iOS apps don't use client secret - they use the authorization code directly
+          // But token exchange still requires the web client secret
+          clientSecret: config.googleOAuth.clientSecret,
+        };
+      }
+
+      case 'android': {
+        const androidClientId = config.googleOAuth.android?.clientId;
+        if (!androidClientId) {
+          throw new Error('Google OAuth Android client is not configured (GOOGLE_ANDROID_CLIENT_ID)');
+        }
+        return {
+          clientId: androidClientId,
+          // Android apps don't use client secret
+          clientSecret: config.googleOAuth.clientSecret,
+        };
+      }
+
+      case 'web':
+      default:
+        return {
+          clientId: config.googleOAuth.clientId,
+          clientSecret: config.googleOAuth.clientSecret,
+        };
+    }
+  }
+
+  /**
+   * Get Google OAuth configuration (legacy - defaults to web)
+   * @deprecated Use getConfigForPlatform instead
+   */
+  private getConfig() {
+    return this.getConfigForPlatform('web');
   }
 
   /**
@@ -83,9 +126,14 @@ class GoogleOAuthProvider {
 
   /**
    * Generate Google OAuth authorization URL
+   *
+   * Uses platform-specific client ID to ensure the redirect URI is allowed
    */
   getAuthorizationUrl(options: GoogleAuthOptions): string {
-    const { clientId } = this.getConfig();
+    const platform = options.platform ?? 'web';
+    const { clientId } = this.getConfigForPlatform(platform);
+
+    logger.debug({ platform, clientId: clientId.substring(0, 20) + '...' }, 'Generating authorization URL');
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -110,13 +158,21 @@ class GoogleOAuthProvider {
 
   /**
    * Exchange authorization code for tokens
+   *
+   * @param code - Authorization code from OAuth callback
+   * @param redirectUri - Must match the redirect URI used in getAuthorizationUrl
+   * @param codeVerifier - PKCE code verifier (if PKCE was used)
+   * @param platform - Must match the platform used in getAuthorizationUrl
    */
   async exchangeCode(
     code: string,
     redirectUri: string,
-    codeVerifier?: string
+    codeVerifier?: string,
+    platform: ClientPlatformType = 'web'
   ): Promise<OAuthTokens> {
-    const { clientId, clientSecret } = this.getConfig();
+    const { clientId, clientSecret } = this.getConfigForPlatform(platform);
+
+    logger.debug({ platform, clientId: clientId.substring(0, 20) + '...' }, 'Exchanging authorization code for tokens');
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -130,8 +186,6 @@ class GoogleOAuthProvider {
       params.set('code_verifier', codeVerifier);
     }
 
-    logger.debug('Exchanging authorization code for tokens');
-
     const response = await fetch(GOOGLE_TOKEN_URL, {
       method: 'POST',
       headers: {
@@ -142,7 +196,7 @@ class GoogleOAuthProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      logger.error({ status: response.status, error }, 'Token exchange failed');
+      logger.error({ status: response.status, error, platform }, 'Token exchange failed');
       throw new Error(`Google token exchange failed: ${error}`);
     }
 

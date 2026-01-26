@@ -6,70 +6,346 @@ This guide covers integrating VOPI (Video Object Processing Infrastructure) into
 >
 > Before integrating or upgrading, review the [API Changelog](./api-changelog/) for breaking changes and migration guides.
 
+## Production API
+
+| Environment | Base URL |
+|-------------|----------|
+| **Production** | `https://api.vopi.24rabbit.com` |
+| Development | `http://localhost:3000` |
+
+## Authentication
+
+VOPI uses **OAuth 2.0** with JWT tokens for user authentication. Users sign in via Google or Apple.
+
+### Authentication Methods
+
+| Method | Use Case | Header |
+|--------|----------|--------|
+| **JWT Token** (recommended) | Mobile/Web apps with user accounts | `Authorization: Bearer <access_token>` |
+| API Key | Server-to-server integrations | `x-api-key: <api_key>` |
+
+### OAuth Flow Overview
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Mobile App    │     │   VOPI API      │     │  OAuth Provider │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         │  1. POST /auth/oauth/init                     │
+         │──────────────────────>│                       │
+         │                       │                       │
+         │  { authorizationUrl, state, codeVerifier }    │
+         │<──────────────────────│                       │
+         │                       │                       │
+         │  2. Open browser/WebView to authorizationUrl  │
+         │─────────────────────────────────────────────>│
+         │                       │                       │
+         │  3. User signs in, redirects back with code   │
+         │<─────────────────────────────────────────────│
+         │                       │                       │
+         │  4. POST /auth/oauth/callback                 │
+         │──────────────────────>│                       │
+         │                       │                       │
+         │  { accessToken, refreshToken, user }          │
+         │<──────────────────────│                       │
+```
+
+### Token Lifecycle
+
+| Token | Expiration | Storage |
+|-------|------------|---------|
+| Access Token | 1 hour | Memory or secure storage |
+| Refresh Token | 30 days | Secure storage (Keychain/Keystore) |
+
+### New User Benefits
+
+- **5 free credits** on first sign-up (one-time, abuse-protected)
+- Credits are used for video processing jobs
+
+---
+
 ## Quick Start
 
-### Integration Flow
+### Complete Integration Flow
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   Mobile App    │     │   VOPI API      │     │   S3 Storage    │
 └────────┬────────┘     └────────┬────────┘     └────────┬────────┘
          │                       │                       │
-         │  1. Get presigned URL │                       │
+         │  1. OAuth login (Google/Apple)                │
          │──────────────────────>│                       │
          │                       │                       │
-         │  Return upload URL    │                       │
+         │  { accessToken, refreshToken, user }          │
          │<──────────────────────│                       │
          │                       │                       │
-         │  2. Upload video directly to S3              │
+         │  2. Check credit balance                      │
+         │──────────────────────>│                       │
+         │                       │                       │
+         │  { balance: 5 }       │                       │
+         │<──────────────────────│                       │
+         │                       │                       │
+         │  3. Get presigned upload URL                  │
+         │──────────────────────>│                       │
+         │                       │                       │
+         │  { uploadUrl, publicUrl }                     │
+         │<──────────────────────│                       │
+         │                       │                       │
+         │  4. Upload video directly to S3               │
          │─────────────────────────────────────────────>│
          │                       │                       │
-         │  3. Create job with publicUrl                │
+         │  5. Create job with publicUrl                 │
          │──────────────────────>│                       │
          │                       │                       │
-         │  Return job ID        │                       │
+         │  { jobId, status: pending }                   │
          │<──────────────────────│                       │
          │                       │                       │
-         │  4. Poll status OR receive webhook           │
+         │  6. Poll status OR receive webhook            │
          │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                       │
          │                       │                       │
-         │  5. Get download URLs (presigned)            │
+         │  7. Get download URLs (presigned)             │
          │──────────────────────>│                       │
          │                       │                       │
-         │  Return presigned URLs│                       │
+         │  { frames, commercialImages }                 │
          │<──────────────────────│                       │
          │                       │                       │
-         │  6. Download images using presigned URLs     │
+         │  8. Download images using presigned URLs      │
          │─────────────────────────────────────────────>│
 ```
 
 > **Note:** The S3 bucket is private. Direct URLs in job results are not accessible. Use the `/jobs/:id/download-urls` endpoint to get time-limited presigned URLs.
 
-## Authentication
+---
 
-All API requests require an API key passed via the `x-api-key` header:
+## Auth Endpoints
 
+### Check Available Providers
+
+**Endpoint:** `GET /api/v1/auth/providers`
+
+**Response:**
+```json
+{
+  "google": true,
+  "apple": true
+}
 ```
-x-api-key: your-api-key-here
+
+### Initialize OAuth
+
+**Endpoint:** `POST /api/v1/auth/oauth/init`
+
+**Request:**
+```json
+{
+  "provider": "google",
+  "redirectUri": "com.yourapp://oauth/callback"
+}
 ```
 
-## Base URL
+**Response:**
+```json
+{
+  "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth?...",
+  "state": "abc123...",
+  "codeVerifier": "xyz789..."
+}
+```
 
-Configure your base URL based on environment:
+> **Important:** Store `state` and `codeVerifier` securely - you need them for the callback.
 
-| Environment | Base URL |
-|-------------|----------|
-| Development | `http://localhost:3000` |
-| Staging | `https://staging-api.your-domain.com` |
-| Production | `https://api.your-domain.com` |
+### Exchange Code for Tokens
 
-## Core Endpoints
+**Endpoint:** `POST /api/v1/auth/oauth/callback`
+
+**Request:**
+```json
+{
+  "provider": "google",
+  "code": "authorization_code_from_redirect",
+  "redirectUri": "com.yourapp://oauth/callback",
+  "state": "abc123...",
+  "codeVerifier": "xyz789...",
+  "deviceInfo": {
+    "deviceId": "unique-device-id",
+    "deviceName": "iPhone 15 Pro"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "dGhpcyBpcyBhIHJlZnJlc2g...",
+  "expiresIn": 3600,
+  "tokenType": "Bearer",
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "avatarUrl": "https://...",
+    "creditsBalance": 5
+  }
+}
+```
+
+### Refresh Access Token
+
+**Endpoint:** `POST /api/v1/auth/refresh`
+
+**Request:**
+```json
+{
+  "refreshToken": "dGhpcyBpcyBhIHJlZnJlc2g..."
+}
+```
+
+**Response:**
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "bmV3IHJlZnJlc2ggdG9rZW4...",
+  "expiresIn": 3600,
+  "tokenType": "Bearer"
+}
+```
+
+> **Note:** A new refresh token is returned. Store it and discard the old one.
+
+### Get User Profile
+
+**Endpoint:** `GET /api/v1/auth/me`
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "email": "user@example.com",
+  "emailVerified": true,
+  "name": "John Doe",
+  "avatarUrl": "https://...",
+  "createdAt": "2025-01-23T10:00:00.000Z",
+  "lastLoginAt": "2025-01-24T15:30:00.000Z"
+}
+```
+
+### Logout
+
+**Endpoint:** `POST /api/v1/auth/logout`
+
+**Request:**
+```json
+{
+  "refreshToken": "dGhpcyBpcyBhIHJlZnJlc2g...",
+  "allDevices": false
+}
+```
+
+---
+
+## Credits System
+
+Users have a credit balance for processing jobs. New users receive 5 free credits.
+
+### Get Credit Balance
+
+**Endpoint:** `GET /api/v1/credits/balance`
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:**
+```json
+{
+  "balance": 25,
+  "transactions": [
+    {
+      "id": "...",
+      "creditsDelta": 5,
+      "type": "signup_grant",
+      "description": "Welcome bonus: 5 free credits",
+      "createdAt": "2025-01-23T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Get Credit Packs (No Auth)
+
+**Endpoint:** `GET /api/v1/credits/packs`
+
+**Response:**
+```json
+{
+  "packs": [
+    { "packType": "CREDIT_1", "credits": 1, "priceUsd": 0.99, "name": "Single Credit" },
+    { "packType": "PACK_20", "credits": 20, "priceUsd": 14.99, "name": "20 Credit Pack" },
+    { "packType": "PACK_100", "credits": 100, "priceUsd": 59, "name": "100 Credit Pack" },
+    { "packType": "PACK_500", "credits": 500, "priceUsd": 199, "name": "500 Credit Pack" }
+  ],
+  "stripeConfigured": true
+}
+```
+
+### Estimate Job Cost
+
+**Endpoint:** `POST /api/v1/credits/estimate`
+
+**Request:**
+```json
+{
+  "videoDurationSeconds": 30,
+  "frameCount": 8
+}
+```
+
+**Response:**
+```json
+{
+  "totalCredits": 3,
+  "breakdown": [
+    { "type": "base", "description": "Base job cost", "credits": 1 },
+    { "type": "duration", "description": "30 seconds of video", "credits": 1.5 }
+  ],
+  "canAfford": true,
+  "currentBalance": 25
+}
+```
+
+### Purchase Credits (Stripe Checkout)
+
+**Endpoint:** `POST /api/v1/credits/checkout`
+
+**Request:**
+```json
+{
+  "packType": "PACK_20",
+  "successUrl": "com.yourapp://purchase/success",
+  "cancelUrl": "com.yourapp://purchase/cancel"
+}
+```
+
+**Response:**
+```json
+{
+  "checkoutUrl": "https://checkout.stripe.com/c/pay/cs_xxx...",
+  "sessionId": "cs_xxx..."
+}
+```
+
+Open `checkoutUrl` in a browser/WebView for payment.
+
+---
+
+## Core Job Endpoints
+
+All job endpoints require authentication.
 
 ### 1. Get Presigned Upload URL
 
 **Endpoint:** `POST /api/v1/uploads/presign`
-
-Request a presigned URL for direct video upload to S3.
 
 **Request:**
 ```json
@@ -184,6 +460,11 @@ Get presigned URLs for accessing job assets. Required because S3 bucket is priva
       "real": "https://s3.../...?X-Amz-...",
       "creative": "https://s3.../...?X-Amz-..."
     }
+  },
+  "productMetadata": {
+    "transcript": "This is a beautiful handmade ceramic vase...",
+    "product": {...},
+    "platforms": {...}
   }
 }
 ```
@@ -230,13 +511,7 @@ Update metadata with user edits before e-commerce upload.
 
 **Response:** Returns full updated `productMetadata` with regenerated platform formats.
 
-### 8. Get Full Job Details (Optional)
-
-**Endpoint:** `GET /api/v1/jobs/:id`
-
-Returns full job details including config, progress, and result metadata.
-
-**Note:** The URLs in `job.result.commercialImages` are direct S3 URLs that are **not accessible**. Always use the download-urls endpoint for actual image access.
+---
 
 ## Job Status Values
 
@@ -273,15 +548,7 @@ Variants depend on the pipeline used:
 | `white-studio` | Clean white background with professional lighting |
 | `lifestyle` | Natural lifestyle setting (bathroom, vanity, etc.) |
 
-> **Note:** The `full_gemini` pipeline uses AI quality filtering, so fewer images may be returned as low-quality results are automatically removed.
-
-## Supported Video Formats
-
-| Format | MIME Type |
-|--------|-----------|
-| MP4 | `video/mp4` |
-| MOV | `video/quicktime` |
-| WebM | `video/webm` |
+---
 
 ## Error Handling
 
@@ -289,9 +556,9 @@ All errors follow this format:
 
 ```json
 {
-  "error": "Error message",
-  "statusCode": 400,
-  "details": {}
+  "error": "ERROR_CODE",
+  "message": "Human readable message",
+  "statusCode": 400
 }
 ```
 
@@ -300,20 +567,34 @@ All errors follow this format:
 | Code | Description |
 |------|-------------|
 | 400 | Bad Request - Invalid input |
-| 401 | Unauthorized - Missing or invalid API key |
+| 401 | Unauthorized - Missing or invalid token |
+| 402 | Payment Required - Insufficient credits |
+| 403 | Forbidden - Access denied |
 | 404 | Not Found - Resource doesn't exist |
 | 500 | Internal Server Error |
 | 503 | Service Unavailable |
 
+---
+
 ## Platform-Specific Guides
 
+- [Expo/React Native Integration](./expo-integration.md) - **Recommended for new projects**
+- [React Native (bare) Integration](./react-native-integration.md)
 - [iOS/Swift Integration](./ios-integration.md)
 - [Android/Kotlin Integration](./android-integration.md)
-- [React Native Integration](./react-native-integration.md)
 - [Flutter/Dart Integration](./flutter-integration.md)
 - [API Changelog](./api-changelog/) - Breaking changes and migration guides
 
+---
+
 ## Best Practices
+
+### Authentication
+
+1. **Store tokens securely**: Use Keychain (iOS) / Keystore (Android) / SecureStore (Expo)
+2. **Implement token refresh**: Check token expiry before requests, refresh proactively
+3. **Handle 401 errors**: Refresh token and retry, or redirect to login
+4. **Clear tokens on logout**: Remove all stored tokens on logout
 
 ### Video Upload
 
@@ -324,10 +605,11 @@ All errors follow this format:
 
 ### Job Processing
 
-1. **Use webhooks when possible**: More efficient than polling
-2. **Poll at reasonable intervals**: 3-5 seconds is recommended
-3. **Implement exponential backoff**: For retries on transient failures
-4. **Cache results**: Store completed job results locally
+1. **Check credits first**: Use `/credits/estimate` before creating jobs
+2. **Use webhooks when possible**: More efficient than polling
+3. **Poll at reasonable intervals**: 3-5 seconds is recommended
+4. **Implement exponential backoff**: For retries on transient failures
+5. **Cache results**: Store completed job results locally
 
 ### UX Recommendations
 
@@ -336,9 +618,11 @@ All errors follow this format:
 3. **Handle background processing**: Support app backgrounding during upload/processing
 4. **Display intermediate results**: Show frames as they become available
 
+---
+
 ## Rate Limits
 
-While the API doesn't enforce rate limits directly, external AI services have their own limits. Recommended limits:
+Recommended limits to avoid throttling:
 
 - Max concurrent jobs per user: 3
 - Max video duration: 5 minutes
@@ -347,53 +631,10 @@ While the API doesn't enforce rate limits directly, external AI services have th
 
 ---
 
-## For Maintainers: Updating Documentation
+## Supported Video Formats
 
-When making API changes that affect front-end clients, follow these steps:
-
-### 1. Create a Changelog Entry
-
-Create a new file in `docs/front-end-integration/api-changelog/` with the format:
-
-```
-YYYY-MM-DD-short-description.md
-```
-
-Example: `2025-01-20-private-bucket-presigned-urls.md`
-
-### 2. Changelog Content
-
-Each changelog should include:
-
-- **Date and Version** - When the change was made
-- **Breaking Change indicator** - Yes/No
-- **Summary** - Brief description
-- **Breaking Changes** - What will break if not updated
-- **New Endpoints** - Full request/response examples
-- **Migration Guide** - Code examples for each platform (iOS, Android, React Native, Flutter)
-- **Important Notes** - Caveats and best practices
-
-### 3. Update Platform Guides
-
-Update all four platform-specific guides:
-
-- `ios-integration.md`
-- `android-integration.md`
-- `react-native-integration.md`
-- `flutter-integration.md`
-
-Changes typically include:
-- New status values in enums
-- New API methods
-- New model/type definitions
-- Updated result handling code
-
-### 4. Update This README
-
-- Add new endpoints to the Core Endpoints section
-- Update status values table if changed
-- Update the integration flow diagram if needed
-
-### 5. Update Changelog Index
-
-Add the new entry to `api-changelog/README.md` index table.
+| Format | MIME Type |
+|--------|-----------|
+| MP4 | `video/mp4` |
+| MOV | `video/quicktime` |
+| WebM | `video/webm` |

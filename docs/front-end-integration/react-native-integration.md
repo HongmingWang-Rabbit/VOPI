@@ -1,6 +1,12 @@
 # React Native Integration Guide
 
-Complete guide for integrating VOPI into React Native applications using TypeScript.
+Complete guide for integrating VOPI into React Native applications using TypeScript with OAuth authentication.
+
+## Production API
+
+```
+https://api.vopi.24rabbit.com
+```
 
 > **Important: Private S3 Bucket**
 >
@@ -10,6 +16,7 @@ Complete guide for integrating VOPI into React Native applications using TypeScr
 
 - [Setup](#setup)
 - [Dependencies](#dependencies)
+- [Authentication](#authentication)
 - [API Client](#api-client)
 - [Types](#types)
 - [Hooks](#hooks)
@@ -30,10 +37,11 @@ Complete guide for integrating VOPI into React Native applications using TypeScr
 # Core dependencies
 npm install axios react-native-blob-util
 
-# Video picker (choose one)
+# OAuth and secure storage
+npm install react-native-inappbrowser-reborn react-native-keychain
+
+# Video picker
 npm install react-native-image-picker
-# OR
-npm install expo-image-picker  # for Expo projects
 
 # State management (optional but recommended)
 npm install zustand
@@ -46,30 +54,383 @@ For iOS, add to `Info.plist`:
 ```xml
 <key>NSPhotoLibraryUsageDescription</key>
 <string>We need access to your photo library to select videos</string>
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>your-app-scheme</string>
+    </array>
+  </dict>
+</array>
 ```
 
 For Android, add to `AndroidManifest.xml`:
 ```xml
 <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+
+<activity android:name="com.reactnativeinappbrowser.ChromeTabsManagerActivity"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="your-app-scheme" />
+    </intent-filter>
+</activity>
 ```
 
-## API Client
+## Authentication
 
 ### Configuration
 
 ```typescript
 // src/config/vopi.config.ts
 export const VOPIConfig = {
-  baseURL: 'https://api.your-domain.com',
-  apiKey: 'your-api-key',
+  baseURL: 'https://api.vopi.24rabbit.com',
+  appScheme: 'your-app-scheme',
   uploadTimeout: 300000, // 5 minutes
   requestTimeout: 30000,
   pollingInterval: 3000,
 } as const;
 ```
 
-### API Client
+### Auth Context
+
+```typescript
+// src/contexts/AuthContext.tsx
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import InAppBrowser from 'react-native-inappbrowser-reborn';
+import * as Keychain from 'react-native-keychain';
+import { Linking, Platform } from 'react-native';
+import { VOPIConfig } from '../config/vopi.config';
+
+interface User {
+  id: string;
+  email: string;
+  name?: string;
+  avatarUrl?: string;
+  emailVerified: boolean;
+  createdAt: string;
+}
+
+interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
+interface AuthContextType {
+  user: User | null;
+  tokens: AuthTokens | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  signInWithGoogle: () => Promise<void>;
+  signInWithApple: () => Promise<void>;
+  signOut: () => Promise<void>;
+  refreshSession: () => Promise<boolean>;
+  getValidAccessToken: () => Promise<string | null>;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const KEYCHAIN_SERVICE = 'vopi-auth';
+const TOKEN_REFRESH_MARGIN = 5 * 60 * 1000; // 5 minutes before expiry
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [tokens, setTokens] = useState<AuthTokens | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load stored tokens on mount
+  useEffect(() => {
+    loadStoredAuth();
+  }, []);
+
+  // Handle deep link callback
+  useEffect(() => {
+    const handleDeepLink = async (event: { url: string }) => {
+      const url = event.url;
+      if (url.startsWith(`${VOPIConfig.appScheme}://auth/callback`)) {
+        await handleAuthCallback(url);
+      }
+    };
+
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+
+    // Check for initial URL (app opened via deep link)
+    Linking.getInitialURL().then((url) => {
+      if (url && url.startsWith(`${VOPIConfig.appScheme}://auth/callback`)) {
+        handleAuthCallback(url);
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  const loadStoredAuth = async () => {
+    try {
+      const credentials = await Keychain.getGenericPassword({ service: KEYCHAIN_SERVICE });
+      if (credentials) {
+        const stored = JSON.parse(credentials.password) as AuthTokens;
+        setTokens(stored);
+
+        // Fetch user profile
+        const response = await fetch(`${VOPIConfig.baseURL}/api/v1/auth/me`, {
+          headers: { Authorization: `Bearer ${stored.accessToken}` },
+        });
+
+        if (response.ok) {
+          const userData = await response.json();
+          setUser(userData.user);
+        } else if (response.status === 401) {
+          // Token expired, try refresh
+          const refreshed = await refreshWithToken(stored.refreshToken);
+          if (!refreshed) {
+            await clearAuth();
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load stored auth:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const storeTokens = async (newTokens: AuthTokens) => {
+    await Keychain.setGenericPassword('auth', JSON.stringify(newTokens), {
+      service: KEYCHAIN_SERVICE,
+    });
+    setTokens(newTokens);
+  };
+
+  const clearAuth = async () => {
+    await Keychain.resetGenericPassword({ service: KEYCHAIN_SERVICE });
+    setTokens(null);
+    setUser(null);
+  };
+
+  const handleAuthCallback = async (url: string) => {
+    try {
+      const urlObj = new URL(url);
+      const code = urlObj.searchParams.get('code');
+      const state = urlObj.searchParams.get('state');
+      const provider = urlObj.searchParams.get('provider') || 'google';
+
+      if (!code || !state) {
+        throw new Error('Missing code or state in callback');
+      }
+
+      // Exchange code for tokens
+      const response = await fetch(`${VOPIConfig.baseURL}/api/v1/auth/${provider}/callback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, state }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Authentication failed');
+      }
+
+      const data = await response.json();
+
+      await storeTokens({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        expiresAt: Date.now() + data.expiresIn * 1000,
+      });
+
+      setUser(data.user);
+    } catch (error) {
+      console.error('Auth callback error:', error);
+      throw error;
+    }
+  };
+
+  const signInWithProvider = async (provider: 'google' | 'apple') => {
+    try {
+      // Generate state and PKCE verifier
+      const state = generateRandomString(32);
+      const codeVerifier = generateRandomString(64);
+
+      // Store PKCE verifier temporarily
+      await Keychain.setGenericPassword('pkce', JSON.stringify({ state, codeVerifier }), {
+        service: `${KEYCHAIN_SERVICE}-pkce`,
+      });
+
+      // Get auth URL
+      const redirectUri = `${VOPIConfig.appScheme}://auth/callback`;
+      const initResponse = await fetch(
+        `${VOPIConfig.baseURL}/api/v1/auth/${provider}/init?` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `state=${state}&` +
+        `code_challenge=${await generateCodeChallenge(codeVerifier)}&` +
+        `code_challenge_method=S256`
+      );
+
+      if (!initResponse.ok) {
+        throw new Error('Failed to initialize OAuth');
+      }
+
+      const { authUrl } = await initResponse.json();
+
+      // Open in-app browser
+      if (await InAppBrowser.isAvailable()) {
+        await InAppBrowser.openAuth(authUrl, redirectUri, {
+          ephemeralWebSession: true,
+          showTitle: false,
+          enableUrlBarHiding: true,
+          enableDefaultShare: false,
+        });
+      } else {
+        await Linking.openURL(authUrl);
+      }
+    } catch (error) {
+      console.error(`${provider} sign in error:`, error);
+      throw error;
+    }
+  };
+
+  const signInWithGoogle = () => signInWithProvider('google');
+  const signInWithApple = () => signInWithProvider('apple');
+
+  const signOut = async () => {
+    try {
+      if (tokens?.accessToken) {
+        await fetch(`${VOPIConfig.baseURL}/api/v1/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        });
+      }
+    } catch (error) {
+      console.warn('Logout API error:', error);
+    }
+    await clearAuth();
+  };
+
+  const refreshWithToken = async (refreshToken: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${VOPIConfig.baseURL}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+
+      if (!response.ok) return false;
+
+      const data = await response.json();
+
+      await storeTokens({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        expiresAt: Date.now() + data.expiresIn * 1000,
+      });
+
+      setUser(data.user);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const refreshSession = useCallback(async (): Promise<boolean> => {
+    if (!tokens?.refreshToken) return false;
+    return refreshWithToken(tokens.refreshToken);
+  }, [tokens?.refreshToken]);
+
+  const getValidAccessToken = useCallback(async (): Promise<string | null> => {
+    if (!tokens) return null;
+
+    // Check if token needs refresh
+    if (Date.now() >= tokens.expiresAt - TOKEN_REFRESH_MARGIN) {
+      const success = await refreshSession();
+      if (!success) return null;
+
+      // Get updated tokens
+      const credentials = await Keychain.getGenericPassword({ service: KEYCHAIN_SERVICE });
+      if (credentials) {
+        const updated = JSON.parse(credentials.password) as AuthTokens;
+        return updated.accessToken;
+      }
+      return null;
+    }
+
+    return tokens.accessToken;
+  }, [tokens, refreshSession]);
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        tokens,
+        isLoading,
+        isAuthenticated: !!user && !!tokens,
+        signInWithGoogle,
+        signInWithApple,
+        signOut,
+        refreshSession,
+        getValidAccessToken,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+}
+
+// Utility functions
+function generateRandomString(length: number): string {
+  const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  let result = '';
+  const randomValues = new Uint8Array(length);
+
+  // Use crypto.getRandomValues if available, otherwise fallback
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(randomValues);
+  } else {
+    for (let i = 0; i < length; i++) {
+      randomValues[i] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  for (let i = 0; i < length; i++) {
+    result += charset[randomValues[i] % charset.length];
+  }
+  return result;
+}
+
+async function generateCodeChallenge(verifier: string): Promise<string> {
+  // In React Native, use crypto-js or expo-crypto
+  // This is a simplified version - use proper SHA256 in production
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return base64UrlEncode(new Uint8Array(digest));
+}
+
+function base64UrlEncode(buffer: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < buffer.length; i++) {
+    binary += String.fromCharCode(buffer[i]);
+  }
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+```
+
+## API Client
 
 ```typescript
 // src/services/vopi.client.ts
@@ -85,10 +446,14 @@ import {
   Frame,
   ApiError,
   DownloadUrlsResponse,
+  CreditBalance,
 } from '../types/vopi.types';
+
+type GetAccessToken = () => Promise<string | null>;
 
 class VOPIClient {
   private client: AxiosInstance;
+  private getAccessToken: GetAccessToken | null = null;
 
   constructor() {
     this.client = axios.create({
@@ -96,8 +461,18 @@ class VOPIClient {
       timeout: VOPIConfig.requestTimeout,
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': VOPIConfig.apiKey,
       },
+    });
+
+    // Add auth token to requests
+    this.client.interceptors.request.use(async (config) => {
+      if (this.getAccessToken) {
+        const token = await this.getAccessToken();
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+      }
+      return config;
     });
 
     // Response interceptor for error handling
@@ -108,6 +483,16 @@ class VOPIClient {
         throw new Error(message);
       }
     );
+  }
+
+  setTokenProvider(getAccessToken: GetAccessToken) {
+    this.getAccessToken = getAccessToken;
+  }
+
+  // Credits
+  async getCreditBalance(): Promise<CreditBalance> {
+    const { data } = await this.client.get<CreditBalance>('/api/v1/credits/balance');
+    return data;
   }
 
   // Presign URL
@@ -186,9 +571,26 @@ class VOPIClient {
 export const vopiClient = new VOPIClient();
 ```
 
-## Types
+### Initialize Client with Auth
 
-### TypeScript Definitions
+```typescript
+// src/App.tsx or where you initialize your app
+import { useEffect } from 'react';
+import { useAuth } from './contexts/AuthContext';
+import { vopiClient } from './services/vopi.client';
+
+function AppInitializer({ children }: { children: React.ReactNode }) {
+  const { getValidAccessToken } = useAuth();
+
+  useEffect(() => {
+    vopiClient.setTokenProvider(getValidAccessToken);
+  }, [getValidAccessToken]);
+
+  return <>{children}</>;
+}
+```
+
+## Types
 
 ```typescript
 // src/types/vopi.types.ts
@@ -198,6 +600,20 @@ export interface ApiError {
   error: string;
   statusCode: number;
   details?: Record<string, string>;
+}
+
+// Credits
+export interface CreditBalance {
+  balance: number;
+  transactions?: CreditTransaction[];
+}
+
+export interface CreditTransaction {
+  id: string;
+  creditsDelta: number;
+  type: 'signup_grant' | 'purchase' | 'spend' | 'refund';
+  description?: string;
+  createdAt: string;
 }
 
 // Presign
@@ -300,24 +716,15 @@ export interface DownloadUrlsResponse {
 }
 
 // Product Metadata (from audio analysis)
-
-/** Complete product metadata output including platform-specific formats */
 export interface ProductMetadataOutput {
-  /** Raw transcript from audio */
   transcript: string;
-  /** Universal product metadata */
   product: ProductMetadata;
-  /** Platform-specific formatted versions */
   platforms: PlatformFormats;
-  /** ISO timestamp when metadata was extracted */
   extractedAt: string;
-  /** Audio duration in seconds (if available) */
   audioDuration?: number;
-  /** Pipeline version */
   pipelineVersion: string;
 }
 
-/** Universal product metadata */
 export interface ProductMetadata {
   title: string;
   description: string;
@@ -341,7 +748,6 @@ export interface ProductMetadata {
   transcriptExcerpts?: string[];
 }
 
-/** Confidence scores for metadata fields */
 export interface MetadataConfidence {
   overall: number;
   title: number;
@@ -350,14 +756,12 @@ export interface MetadataConfidence {
   attributes?: number;
 }
 
-/** Platform-specific formatted product data */
 export interface PlatformFormats {
   shopify: ShopifyProduct;
   amazon: AmazonProduct;
   ebay: EbayProduct;
 }
 
-/** Shopify-formatted product data */
 export interface ShopifyProduct {
   title: string;
   descriptionHtml: string;
@@ -367,7 +771,6 @@ export interface ShopifyProduct {
   status?: string;
 }
 
-/** Amazon-formatted product data */
 export interface AmazonProduct {
   item_name: string;
   brand_name?: string;
@@ -378,7 +781,6 @@ export interface AmazonProduct {
   material?: string[];
 }
 
-/** eBay-formatted product data */
 export interface EbayProduct {
   title: string;
   description: string;
@@ -631,6 +1033,50 @@ function capitalizeFirst(str: string): string {
 }
 ```
 
+### useCredits Hook
+
+```typescript
+// src/hooks/useCredits.ts
+import { useState, useCallback, useEffect } from 'react';
+import { vopiClient } from '../services/vopi.client';
+import { CreditBalance } from '../types/vopi.types';
+import { useAuth } from '../contexts/AuthContext';
+
+export function useCredits() {
+  const { isAuthenticated } = useAuth();
+  const [balance, setBalance] = useState<number>(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchBalance = useCallback(async () => {
+    if (!isAuthenticated) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await vopiClient.getCreditBalance();
+      setBalance(data.balance);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch balance');
+    } finally {
+      setLoading(false);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    fetchBalance();
+  }, [fetchBalance]);
+
+  return {
+    balance,
+    loading,
+    error,
+    refresh: fetchBalance,
+  };
+}
+```
+
 ### useVOPIJobs Hook
 
 ```typescript
@@ -721,6 +1167,128 @@ export function useVOPIJobs(options: UseVOPIJobsOptions = {}) {
 
 ## Components
 
+### Login Screen
+
+```typescript
+// src/screens/LoginScreen.tsx
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
+
+export function LoginScreen() {
+  const { signInWithGoogle, signInWithApple } = useAuth();
+  const [loading, setLoading] = useState<'google' | 'apple' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSignIn = async (provider: 'google' | 'apple') => {
+    setLoading(provider);
+    setError(null);
+
+    try {
+      if (provider === 'google') {
+        await signInWithGoogle();
+      } else {
+        await signInWithApple();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign in failed');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>VOPI</Text>
+      <Text style={styles.subtitle}>Video Object Processing</Text>
+
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[styles.button, styles.googleButton]}
+          onPress={() => handleSignIn('google')}
+          disabled={loading !== null}
+        >
+          {loading === 'google' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Continue with Google</Text>
+          )}
+        </TouchableOpacity>
+
+        {Platform.OS === 'ios' && (
+          <TouchableOpacity
+            style={[styles.button, styles.appleButton]}
+            onPress={() => handleSignIn('apple')}
+            disabled={loading !== null}
+          >
+            {loading === 'apple' ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Continue with Apple</Text>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {error && <Text style={styles.error}>{error}</Text>}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#fff',
+  },
+  title: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 18,
+    color: '#666',
+    marginBottom: 60,
+  },
+  buttonContainer: {
+    width: '100%',
+    maxWidth: 300,
+  },
+  button: {
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  googleButton: {
+    backgroundColor: '#4285F4',
+  },
+  appleButton: {
+    backgroundColor: '#000',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  error: {
+    color: '#FF3B30',
+    marginTop: 20,
+    textAlign: 'center',
+  },
+});
+```
+
 ### Video Picker Component
 
 ```typescript
@@ -731,7 +1299,6 @@ import {
   Text,
   StyleSheet,
   Alert,
-  Platform,
 } from 'react-native';
 import {
   launchImageLibrary,
@@ -1030,7 +1597,60 @@ const styles = StyleSheet.create({
 
 ## Complete Example
 
-### Main App Screen
+### App Entry Point
+
+```typescript
+// App.tsx
+import React, { useEffect } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { AuthProvider, useAuth } from './src/contexts/AuthContext';
+import { vopiClient } from './src/services/vopi.client';
+import { LoginScreen } from './src/screens/LoginScreen';
+import { HomeScreen } from './src/screens/HomeScreen';
+import { ActivityIndicator, View } from 'react-native';
+
+const Stack = createNativeStackNavigator();
+
+function AppNavigator() {
+  const { isAuthenticated, isLoading, getValidAccessToken } = useAuth();
+
+  // Set up API client with token provider
+  useEffect(() => {
+    vopiClient.setTokenProvider(getValidAccessToken);
+  }, [getValidAccessToken]);
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      {isAuthenticated ? (
+        <Stack.Screen name="Home" component={HomeScreen} />
+      ) : (
+        <Stack.Screen name="Login" component={LoginScreen} />
+      )}
+    </Stack.Navigator>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <NavigationContainer>
+        <AppNavigator />
+      </NavigationContainer>
+    </AuthProvider>
+  );
+}
+```
+
+### Home Screen
 
 ```typescript
 // src/screens/HomeScreen.tsx
@@ -1043,12 +1663,16 @@ import {
   Modal,
   TouchableOpacity,
 } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
 import { useVOPIUpload } from '../hooks/useVOPIUpload';
+import { useCredits } from '../hooks/useCredits';
 import { VideoPicker } from '../components/VideoPicker';
 import { UploadProgress } from '../components/UploadProgress';
 import { ResultsGallery } from '../components/ResultsGallery';
 
 export function HomeScreen() {
+  const { user, signOut } = useAuth();
+  const { balance } = useCredits();
   const { state, uploadAndProcess, cancel, reset } = useVOPIUpload();
   const [showResults, setShowResults] = useState(false);
 
@@ -1068,6 +1692,16 @@ export function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.greeting}>Hello, {user?.name || 'User'}</Text>
+          <Text style={styles.credits}>{balance} credits</Text>
+        </View>
+        <TouchableOpacity onPress={signOut}>
+          <Text style={styles.signOut}>Sign Out</Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.content}>
         <Text style={styles.title}>VOPI</Text>
         <Text style={styles.subtitle}>Video Object Processing</Text>
@@ -1129,6 +1763,28 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  greeting: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  credits: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+  signOut: {
+    color: '#FF3B30',
+    fontSize: 14,
+    fontWeight: '500',
   },
   content: {
     flex: 1,
@@ -1200,12 +1856,12 @@ const styles = StyleSheet.create({
 });
 ```
 
-### Zustand Store (Alternative)
+## Zustand Store (Alternative)
 
 ```typescript
 // src/store/vopi.store.ts
 import { create } from 'zustand';
-import { UploadState, Job, JobConfig } from '../types/vopi.types';
+import { UploadState, Job } from '../types/vopi.types';
 
 interface VOPIStore {
   uploadState: UploadState;
@@ -1230,85 +1886,10 @@ export const useVOPIStore = create<VOPIStore>((set) => ({
 }));
 ```
 
-## Expo Configuration
+## Security Best Practices
 
-For Expo projects, use `expo-image-picker`:
-
-```typescript
-// src/components/VideoPicker.expo.tsx
-import React from 'react';
-import { TouchableOpacity, Text, StyleSheet, Alert } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-
-interface VideoPickerProps {
-  onSelect: (video: { uri: string; fileName?: string; type?: string }) => void;
-  disabled?: boolean;
-}
-
-export function VideoPicker({ onSelect, disabled }: VideoPickerProps) {
-  const handlePress = async () => {
-    try {
-      const permission =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-      if (!permission.granted) {
-        Alert.alert(
-          'Permission Required',
-          'Please allow access to your photo library'
-        );
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        quality: 1,
-        allowsEditing: false,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        onSelect({
-          uri: asset.uri,
-          fileName: asset.fileName || 'video.mp4',
-          type: asset.mimeType,
-        });
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to access video library');
-    }
-  };
-
-  return (
-    <TouchableOpacity
-      style={[styles.button, disabled && styles.buttonDisabled]}
-      onPress={handlePress}
-      disabled={disabled}
-    >
-      <Text style={[styles.buttonText, disabled && styles.buttonTextDisabled]}>
-        Select Video
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
-const styles = StyleSheet.create({
-  button: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  buttonDisabled: {
-    backgroundColor: '#A0A0A0',
-  },
-  buttonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  buttonTextDisabled: {
-    color: '#E0E0E0',
-  },
-});
-```
+1. **Token Storage**: Always use `react-native-keychain` for storing tokens securely
+2. **Token Refresh**: Automatically refresh tokens before they expire
+3. **PKCE**: Use PKCE for OAuth to prevent authorization code interception
+4. **Secure Transport**: All API calls use HTTPS
+5. **Token Validation**: Always validate tokens server-side

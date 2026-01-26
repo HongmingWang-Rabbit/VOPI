@@ -11,6 +11,18 @@ export const OAuthProvider = {
 export type OAuthProviderType = (typeof OAuthProvider)[keyof typeof OAuthProvider];
 
 /**
+ * Client platform types for OAuth
+ * Used to select the correct OAuth client ID for mobile vs web
+ */
+export const ClientPlatform = {
+  IOS: 'ios',
+  ANDROID: 'android',
+  WEB: 'web',
+} as const;
+
+export type ClientPlatformType = (typeof ClientPlatform)[keyof typeof ClientPlatform];
+
+/**
  * E-commerce platform types
  */
 export const PlatformType = {
@@ -195,10 +207,11 @@ export interface AuthResponse {
  */
 export const oauthInitRequestSchema = z.object({
   provider: z.enum(['google', 'apple']),
-  redirectUri: z.string().url(),
+  redirectUri: z.string(), // Allow custom schemes for mobile (not just URLs)
   state: z.string().optional(),
   codeChallenge: z.string().optional(), // PKCE
   codeChallengeMethod: z.enum(['S256', 'plain']).optional(),
+  platform: z.enum(['ios', 'android', 'web']).optional().default('web'), // Client platform for OAuth client selection
 });
 
 export type OAuthInitRequest = z.infer<typeof oauthInitRequestSchema>;
@@ -206,8 +219,9 @@ export type OAuthInitRequest = z.infer<typeof oauthInitRequestSchema>;
 export const oauthCallbackRequestSchema = z.object({
   provider: z.enum(['google', 'apple']),
   code: z.string(),
-  redirectUri: z.string().url(),
+  redirectUri: z.string(), // Allow custom schemes for mobile (not just URLs)
   codeVerifier: z.string().optional(), // PKCE
+  platform: z.enum(['ios', 'android', 'web']).optional().default('web'), // Must match the platform used in init
   deviceInfo: z.object({
     deviceId: z.string().optional(),
     deviceName: z.string().optional(),

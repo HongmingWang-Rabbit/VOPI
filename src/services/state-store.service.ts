@@ -13,6 +13,7 @@ export interface OAuthStateData {
   codeVerifier?: string;
   userId?: string;
   shop?: string;
+  platform?: 'ios' | 'android' | 'web'; // Client platform for OAuth client selection
   expiresAt: number;
 }
 
