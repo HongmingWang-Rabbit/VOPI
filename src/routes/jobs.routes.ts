@@ -7,7 +7,10 @@ import { storageService } from '../services/storage.service.js';
 import { getConfig } from '../config/index.js';
 import { extractS3KeyFromUrl } from '../utils/s3-url.js';
 import { requireUserAuth } from '../middleware/auth.middleware.js';
+import { createChildLogger } from '../utils/logger.js';
 import { z } from 'zod';
+
+const logger = createChildLogger({ service: 'jobs-routes' });
 
 const jobIdParamsSchema = z.object({
   id: z.string().uuid(),
@@ -630,30 +633,55 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const body = presignBodySchema.parse(request.body);
+      try {
+        const body = presignBodySchema.parse(request.body);
 
-      // Generate unique key for the upload
-      const uploadId = randomUUID();
+        logger.debug(
+          { filename: body.filename, contentType: body.contentType, expiresIn: body.expiresIn },
+          'Presign request received'
+        );
 
-      // Safely extract extension using path.extname (handles edge cases like .mp4, video..mp4)
-      let ext = 'mp4';
-      if (body.filename) {
-        const parsed = path.extname(body.filename).toLowerCase();
-        // Remove the leading dot and validate it's a safe extension
-        if (parsed && /^\.[a-z0-9]+$/.test(parsed)) {
-          ext = parsed.slice(1);
+        // Generate unique key for the upload
+        const uploadId = randomUUID();
+
+        // Safely extract extension using path.extname (handles edge cases like .mp4, video..mp4)
+        let ext = 'mp4';
+        if (body.filename) {
+          const parsed = path.extname(body.filename).toLowerCase();
+          // Remove the leading dot and validate it's a safe extension
+          if (parsed && /^\.[a-z0-9]+$/.test(parsed)) {
+            ext = parsed.slice(1);
+          }
         }
+
+        const s3Key = `uploads/${uploadId}.${ext}`;
+        const config = getConfig();
+        const expiresIn = body.expiresIn ?? config.upload.presignExpirationSeconds;
+
+        logger.debug(
+          { s3Key, contentType: body.contentType, expiresIn },
+          'Generating presigned upload URL'
+        );
+
+        const result = await storageService.getPresignedUploadUrl(s3Key, body.contentType, expiresIn);
+
+        logger.debug({ s3Key, hasUploadUrl: !!result.uploadUrl }, 'Presigned URL generated successfully');
+
+        return reply.send({
+          ...result,
+          expiresIn,
+        });
+      } catch (error) {
+        logger.error(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            body: request.body,
+          },
+          'Failed to generate presigned upload URL'
+        );
+        throw error;
       }
-
-      const s3Key = `uploads/${uploadId}.${ext}`;
-      const config = getConfig();
-      const expiresIn = body.expiresIn ?? config.upload.presignExpirationSeconds;
-      const result = await storageService.getPresignedUploadUrl(s3Key, body.contentType, expiresIn);
-
-      return reply.send({
-        ...result,
-        expiresIn,
-      });
     }
   );
 }
