@@ -9,6 +9,7 @@ import { stateStoreService, type OAuthStateData } from '../services/state-store.
 import { getRedis, initRedis } from '../queues/redis.js';
 import { getConfig } from '../config/index.js';
 import { getLogger } from '../utils/logger.js';
+import { formatAuthError } from '../utils/auth-errors.js';
 import {
   oauthInitRequestSchema,
   oauthCallbackRequestSchema,
@@ -429,10 +430,23 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           tokenType: 'Bearer',
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Token refresh failed';
+        // Format error with specific code for debugging
+        const authError = formatAuthError(error);
+
+        // Log with context for debugging
+        logger.info(
+          {
+            errorCode: authError.code,
+            errorMessage: authError.message,
+            context: authError.context,
+            ip: request.ip,
+          },
+          'Token refresh failed'
+        );
+
         return reply.status(401).send({
-          error: 'INVALID_TOKEN',
-          message,
+          error: authError.code,
+          message: authError.message,
         });
       }
     }

@@ -3,9 +3,14 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { and, isNull, or, gt, eq } from 'drizzle-orm';
 import { getConfig } from '../config/index.js';
 import { getDatabase, schema } from '../db/index.js';
-// UnauthorizedError removed - using inline error construction for better error messages
 import { authService } from '../services/auth.service.js';
 import { getLogger } from '../utils/logger.js';
+import {
+  AuthError,
+  AuthErrorCode,
+  AccessTokenInvalidError,
+  UserNotFoundError,
+} from '../utils/auth-errors.js';
 import type { ApiKey, User } from '../db/schema.js';
 import type { AuthContext } from '../types/auth.types.js';
 
@@ -86,13 +91,11 @@ function safeCompare(a: string, b: string): boolean {
 }
 
 /**
- * JWT auth failure reasons (for better error responses)
+ * JWT auth failure with specific error type
  */
 type JwtAuthFailure =
   | { reason: 'no_token' }
-  | { reason: 'invalid_token'; error: string }
-  | { reason: 'user_not_found'; userId: string }
-  | { reason: 'user_deleted'; userId: string };
+  | { reason: 'auth_error'; error: AuthError };
 
 /**
  * Try to authenticate using JWT Bearer token
@@ -114,7 +117,7 @@ async function tryJwtAuth(request: FastifyRequest): Promise<true | JwtAuthFailur
       // Log at WARN level since this indicates a potential issue
       // (valid token for non-existent/deleted user)
       logger.warn({ userId: payload.sub }, 'JWT valid but user not found in database');
-      return { reason: 'user_not_found', userId: payload.sub };
+      return { reason: 'auth_error', error: new UserNotFoundError(payload.sub) };
     }
 
     request.user = user;
@@ -126,10 +129,22 @@ async function tryJwtAuth(request: FastifyRequest): Promise<true | JwtAuthFailur
 
     return true;
   } catch (error) {
-    // JWT verification failed - log at INFO level for production debugging
+    // Return specific auth errors
+    if (error instanceof AuthError) {
+      logger.info(
+        { errorCode: error.code, errorMessage: error.message, context: error.context },
+        'JWT verification failed'
+      );
+      return { reason: 'auth_error', error };
+    }
+
+    // Wrap unexpected errors
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.info({ error: errorMessage }, 'JWT verification failed');
-    return { reason: 'invalid_token', error: errorMessage };
+    logger.warn({ error: errorMessage }, 'Unexpected error during JWT verification');
+    return {
+      reason: 'auth_error',
+      error: new AccessTokenInvalidError(errorMessage),
+    };
   }
 }
 
@@ -246,25 +261,13 @@ export async function authMiddleware(
   }
 
   // No valid authentication found - provide specific error message
-  let errorMessage = 'Authentication required';
-  let errorCode = 'UNAUTHORIZED';
+  let errorCode = AuthErrorCode.UNAUTHORIZED;
+  let errorMessage = 'Authentication required. Provide a valid Bearer token or API key.';
 
-  // If a Bearer token was provided but failed, give specific feedback
-  if (jwtResult.reason !== 'no_token') {
-    switch (jwtResult.reason) {
-      case 'invalid_token':
-        errorMessage = `Invalid token: ${jwtResult.error}`;
-        errorCode = 'INVALID_TOKEN';
-        break;
-      case 'user_not_found':
-        errorMessage = 'User account not found';
-        errorCode = 'USER_NOT_FOUND';
-        break;
-      case 'user_deleted':
-        errorMessage = 'User account has been deleted';
-        errorCode = 'USER_DELETED';
-        break;
-    }
+  // If a Bearer token was provided but failed, return the specific error
+  if (jwtResult.reason === 'auth_error') {
+    errorCode = jwtResult.error.code as typeof errorCode;
+    errorMessage = jwtResult.error.message;
   }
 
   reply.status(401).send({

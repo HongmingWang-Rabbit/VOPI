@@ -122,7 +122,7 @@ describe('auth.middleware', () => {
       expect(mockReply.status).toHaveBeenCalledWith(401);
       expect(mockReply.send).toHaveBeenCalledWith({
         error: 'UNAUTHORIZED',
-        message: 'Authentication required',
+        message: 'Authentication required. Provide a valid Bearer token or API key.',
       });
     });
 
@@ -134,7 +134,7 @@ describe('auth.middleware', () => {
       expect(mockReply.status).toHaveBeenCalledWith(401);
       expect(mockReply.send).toHaveBeenCalledWith({
         error: 'UNAUTHORIZED',
-        message: 'Authentication required',
+        message: 'Authentication required. Provide a valid Bearer token or API key.',
       });
     });
 

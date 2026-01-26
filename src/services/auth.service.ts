@@ -1,11 +1,25 @@
 import jwt from 'jsonwebtoken';
 import { createHash, randomUUID } from 'crypto';
-import { eq, and, isNull, gt } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { getConfig } from '../config/index.js';
 import { getDatabase, schema } from '../db/index.js';
 import { getLogger } from '../utils/logger.js';
 import { parseDuration } from '../utils/duration.js';
 import { creditsService } from './credits.service.js';
+import {
+  JwtSecretNotConfiguredError,
+  AccessTokenExpiredError,
+  AccessTokenInvalidError,
+  AccessTokenMalformedError,
+  AccessTokenWrongTypeError,
+  RefreshTokenExpiredError,
+  RefreshTokenInvalidError,
+  RefreshTokenRevokedError,
+  RefreshTokenReusedError,
+  RefreshTokenWrongTypeError,
+  UserNotFoundError,
+  UserDeletedError,
+} from '../utils/auth-errors.js';
 import type {
   JwtPayload,
   RefreshTokenPayload,
@@ -36,7 +50,7 @@ class AuthService {
   private getSecret(): string {
     const config = getConfig();
     if (!config.jwt.secret) {
-      throw new Error('JWT_SECRET is not configured');
+      throw new JwtSecretNotConfiguredError();
     }
     return config.jwt.secret;
   }
@@ -110,16 +124,27 @@ class AuthService {
       const decoded = jwt.verify(token, secret) as JwtPayload;
 
       if (decoded.type !== 'access') {
-        throw new Error('Invalid token type');
+        throw new AccessTokenWrongTypeError('access', decoded.type || 'unknown');
       }
 
       return decoded;
     } catch (error) {
+      // Re-throw our custom errors
+      if (error instanceof AccessTokenWrongTypeError) {
+        throw error;
+      }
       if (error instanceof jwt.TokenExpiredError) {
-        throw new Error('Token expired');
+        throw new AccessTokenExpiredError(error.expiredAt);
+      }
+      if (error instanceof jwt.NotBeforeError) {
+        throw new AccessTokenInvalidError('Token not yet valid (nbf claim)');
       }
       if (error instanceof jwt.JsonWebTokenError) {
-        throw new Error('Invalid token');
+        // Distinguish between malformed and invalid signature
+        if (error.message.includes('malformed') || error.message.includes('invalid')) {
+          throw new AccessTokenMalformedError(error.message);
+        }
+        throw new AccessTokenInvalidError(error.message);
       }
       throw error;
     }
@@ -143,13 +168,23 @@ class AuthService {
       decoded = jwt.verify(refreshToken, secret) as RefreshTokenPayload;
 
       if (decoded.type !== 'refresh') {
-        throw new Error('Invalid token type');
+        throw new RefreshTokenWrongTypeError('refresh', decoded.type || 'unknown');
       }
     } catch (error) {
-      if (error instanceof jwt.TokenExpiredError) {
-        throw new Error('Refresh token expired');
+      // Re-throw our custom errors
+      if (error instanceof RefreshTokenWrongTypeError) {
+        throw error;
       }
-      throw new Error('Invalid refresh token');
+      if (error instanceof jwt.TokenExpiredError) {
+        throw new RefreshTokenExpiredError(error.expiredAt);
+      }
+      if (error instanceof jwt.NotBeforeError) {
+        throw new RefreshTokenInvalidError('Token not yet valid (nbf claim)');
+      }
+      if (error instanceof jwt.JsonWebTokenError) {
+        throw new RefreshTokenInvalidError(error.message);
+      }
+      throw error;
     }
 
     const tokenHash = hashToken(refreshToken);
@@ -161,33 +196,51 @@ class AuthService {
       .where(
         and(
           eq(schema.refreshTokens.tokenHash, tokenHash),
-          eq(schema.refreshTokens.userId, decoded.sub),
-          isNull(schema.refreshTokens.revokedAt),
-          gt(schema.refreshTokens.expiresAt, new Date())
+          eq(schema.refreshTokens.userId, decoded.sub)
         )
       )
       .limit(1);
 
     if (!storedToken) {
-      // Token not found or revoked - potential token reuse attack
-      logger.warn({ userId: decoded.sub }, 'Refresh token not found or revoked');
-      throw new Error('Invalid refresh token');
+      // Token hash not found - could be reused after rotation or never existed
+      logger.warn(
+        { userId: decoded.sub, tokenId: decoded.jti },
+        'Refresh token not found in database - possible token reuse or invalid token'
+      );
+      throw new RefreshTokenReusedError(decoded.sub);
+    }
+
+    // Check if token has been revoked
+    if (storedToken.revokedAt) {
+      logger.warn(
+        { userId: decoded.sub, tokenId: storedToken.id, revokedAt: storedToken.revokedAt },
+        'Attempt to use revoked refresh token'
+      );
+      throw new RefreshTokenRevokedError(decoded.sub);
+    }
+
+    // Check if token has expired in the database
+    if (storedToken.expiresAt <= new Date()) {
+      logger.info(
+        { userId: decoded.sub, tokenId: storedToken.id, expiredAt: storedToken.expiresAt },
+        'Refresh token expired in database'
+      );
+      throw new RefreshTokenExpiredError(storedToken.expiresAt);
     }
 
     // Get user
     const [user] = await db
       .select()
       .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.id, decoded.sub),
-          isNull(schema.users.deletedAt)
-        )
-      )
+      .where(eq(schema.users.id, decoded.sub))
       .limit(1);
 
     if (!user) {
-      throw new Error('User not found');
+      throw new UserNotFoundError(decoded.sub);
+    }
+
+    if (user.deletedAt) {
+      throw new UserDeletedError(decoded.sub);
     }
 
     // Revoke old refresh token (rotation)
@@ -255,8 +308,11 @@ class AuthService {
         .where(eq(schema.users.id, existingOAuth.userId))
         .limit(1);
 
-      if (!user || user.deletedAt) {
-        throw new Error('User account has been deleted');
+      if (!user) {
+        throw new UserNotFoundError(existingOAuth.userId);
+      }
+      if (user.deletedAt) {
+        throw new UserDeletedError(existingOAuth.userId);
       }
 
       // Update last login
@@ -277,7 +333,7 @@ class AuthService {
 
     if (existingUser) {
       if (existingUser.deletedAt) {
-        throw new Error('User account has been deleted');
+        throw new UserDeletedError(existingUser.id);
       }
 
       // Link OAuth account to existing user
