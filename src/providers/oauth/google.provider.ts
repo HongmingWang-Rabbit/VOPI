@@ -161,8 +161,11 @@ class GoogleOAuthProvider {
    *
    * @param code - Authorization code from OAuth callback
    * @param redirectUri - Must match the redirect URI used in getAuthorizationUrl
-   * @param codeVerifier - PKCE code verifier (if PKCE was used)
+   * @param codeVerifier - PKCE code verifier (required for mobile, optional for web)
    * @param platform - Must match the platform used in getAuthorizationUrl
+   *
+   * Note: Mobile platforms (iOS/Android) are "public clients" and don't use client_secret.
+   * They rely on PKCE for security instead.
    */
   async exchangeCode(
     code: string,
@@ -171,19 +174,29 @@ class GoogleOAuthProvider {
     platform: ClientPlatformType = 'web'
   ): Promise<OAuthTokens> {
     const { clientId, clientSecret } = this.getConfigForPlatform(platform);
+    const isMobile = platform === 'ios' || platform === 'android';
 
-    logger.debug({ platform, clientId: clientId.substring(0, 20) + '...' }, 'Exchanging authorization code for tokens');
+    logger.debug({ platform, clientId: clientId.substring(0, 20) + '...', isMobile }, 'Exchanging authorization code for tokens');
 
+    // Build token exchange params
     const params = new URLSearchParams({
       client_id: clientId,
-      client_secret: clientSecret,
       code,
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     });
 
+    // Mobile apps are "public clients" - they don't use client_secret
+    // They must use PKCE (code_verifier) for security instead
+    if (!isMobile) {
+      params.set('client_secret', clientSecret);
+    }
+
+    // PKCE code verifier (required for mobile, optional for web)
     if (codeVerifier) {
       params.set('code_verifier', codeVerifier);
+    } else if (isMobile) {
+      logger.warn({ platform }, 'Mobile OAuth without PKCE code_verifier - this may fail');
     }
 
     const response = await fetch(GOOGLE_TOKEN_URL, {
@@ -196,7 +209,7 @@ class GoogleOAuthProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      logger.error({ status: response.status, error, platform }, 'Token exchange failed');
+      logger.error({ status: response.status, error, platform, isMobile }, 'Token exchange failed');
       throw new Error(`Google token exchange failed: ${error}`);
     }
 
