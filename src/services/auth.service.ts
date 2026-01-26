@@ -68,9 +68,24 @@ class AuthService {
       type: 'access',
     };
 
-    return jwt.sign(payload, secret, {
+    const token = jwt.sign(payload, secret, {
       expiresIn: config.jwt.accessTokenExpiresIn as jwt.SignOptions['expiresIn'],
     });
+
+    // Debug: verify the token we just created has correct claims
+    const decoded = jwt.decode(token) as JwtPayload;
+    logger.debug(
+      {
+        userId: user.id,
+        tokenType: decoded?.type,
+        tokenSub: decoded?.sub,
+        hasType: 'type' in (decoded || {}),
+        expiresIn: config.jwt.accessTokenExpiresIn,
+      },
+      'Generated access token'
+    );
+
+    return token;
   }
 
   /**
@@ -120,10 +135,37 @@ class AuthService {
   verifyAccessToken(token: string): JwtPayload {
     const secret = this.getSecret();
 
+    // Debug: decode without verification first to see what claims are in the token
+    const unverifiedDecoded = jwt.decode(token);
+    logger.debug(
+      {
+        hasToken: !!token,
+        tokenLength: token?.length,
+        unverifiedClaims: unverifiedDecoded,
+        unverifiedType: (unverifiedDecoded as Record<string, unknown>)?.type,
+      },
+      'Verifying access token - pre-verification decode'
+    );
+
     try {
       const decoded = jwt.verify(token, secret) as JwtPayload;
 
+      logger.debug(
+        {
+          sub: decoded.sub,
+          type: decoded.type,
+          email: decoded.email,
+          exp: decoded.exp,
+          iat: decoded.iat,
+        },
+        'Access token verified successfully'
+      );
+
       if (decoded.type !== 'access') {
+        logger.warn(
+          { expectedType: 'access', actualType: decoded.type, sub: decoded.sub },
+          'Token type mismatch'
+        );
         throw new AccessTokenWrongTypeError('access', decoded.type || 'unknown');
       }
 
@@ -140,6 +182,10 @@ class AuthService {
         throw new AccessTokenInvalidError('Token not yet valid (nbf claim)');
       }
       if (error instanceof jwt.JsonWebTokenError) {
+        logger.warn(
+          { error: error.message, tokenPreview: token?.substring(0, 20) + '...' },
+          'JWT verification failed'
+        );
         // Distinguish between malformed and invalid signature
         if (error.message.includes('malformed') || error.message.includes('invalid')) {
           throw new AccessTokenMalformedError(error.message);

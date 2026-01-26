@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomBytes } from 'crypto';
+import jwt from 'jsonwebtoken';
 import rateLimit from '@fastify/rate-limit';
 import { authService } from '../services/auth.service.js';
 import { googleOAuthProvider } from '../providers/oauth/google.provider.js';
@@ -573,6 +574,83 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         google: googleOAuthProvider.isConfigured(),
         apple: appleOAuthProvider.isConfigured(),
       });
+    }
+  );
+
+  /**
+   * Debug endpoint to decode a token without verification
+   * Useful for debugging token issues
+   * Only available in development/staging
+   */
+  fastify.post(
+    '/auth/debug/decode-token',
+    {
+      schema: {
+        description: 'Decode a JWT token without verification (debug only)',
+        tags: ['Auth'],
+        body: {
+          type: 'object',
+          required: ['token'],
+          properties: {
+            token: { type: 'string' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              decoded: { type: 'object' },
+              header: { type: 'object' },
+              isExpired: { type: 'boolean' },
+              expiresAt: { type: 'string' },
+              issuedAt: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Body: { token: string } }>, reply: FastifyReply) => {
+      const { token } = request.body;
+
+      // Only allow in non-production environments
+      if (config.server.env === 'production') {
+        return reply.status(403).send({
+          error: 'FORBIDDEN',
+          message: 'This endpoint is not available in production',
+        });
+      }
+
+      try {
+        // Decode without verification
+        const decoded = jwt.decode(token, { complete: true });
+
+        if (!decoded) {
+          return reply.status(400).send({
+            error: 'INVALID_TOKEN',
+            message: 'Could not decode token - not a valid JWT format',
+          });
+        }
+
+        const payload = decoded.payload as Record<string, unknown>;
+        const now = Math.floor(Date.now() / 1000);
+        const exp = payload.exp as number | undefined;
+        const iat = payload.iat as number | undefined;
+
+        return reply.send({
+          decoded: payload,
+          header: decoded.header,
+          isExpired: exp ? exp < now : false,
+          expiresAt: exp ? new Date(exp * 1000).toISOString() : null,
+          issuedAt: iat ? new Date(iat * 1000).toISOString() : null,
+          hasTypeField: 'type' in payload,
+          typeValue: payload.type,
+        });
+      } catch (error) {
+        return reply.status(400).send({
+          error: 'DECODE_FAILED',
+          message: error instanceof Error ? error.message : 'Failed to decode token',
+        });
+      }
     }
   );
 }
