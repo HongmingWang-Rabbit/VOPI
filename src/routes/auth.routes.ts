@@ -200,11 +200,13 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         );
       }
 
+      // Response includes codeVerifier in both camelCase and snake_case for client compatibility:
+      // - codeVerifier: JavaScript/TypeScript convention
+      // - code_verifier: OAuth 2.0 PKCE specification convention (RFC 7636)
+      // Both fields contain the identical value. Clients should use whichever matches their convention.
       return reply.send({
         authorizationUrl,
         state,
-        // Return codeVerifier if we generated it (for mobile clients)
-        // Include both camelCase and snake_case for compatibility
         ...(codeVerifier ? { codeVerifier, code_verifier: codeVerifier } : {}),
       });
     }

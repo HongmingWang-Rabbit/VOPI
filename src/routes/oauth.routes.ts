@@ -3,6 +3,7 @@ import { eq, and } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 import { requireUserAuth } from '../middleware/auth.middleware.js';
 import { getDatabase, schema } from '../db/index.js';
+import { getConfig } from '../config/index.js';
 import { shopifyOAuthService } from '../services/oauth/shopify-oauth.service.js';
 import { amazonOAuthService } from '../services/oauth/amazon-oauth.service.js';
 import { ebayOAuthService } from '../services/oauth/ebay-oauth.service.js';
@@ -195,10 +196,9 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
           });
         }
 
-        // Redirect to success page
-        // Note: In production, consider making this URL configurable via environment variable
-        // or using the stored redirectUri from state for better UX
-        return reply.redirect('/api/v1/connections?success=shopify');
+        // Redirect to success page (configurable via OAUTH_SUCCESS_REDIRECT_URL)
+        const config = getConfig();
+        return reply.redirect(config.oauthSuccessRedirectUrl);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         return reply.status(400).send({

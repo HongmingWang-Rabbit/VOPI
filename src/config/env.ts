@@ -4,6 +4,21 @@ import { z } from 'zod';
 const RECOMMENDED_API_KEY_LENGTH = 16;
 
 /**
+ * Warn about short API keys during env parsing.
+ * Note: Uses console.warn because the logger is not yet available during env validation
+ * (logger depends on config, which depends on env parsing completing first).
+ */
+const warnAboutShortKeys = (keys: string[], keyType: string): void => {
+  const shortKeys = keys.filter((k) => k.length < RECOMMENDED_API_KEY_LENGTH);
+  if (shortKeys.length > 0) {
+    console.warn(
+      `[Security Warning] ${shortKeys.length} ${keyType} key(s) are shorter than ${RECOMMENDED_API_KEY_LENGTH} characters. ` +
+        'Consider using longer keys for better security.'
+    );
+  }
+};
+
+/**
  * Environment variable schema validation using Zod
  */
 export const envSchema = z.object({
@@ -26,14 +41,7 @@ export const envSchema = z.object({
     .string()
     .transform((val) => {
       const keys = val.split(',').map((k) => k.trim()).filter(Boolean);
-      // Warn about short keys but don't fail (for backward compatibility)
-      const shortKeys = keys.filter((k) => k.length < RECOMMENDED_API_KEY_LENGTH);
-      if (shortKeys.length > 0) {
-        console.warn(
-          `[Security Warning] ${shortKeys.length} API key(s) are shorter than ${RECOMMENDED_API_KEY_LENGTH} characters. ` +
-          'Consider using longer keys for better security.'
-        );
-      }
+      warnAboutShortKeys(keys, 'API');
       return keys;
     }),
   ADMIN_API_KEYS: z
@@ -41,14 +49,7 @@ export const envSchema = z.object({
     .default('')
     .transform((val) => {
       const keys = val.split(',').map((k) => k.trim()).filter(Boolean);
-      // Warn about short keys but don't fail (for backward compatibility)
-      const shortKeys = keys.filter((k) => k.length < RECOMMENDED_API_KEY_LENGTH);
-      if (shortKeys.length > 0) {
-        console.warn(
-          `[Security Warning] ${shortKeys.length} Admin API key(s) are shorter than ${RECOMMENDED_API_KEY_LENGTH} characters. ` +
-          'Consider using longer keys for better security.'
-        );
-      }
+      warnAboutShortKeys(keys, 'Admin API');
       return keys;
     }),
 
@@ -110,6 +111,9 @@ export const envSchema = z.object({
     .default('')
     .transform((val) => val.split(',').map((d) => d.trim()).filter(Boolean)),
 
+  // OAuth success redirect URL (for platform connections like Shopify)
+  OAUTH_SUCCESS_REDIRECT_URL: z.string().default('/api/v1/connections?success=shopify'),
+
   // FFmpeg
   FFMPEG_PATH: z.string().default('ffmpeg'),
   FFPROBE_PATH: z.string().default('ffprobe'),
@@ -170,6 +174,7 @@ export const envSchema = z.object({
   // Token refresh worker
   TOKEN_REFRESH_INTERVAL_MS: z.coerce.number().default(300000), // 5 minutes
   TOKEN_REFRESH_THRESHOLD_MS: z.coerce.number().default(900000), // 15 minutes before expiry
+  TOKEN_REFRESH_CONCURRENCY: z.coerce.number().default(5), // Max concurrent token refreshes
 
   // Stripe (for credit purchases)
   STRIPE_SECRET_KEY: z.string().optional(),

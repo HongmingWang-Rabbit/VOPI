@@ -12,9 +12,6 @@ import type { PlatformConnection } from '../db/schema.js';
 
 const logger = getLogger().child({ service: 'token-refresh' });
 
-/** Maximum concurrent token refresh operations */
-const TOKEN_REFRESH_CONCURRENCY = 5;
-
 /**
  * Token refresh service
  * Handles automatic refresh of expiring platform tokens
@@ -56,7 +53,8 @@ class TokenRefreshService {
     let failed = 0;
 
     // Process connections in parallel batches for efficiency
-    const batches = chunk(expiringConnections, TOKEN_REFRESH_CONCURRENCY);
+    // Concurrency is configurable via TOKEN_REFRESH_CONCURRENCY env var
+    const batches = chunk(expiringConnections, config.tokenRefresh.concurrency);
 
     for (const batch of batches) {
       const results = await Promise.allSettled(

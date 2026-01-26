@@ -31,6 +31,8 @@ export interface AppConfig {
   callback: {
     allowedDomains: string[];
   };
+  /** OAuth success redirect URL for platform connections (e.g., Shopify) */
+  oauthSuccessRedirectUrl: string;
   storage: {
     bucket: string;
     region: string;
@@ -132,6 +134,7 @@ export interface AppConfig {
   tokenRefresh: {
     intervalMs: number;
     thresholdMs: number;
+    concurrency: number;
   };
   stripe: {
     secretKey?: string;
@@ -179,6 +182,7 @@ export function buildConfig(env: Env): AppConfig {
     callback: {
       allowedDomains: env.CALLBACK_ALLOWED_DOMAINS,
     },
+    oauthSuccessRedirectUrl: env.OAUTH_SUCCESS_REDIRECT_URL,
     storage: {
       bucket: env.S3_BUCKET,
       region: env.S3_REGION,
@@ -279,6 +283,7 @@ export function buildConfig(env: Env): AppConfig {
     tokenRefresh: {
       intervalMs: env.TOKEN_REFRESH_INTERVAL_MS,
       thresholdMs: env.TOKEN_REFRESH_THRESHOLD_MS,
+      concurrency: env.TOKEN_REFRESH_CONCURRENCY,
     },
     stripe: {
       secretKey: env.STRIPE_SECRET_KEY,
