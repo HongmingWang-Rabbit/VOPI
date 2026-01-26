@@ -1,5 +1,22 @@
 import { z } from 'zod';
 
+/** Minimum required length for API keys */
+const MIN_API_KEY_LENGTH = 16;
+
+/**
+ * Reusable validation for API key minimum length
+ * Used by both API_KEYS and ADMIN_API_KEYS
+ */
+const validateApiKeyLength = (keys: string[], ctx: z.RefinementCtx, keyType: string = 'API') => {
+  const invalidKeys = keys.filter((k) => k.length < MIN_API_KEY_LENGTH);
+  if (invalidKeys.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${keyType} keys must be at least ${MIN_API_KEY_LENGTH} characters. Found ${invalidKeys.length} invalid key(s).`,
+    });
+  }
+};
+
 /**
  * Environment variable schema validation using Zod
  */
@@ -22,30 +39,12 @@ export const envSchema = z.object({
   API_KEYS: z
     .string()
     .transform((val) => val.split(',').map((k) => k.trim()).filter(Boolean))
-    .superRefine((keys, ctx) => {
-      // Validate minimum key length for security
-      const invalidKeys = keys.filter((k) => k.length < 16);
-      if (invalidKeys.length > 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `API keys must be at least 16 characters. Found ${invalidKeys.length} invalid key(s).`,
-        });
-      }
-    }),
+    .superRefine((keys, ctx) => validateApiKeyLength(keys, ctx, 'API')),
   ADMIN_API_KEYS: z
     .string()
     .default('')
     .transform((val) => val.split(',').map((k) => k.trim()).filter(Boolean))
-    .superRefine((keys, ctx) => {
-      // Validate minimum key length for security (if any keys provided)
-      const invalidKeys = keys.filter((k) => k.length < 16);
-      if (invalidKeys.length > 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Admin API keys must be at least 16 characters. Found ${invalidKeys.length} invalid key(s).`,
-        });
-      }
-    }),
+    .superRefine((keys, ctx) => validateApiKeyLength(keys, ctx, 'Admin API')),
 
   // S3/Storage (S3-compatible storage - MinIO, AWS S3, DigitalOcean Spaces, etc.)
   S3_BUCKET: z.string(),

@@ -18,6 +18,12 @@ import type { MetadataFileOutput, ProductMetadata } from '../types/product-metad
 const logger = createChildLogger({ service: 'jobs-controller' });
 
 /**
+ * Buffer multiplier for affordability pre-check.
+ * Adds 20% to estimated duration to account for estimation inaccuracies.
+ */
+const AFFORDABILITY_BUFFER_MULTIPLIER = 1.2;
+
+/**
  * JobsController - handles job CRUD operations
  */
 export class JobsController {
@@ -53,8 +59,8 @@ export class JobsController {
     // gracefully if insufficient credits. This pre-check is a UX improvement to catch obvious
     // insufficient balance cases early.
     if (data.estimatedDurationSeconds) {
-      // Add 20% buffer to estimate for safety margin
-      const bufferedDuration = data.estimatedDurationSeconds * 1.2;
+      // Add buffer to estimate for safety margin
+      const bufferedDuration = data.estimatedDurationSeconds * AFFORDABILITY_BUFFER_MULTIPLIER;
       const costEstimate = await creditsService.calculateJobCostWithAffordability(user.id, {
         videoDurationSeconds: bufferedDuration,
       });

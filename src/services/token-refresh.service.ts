@@ -2,6 +2,7 @@ import { eq, and, lt, isNotNull } from 'drizzle-orm';
 import { getDatabase, schema } from '../db/index.js';
 import { getConfig } from '../config/index.js';
 import { getLogger } from '../utils/logger.js';
+import { chunk } from '../utils/parallel.js';
 import { shopifyOAuthService } from './oauth/shopify-oauth.service.js';
 import { amazonOAuthService } from './oauth/amazon-oauth.service.js';
 import { ebayOAuthService } from './oauth/ebay-oauth.service.js';
@@ -55,10 +56,7 @@ class TokenRefreshService {
     let failed = 0;
 
     // Process connections in parallel batches for efficiency
-    const batches: PlatformConnection[][] = [];
-    for (let i = 0; i < expiringConnections.length; i += TOKEN_REFRESH_CONCURRENCY) {
-      batches.push(expiringConnections.slice(i, i + TOKEN_REFRESH_CONCURRENCY));
-    }
+    const batches = chunk(expiringConnections, TOKEN_REFRESH_CONCURRENCY);
 
     for (const batch of batches) {
       const results = await Promise.allSettled(

@@ -117,7 +117,8 @@ export const platformConnections = pgTable('platform_connections', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => ({
   uniqueConnection: unique('platform_connection_unique').on(table.userId, table.platform, table.platformAccountId),
-  tokenExpiresIdx: index('idx_platform_connections_token_expires').on(table.tokenExpiresAt),
+  // Note: tokenExpiresAt index is defined as a partial index in migration 0006
+  // Partial indexes cannot be expressed in Drizzle schema, so managed via SQL migration
 }));
 
 export type PlatformConnection = typeof platformConnections.$inferSelect;

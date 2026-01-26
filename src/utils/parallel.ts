@@ -92,3 +92,25 @@ export async function parallelMap<T, R>(
 export function isParallelError<T>(result: T | Error): result is Error {
   return result instanceof Error;
 }
+
+/**
+ * Split an array into chunks of specified size
+ *
+ * @param items - Array to chunk
+ * @param size - Maximum size of each chunk
+ * @returns Array of chunks
+ *
+ * @example
+ * chunk([1, 2, 3, 4, 5], 2) // [[1, 2], [3, 4], [5]]
+ */
+export function chunk<T>(items: T[], size: number): T[][] {
+  if (size <= 0) {
+    throw new Error('Chunk size must be positive');
+  }
+
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}

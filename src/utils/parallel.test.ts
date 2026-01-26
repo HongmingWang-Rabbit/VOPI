@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parallelMap, isParallelError } from './parallel.js';
+import { parallelMap, isParallelError, chunk } from './parallel.js';
 
 describe('parallelMap', () => {
   describe('basic functionality', () => {
@@ -252,5 +252,41 @@ describe('isParallelError', () => {
 
     expect(errors).toHaveLength(1);
     expect(successes).toHaveLength(2);
+  });
+});
+
+describe('chunk', () => {
+  it('should split array into chunks of specified size', () => {
+    expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+
+  it('should handle exact divisible array', () => {
+    expect(chunk([1, 2, 3, 4], 2)).toEqual([[1, 2], [3, 4]]);
+  });
+
+  it('should handle chunk size larger than array', () => {
+    expect(chunk([1, 2, 3], 10)).toEqual([[1, 2, 3]]);
+  });
+
+  it('should handle chunk size of 1', () => {
+    expect(chunk([1, 2, 3], 1)).toEqual([[1], [2], [3]]);
+  });
+
+  it('should handle empty array', () => {
+    expect(chunk([], 5)).toEqual([]);
+  });
+
+  it('should handle single element array', () => {
+    expect(chunk([1], 5)).toEqual([[1]]);
+  });
+
+  it('should throw error for non-positive chunk size', () => {
+    expect(() => chunk([1, 2, 3], 0)).toThrow('Chunk size must be positive');
+    expect(() => chunk([1, 2, 3], -1)).toThrow('Chunk size must be positive');
+  });
+
+  it('should work with different types', () => {
+    expect(chunk(['a', 'b', 'c', 'd'], 2)).toEqual([['a', 'b'], ['c', 'd']]);
+    expect(chunk([{ id: 1 }, { id: 2 }, { id: 3 }], 2)).toEqual([[{ id: 1 }, { id: 2 }], [{ id: 3 }]]);
   });
 });

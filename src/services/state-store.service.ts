@@ -139,10 +139,17 @@ class StateStoreService {
         if (deleteAfterGet) {
           // Use GETDEL for atomic get-and-delete to prevent race conditions
           // in concurrent OAuth callbacks (requires Redis 6.2+)
-          // Falls back to GET + DEL if GETDEL is not available
+          // Falls back to Lua script if GETDEL is not available
           try {
             data = await redis.getdel(key);
-          } catch {
+          } catch (getdelError) {
+            // Log the fallback for debugging Redis compatibility issues
+            const errorMsg = getdelError instanceof Error ? getdelError.message : String(getdelError);
+            logger.debug(
+              { error: errorMsg, key },
+              'GETDEL not available, falling back to Lua script (Redis < 6.2)'
+            );
+
             // Fallback for older Redis versions - use Lua script for atomicity
             const luaScript = `
               local value = redis.call('GET', KEYS[1])

@@ -115,8 +115,11 @@ async function tryJwtAuth(request: FastifyRequest): Promise<boolean> {
     return true;
   } catch (error) {
     // JWT verification failed - log at debug level for troubleshooting
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    logger.debug({ error: errorMessage }, 'JWT verification failed');
+    // Include full error context for non-Error objects to aid debugging
+    const errorDetails = error instanceof Error
+      ? { message: error.message, name: error.name }
+      : { rawError: String(error), type: typeof error };
+    logger.debug({ error: errorDetails }, 'JWT verification failed');
     return false;
   }
 }
