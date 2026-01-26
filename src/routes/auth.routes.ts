@@ -424,7 +424,20 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       };
 
       try {
+        logger.debug({ ip: request.ip }, 'Starting token refresh');
+
         const result = await authService.refreshAccessToken(body.refreshToken, deviceInfo);
+
+        // Log success for debugging
+        logger.info(
+          {
+            accessTokenLength: result.accessToken.length,
+            refreshTokenLength: result.refreshToken.length,
+            expiresIn: result.expiresIn,
+            ip: request.ip,
+          },
+          'Token refresh successful'
+        );
 
         return reply.send({
           ...result,
