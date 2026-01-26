@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { envSchema } from './env.js';
 
 // Valid API key for testing (must be at least 16 characters)
@@ -164,7 +164,10 @@ describe('envSchema', () => {
       }
     });
 
-    it('should reject keys shorter than 16 characters', () => {
+    it('should accept short keys with warning (backward compatibility)', () => {
+      // Short keys are allowed but trigger a console warning
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
         API_KEYS: 'short-key',
@@ -175,7 +178,13 @@ describe('envSchema', () => {
         GOOGLE_AI_API_KEY: 'key',
         PHOTOROOM_API_KEY: 'key',
       });
-      expect(result.success).toBe(false);
+
+      expect(result.success).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('API key(s) are shorter than 16 characters')
+      );
+
+      warnSpy.mockRestore();
     });
   });
 

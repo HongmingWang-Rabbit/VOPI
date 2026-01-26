@@ -1,21 +1,7 @@
 import { z } from 'zod';
 
-/** Minimum required length for API keys */
-const MIN_API_KEY_LENGTH = 16;
-
-/**
- * Reusable validation for API key minimum length
- * Used by both API_KEYS and ADMIN_API_KEYS
- */
-const validateApiKeyLength = (keys: string[], ctx: z.RefinementCtx, keyType: string = 'API') => {
-  const invalidKeys = keys.filter((k) => k.length < MIN_API_KEY_LENGTH);
-  if (invalidKeys.length > 0) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: `${keyType} keys must be at least ${MIN_API_KEY_LENGTH} characters. Found ${invalidKeys.length} invalid key(s).`,
-    });
-  }
-};
+/** Recommended minimum length for API keys (warning only, not enforced) */
+const RECOMMENDED_API_KEY_LENGTH = 16;
 
 /**
  * Environment variable schema validation using Zod
@@ -38,13 +24,33 @@ export const envSchema = z.object({
   // Auth
   API_KEYS: z
     .string()
-    .transform((val) => val.split(',').map((k) => k.trim()).filter(Boolean))
-    .superRefine((keys, ctx) => validateApiKeyLength(keys, ctx, 'API')),
+    .transform((val) => {
+      const keys = val.split(',').map((k) => k.trim()).filter(Boolean);
+      // Warn about short keys but don't fail (for backward compatibility)
+      const shortKeys = keys.filter((k) => k.length < RECOMMENDED_API_KEY_LENGTH);
+      if (shortKeys.length > 0) {
+        console.warn(
+          `[Security Warning] ${shortKeys.length} API key(s) are shorter than ${RECOMMENDED_API_KEY_LENGTH} characters. ` +
+          'Consider using longer keys for better security.'
+        );
+      }
+      return keys;
+    }),
   ADMIN_API_KEYS: z
     .string()
     .default('')
-    .transform((val) => val.split(',').map((k) => k.trim()).filter(Boolean))
-    .superRefine((keys, ctx) => validateApiKeyLength(keys, ctx, 'Admin API')),
+    .transform((val) => {
+      const keys = val.split(',').map((k) => k.trim()).filter(Boolean);
+      // Warn about short keys but don't fail (for backward compatibility)
+      const shortKeys = keys.filter((k) => k.length < RECOMMENDED_API_KEY_LENGTH);
+      if (shortKeys.length > 0) {
+        console.warn(
+          `[Security Warning] ${shortKeys.length} Admin API key(s) are shorter than ${RECOMMENDED_API_KEY_LENGTH} characters. ` +
+          'Consider using longer keys for better security.'
+        );
+      }
+      return keys;
+    }),
 
   // S3/Storage (S3-compatible storage - MinIO, AWS S3, DigitalOcean Spaces, etc.)
   S3_BUCKET: z.string(),
