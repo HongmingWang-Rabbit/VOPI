@@ -341,21 +341,39 @@ export class StorageService {
     contentType = 'video/mp4',
     expiresIn = 3600
   ): Promise<{ uploadUrl: string; key: string; publicUrl: string }> {
-    const client = this.init();
-    const bucket = this.getBucket();
+    logger.debug({ s3Key, contentType, expiresIn }, 'getPresignedUploadUrl called');
 
-    const command = new PutObjectCommand({
-      Bucket: bucket,
-      Key: s3Key,
-      ContentType: contentType,
-    });
+    try {
+      const client = this.init();
+      const bucket = this.getBucket();
 
-    const uploadUrl = await getSignedUrl(client, command, { expiresIn });
-    const publicUrl = this.getPublicUrl(s3Key);
+      logger.debug({ bucket, hasClient: !!client }, 'S3 client and bucket ready');
 
-    logger.info({ key: s3Key, expiresIn }, 'Generated presigned upload URL');
+      const command = new PutObjectCommand({
+        Bucket: bucket,
+        Key: s3Key,
+        ContentType: contentType,
+      });
 
-    return { uploadUrl, key: s3Key, publicUrl };
+      const uploadUrl = await getSignedUrl(client, command, { expiresIn });
+      const publicUrl = this.getPublicUrl(s3Key);
+
+      logger.info({ key: s3Key, expiresIn }, 'Generated presigned upload URL');
+
+      return { uploadUrl, key: s3Key, publicUrl };
+    } catch (error) {
+      logger.error(
+        {
+          s3Key,
+          contentType,
+          expiresIn,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        },
+        'Failed to generate presigned upload URL'
+      );
+      throw error;
+    }
   }
 
   /**
