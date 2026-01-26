@@ -672,13 +672,16 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
           expiresIn,
         });
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorName = error instanceof Error ? error.name : 'Unknown';
         logger.error(
           {
-            error: error instanceof Error ? error.message : String(error),
+            errorName,
+            errorMessage,
             stack: error instanceof Error ? error.stack : undefined,
             body: request.body,
           },
-          'Failed to generate presigned upload URL'
+          `Failed to generate presigned upload URL: ${errorName}: ${errorMessage}`
         );
         throw error;
       }

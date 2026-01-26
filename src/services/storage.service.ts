@@ -62,6 +62,20 @@ export class StorageService {
 
     const config = getConfig();
 
+    // Validate required S3 configuration
+    const missingConfig: string[] = [];
+    if (!config.storage.bucket) missingConfig.push('bucket');
+    if (!config.storage.region) missingConfig.push('region');
+    if (!config.storage.endpoint) missingConfig.push('endpoint');
+    if (!config.storage.accessKeyId) missingConfig.push('accessKeyId');
+    if (!config.storage.secretAccessKey) missingConfig.push('secretAccessKey');
+
+    if (missingConfig.length > 0) {
+      const errorMsg = `Missing required S3 configuration: ${missingConfig.join(', ')}`;
+      logger.error({ missingConfig }, errorMsg);
+      throw new Error(errorMsg);
+    }
+
     // Create HTTP agents with keep-alive for connection reuse
     // This significantly reduces latency for multiple uploads
     const httpAgent = new HttpAgent({
@@ -93,7 +107,14 @@ export class StorageService {
     });
 
     logger.info(
-      { region: config.storage.region, endpoint: config.storage.endpoint },
+      {
+        region: config.storage.region,
+        endpoint: config.storage.endpoint,
+        bucket: config.storage.bucket,
+        forcePathStyle: config.storage.forcePathStyle,
+        hasAccessKeyId: !!config.storage.accessKeyId,
+        hasSecretAccessKey: !!config.storage.secretAccessKey,
+      },
       'S3 client initialized with keep-alive'
     );
 
@@ -362,15 +383,18 @@ export class StorageService {
 
       return { uploadUrl, key: s3Key, publicUrl };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorName = error instanceof Error ? error.name : 'Unknown';
       logger.error(
         {
           s3Key,
           contentType,
           expiresIn,
-          error: error instanceof Error ? error.message : String(error),
+          errorName,
+          errorMessage,
           stack: error instanceof Error ? error.stack : undefined,
         },
-        'Failed to generate presigned upload URL'
+        `Failed to generate presigned upload URL: ${errorName}: ${errorMessage}`
       );
       throw error;
     }
