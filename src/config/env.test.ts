@@ -243,7 +243,11 @@ describe('envSchema', () => {
           '/health',
           '/ready',
           '/docs',
-          '/api/v1/auth',
+          '/api/v1/auth/oauth',
+          '/api/v1/auth/refresh',
+          '/api/v1/auth/logout',
+          '/api/v1/auth/providers',
+          '/api/v1/auth/debug',
           '/api/v1/credits/webhook',
           '/api/v1/credits/packs',
         ]);
