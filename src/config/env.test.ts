@@ -1,12 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { envSchema } from './env.js';
 
+// Valid API key for testing (must be at least 16 characters)
+const VALID_API_KEY = 'test-api-key-12345';
+const VALID_API_KEY_2 = 'test-api-key-67890';
+const VALID_API_KEY_3 = 'test-api-key-abcde';
+
 describe('envSchema', () => {
   describe('SERVER configuration', () => {
     it('should use default values when not provided', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1,key2',
+        API_KEYS: `${VALID_API_KEY},${VALID_API_KEY_2}`,
         S3_BUCKET: 'test-bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'access-key',
@@ -29,7 +34,7 @@ describe('envSchema', () => {
         const result = envSchema.safeParse({
           NODE_ENV: env,
           DATABASE_URL: 'postgres://localhost/test',
-          API_KEYS: 'key1',
+          API_KEYS: VALID_API_KEY,
           S3_BUCKET: 'bucket',
           S3_ENDPOINT: 'http://localhost:9000',
           S3_ACCESS_KEY_ID: 'key',
@@ -45,7 +50,7 @@ describe('envSchema', () => {
       const result = envSchema.safeParse({
         NODE_ENV: 'invalid',
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -60,7 +65,7 @@ describe('envSchema', () => {
       const result = envSchema.safeParse({
         PORT: '8080',
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -79,7 +84,7 @@ describe('envSchema', () => {
   describe('DATABASE configuration', () => {
     it('should require DATABASE_URL', () => {
       const result = envSchema.safeParse({
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -93,7 +98,7 @@ describe('envSchema', () => {
     it('should validate DATABASE_URL is a valid URL', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'not-a-url',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -107,7 +112,7 @@ describe('envSchema', () => {
     it('should use default pool settings', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -128,7 +133,7 @@ describe('envSchema', () => {
     it('should split comma-separated keys into array', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1,key2,key3',
+        API_KEYS: `${VALID_API_KEY},${VALID_API_KEY_2},${VALID_API_KEY_3}`,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -138,14 +143,14 @@ describe('envSchema', () => {
       });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.API_KEYS).toEqual(['key1', 'key2', 'key3']);
+        expect(result.data.API_KEYS).toEqual([VALID_API_KEY, VALID_API_KEY_2, VALID_API_KEY_3]);
       }
     });
 
     it('should trim whitespace from keys', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: ' key1 , key2 , key3 ',
+        API_KEYS: ` ${VALID_API_KEY} , ${VALID_API_KEY_2} , ${VALID_API_KEY_3} `,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -155,8 +160,22 @@ describe('envSchema', () => {
       });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.API_KEYS).toEqual(['key1', 'key2', 'key3']);
+        expect(result.data.API_KEYS).toEqual([VALID_API_KEY, VALID_API_KEY_2, VALID_API_KEY_3]);
       }
+    });
+
+    it('should reject keys shorter than 16 characters', () => {
+      const result = envSchema.safeParse({
+        DATABASE_URL: 'postgres://localhost/test',
+        API_KEYS: 'short-key',
+        S3_BUCKET: 'bucket',
+        S3_ENDPOINT: 'http://localhost:9000',
+        S3_ACCESS_KEY_ID: 'key',
+        S3_SECRET_ACCESS_KEY: 'secret',
+        GOOGLE_AI_API_KEY: 'key',
+        PHOTOROOM_API_KEY: 'key',
+      });
+      expect(result.success).toBe(false);
     });
   });
 
@@ -164,7 +183,7 @@ describe('envSchema', () => {
     it('should use default domain pattern', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -181,7 +200,7 @@ describe('envSchema', () => {
     it('should split and filter empty domains', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -201,7 +220,7 @@ describe('envSchema', () => {
     it('should use default skip paths', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -227,7 +246,7 @@ describe('envSchema', () => {
     it('should default to empty array', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -246,7 +265,7 @@ describe('envSchema', () => {
     it('should use default worker settings', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -268,7 +287,7 @@ describe('envSchema', () => {
     it('should use default queue settings', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -292,7 +311,7 @@ describe('envSchema', () => {
     it('should use default FFmpeg paths', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -310,7 +329,7 @@ describe('envSchema', () => {
     it('should accept custom FFmpeg paths', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -332,7 +351,7 @@ describe('envSchema', () => {
     it('should use default log level', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',
@@ -351,7 +370,7 @@ describe('envSchema', () => {
       for (const level of levels) {
         const result = envSchema.safeParse({
           DATABASE_URL: 'postgres://localhost/test',
-          API_KEYS: 'key1',
+          API_KEYS: VALID_API_KEY,
           S3_BUCKET: 'bucket',
           S3_ENDPOINT: 'http://localhost:9000',
           S3_ACCESS_KEY_ID: 'key',
@@ -367,7 +386,7 @@ describe('envSchema', () => {
     it('should reject invalid log level', () => {
       const result = envSchema.safeParse({
         DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: 'key1',
+        API_KEYS: VALID_API_KEY,
         S3_BUCKET: 'bucket',
         S3_ENDPOINT: 'http://localhost:9000',
         S3_ACCESS_KEY_ID: 'key',

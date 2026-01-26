@@ -69,6 +69,7 @@ export const oauthAccounts = pgTable('oauth_accounts', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => ({
   providerAccountUnique: unique('oauth_provider_account_unique').on(table.provider, table.providerAccountId),
+  userIdIdx: index('idx_oauth_accounts_user_id').on(table.userId),
 }));
 
 export type OAuthAccount = typeof oauthAccounts.$inferSelect;
@@ -89,7 +90,10 @@ export const refreshTokens = pgTable('refresh_tokens', {
   expiresAt: timestamp('expires_at').notNull(),
   lastUsedAt: timestamp('last_used_at'),
   revokedAt: timestamp('revoked_at'),
-});
+}, (table) => ({
+  userIdIdx: index('idx_refresh_tokens_user_id').on(table.userId),
+  expiresAtIdx: index('idx_refresh_tokens_expires_at').on(table.expiresAt),
+}));
 
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type NewRefreshToken = typeof refreshTokens.$inferInsert;
@@ -113,6 +117,7 @@ export const platformConnections = pgTable('platform_connections', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => ({
   uniqueConnection: unique('platform_connection_unique').on(table.userId, table.platform, table.platformAccountId),
+  tokenExpiresIdx: index('idx_platform_connections_token_expires').on(table.tokenExpiresAt),
 }));
 
 export type PlatformConnection = typeof platformConnections.$inferSelect;
@@ -138,7 +143,11 @@ export const jobs = pgTable('jobs', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
   startedAt: timestamp('started_at'),
   completedAt: timestamp('completed_at'),
-});
+}, (table) => ({
+  userIdIdx: index('idx_jobs_user_id').on(table.userId),
+  statusIdx: index('idx_jobs_status').on(table.status),
+  userStatusIdx: index('idx_jobs_user_status').on(table.userId, table.status),
+}));
 
 export type Job = typeof jobs.$inferSelect;
 export type NewJob = typeof jobs.$inferInsert;

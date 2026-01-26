@@ -19,11 +19,33 @@ export const envSchema = z.object({
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
 
   // Auth
-  API_KEYS: z.string().transform((val) => val.split(',').map((k) => k.trim())),
+  API_KEYS: z
+    .string()
+    .transform((val) => val.split(',').map((k) => k.trim()).filter(Boolean))
+    .superRefine((keys, ctx) => {
+      // Validate minimum key length for security
+      const invalidKeys = keys.filter((k) => k.length < 16);
+      if (invalidKeys.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `API keys must be at least 16 characters. Found ${invalidKeys.length} invalid key(s).`,
+        });
+      }
+    }),
   ADMIN_API_KEYS: z
     .string()
     .default('')
-    .transform((val) => val.split(',').map((k) => k.trim()).filter(Boolean)),
+    .transform((val) => val.split(',').map((k) => k.trim()).filter(Boolean))
+    .superRefine((keys, ctx) => {
+      // Validate minimum key length for security (if any keys provided)
+      const invalidKeys = keys.filter((k) => k.length < 16);
+      if (invalidKeys.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Admin API keys must be at least 16 characters. Found ${invalidKeys.length} invalid key(s).`,
+        });
+      }
+    }),
 
   // S3/Storage (S3-compatible storage - MinIO, AWS S3, DigitalOcean Spaces, etc.)
   S3_BUCKET: z.string(),

@@ -98,6 +98,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
             properties: {
               authorizationUrl: { type: 'string' },
               state: { type: 'string' },
+              codeVerifier: { type: 'string' }, // Returned when server generates PKCE for mobile clients (camelCase)
+              code_verifier: { type: 'string' }, // Same as above, snake_case for OAuth convention compatibility
             },
           },
         },
@@ -112,13 +114,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       // Generate state if not provided
       const state = body.state || randomBytes(32).toString('base64url');
 
-      // Generate PKCE if not provided
-      if (body.codeChallenge) {
-        // Client is handling PKCE
-      } else if (body.codeChallengeMethod === 'S256') {
-        // We should generate PKCE - but client needs codeVerifier
-        // For now, client should handle PKCE
-      }
+      // PKCE handling:
+      // - If client provides codeChallenge, they manage PKCE (mobile apps typically do this)
+      // - If client doesn't provide codeChallenge, server generates PKCE and returns codeVerifier
+      // - The codeVerifier is stored in state and returned to client for the callback
 
       switch (body.provider) {
         case OAuthProvider.GOOGLE: {
@@ -193,10 +192,20 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       };
       await stateStoreService.set(state, stateData);
 
+      // Log PKCE status for debugging
+      if (codeVerifier) {
+        logger.info(
+          { platform: body.platform, state, codeVerifierLength: codeVerifier.length },
+          'Generated PKCE code verifier for mobile client'
+        );
+      }
+
       return reply.send({
         authorizationUrl,
         state,
-        ...(codeVerifier ? { codeVerifier } : {}), // Return codeVerifier if we generated it
+        // Return codeVerifier if we generated it (for mobile clients)
+        // Include both camelCase and snake_case for compatibility
+        ...(codeVerifier ? { codeVerifier, code_verifier: codeVerifier } : {}),
       });
     }
   );

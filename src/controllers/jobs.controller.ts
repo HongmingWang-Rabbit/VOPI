@@ -42,15 +42,26 @@ export class JobsController {
     const config = jobConfigSchema.parse(data.config || {});
 
     // Check affordability if estimated duration is provided
-    // This is a pre-check - actual charge happens during processing when we know real duration
+    // This is a PRE-CHECK only - actual charge happens during processing when we know real duration.
+    //
+    // IMPORTANT: This pre-check may pass but actual spend may fail if:
+    // 1. Actual video duration exceeds estimated duration
+    // 2. User spends credits on other jobs between pre-check and processing
+    // 3. Multiple concurrent job submissions
+    //
+    // The actual credit spend happens in the spend-credits processor which will fail the job
+    // gracefully if insufficient credits. This pre-check is a UX improvement to catch obvious
+    // insufficient balance cases early.
     if (data.estimatedDurationSeconds) {
+      // Add 20% buffer to estimate for safety margin
+      const bufferedDuration = data.estimatedDurationSeconds * 1.2;
       const costEstimate = await creditsService.calculateJobCostWithAffordability(user.id, {
-        videoDurationSeconds: data.estimatedDurationSeconds,
+        videoDurationSeconds: bufferedDuration,
       });
 
       if (!costEstimate.canAfford) {
         throw new ForbiddenError(
-          `Insufficient credits. Estimated cost: ${costEstimate.totalCredits}, available: ${costEstimate.currentBalance}. Please purchase more credits.`,
+          `Insufficient credits. Estimated cost: ${Math.ceil(costEstimate.totalCredits)}, available: ${costEstimate.currentBalance}. Please purchase more credits.`,
           'INSUFFICIENT_CREDITS'
         );
       }
@@ -59,6 +70,7 @@ export class JobsController {
         {
           userId: user.id,
           estimatedDuration: data.estimatedDurationSeconds,
+          bufferedDuration,
           estimatedCost: costEstimate.totalCredits,
           currentBalance: costEstimate.currentBalance,
         },

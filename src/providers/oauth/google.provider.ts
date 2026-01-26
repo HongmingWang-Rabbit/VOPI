@@ -196,7 +196,10 @@ class GoogleOAuthProvider {
     if (codeVerifier) {
       params.set('code_verifier', codeVerifier);
     } else if (isMobile) {
-      logger.warn({ platform }, 'Mobile OAuth without PKCE code_verifier - this may fail');
+      // Mobile apps are public clients and MUST use PKCE for security
+      // Fail fast rather than attempting an exchange that will likely fail
+      logger.error({ platform }, 'Mobile OAuth token exchange requires PKCE code_verifier');
+      throw new Error('Mobile OAuth requires PKCE code_verifier for security. Please ensure your app sends the code_verifier parameter.');
     }
 
     const response = await fetch(GOOGLE_TOKEN_URL, {

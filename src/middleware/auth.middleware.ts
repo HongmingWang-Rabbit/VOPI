@@ -5,12 +5,21 @@ import { getConfig } from '../config/index.js';
 import { getDatabase, schema } from '../db/index.js';
 import { UnauthorizedError } from '../utils/errors.js';
 import { authService } from '../services/auth.service.js';
+import { getLogger } from '../utils/logger.js';
 import type { ApiKey, User } from '../db/schema.js';
 import type { AuthContext } from '../types/auth.types.js';
+
+const logger = getLogger().child({ service: 'auth-middleware' });
 
 /**
  * API Key cache for reducing database lookups
  * Uses a short TTL to balance performance and security
+ *
+ * Note: Uses FIFO eviction (oldest insertion removed first) when cache is full.
+ * This is acceptable because:
+ * 1. The short TTL (30s) means entries are frequently refreshed
+ * 2. The large cache size (100) should accommodate most deployments
+ * 3. True LRU would require more complexity with minimal benefit for this use case
  */
 interface CachedApiKey {
   key: ApiKey;
@@ -92,6 +101,7 @@ async function tryJwtAuth(request: FastifyRequest): Promise<boolean> {
     const user = await authService.getUserById(payload.sub);
 
     if (!user) {
+      logger.debug({ userId: payload.sub }, 'JWT valid but user not found');
       return false;
     }
 
@@ -103,8 +113,10 @@ async function tryJwtAuth(request: FastifyRequest): Promise<boolean> {
     };
 
     return true;
-  } catch {
-    // JWT verification failed
+  } catch (error) {
+    // JWT verification failed - log at debug level for troubleshooting
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.debug({ error: errorMessage }, 'JWT verification failed');
     return false;
   }
 }

@@ -14,16 +14,14 @@
 import type { Processor, ProcessorContext, ProcessorResult, PipelineData } from '../../types.js';
 import { creditsService } from '../../../services/credits.service.js';
 import { createChildLogger } from '../../../utils/logger.js';
-import { CreditErrorCode, type AddOnServiceType, type CreditError } from '../../../types/credits.types.js';
+import {
+  CreditErrorCode,
+  MINIMUM_CREDITS_PER_SPEND,
+  type AddOnServiceType,
+  type CreditError,
+} from '../../../types/credits.types.js';
 
 const logger = createChildLogger({ processor: 'spend-credits' });
-
-/**
- * Minimum credits that can be spent in a single transaction.
- * This ensures we never try to spend 0 credits even if the calculated cost
- * rounds down to 0 (e.g., for very short videos).
- */
-const MINIMUM_CREDITS_PER_SPEND = 1;
 
 export const spendCreditsProcessor: Processor = {
   id: 'spend-credits',

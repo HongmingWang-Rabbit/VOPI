@@ -185,6 +185,7 @@ class StripeService {
     const customerId = await this.getOrCreateCustomer(userId, email);
 
     // Create checkout session
+    const pack = CreditPacks[packType];
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
@@ -200,8 +201,18 @@ class StripeService {
       metadata: {
         userId,
         packType,
+        credits: String(pack.credits),
+        priceUsd: String(pack.priceUsd),
       },
       client_reference_id: userId,
+      // Add metadata to payment intent for better traceability
+      payment_intent_data: {
+        metadata: {
+          userId,
+          packType,
+          credits: String(pack.credits),
+        },
+      },
     });
 
     // Validate session URL exists

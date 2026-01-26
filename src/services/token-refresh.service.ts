@@ -11,6 +11,9 @@ import type { PlatformConnection } from '../db/schema.js';
 
 const logger = getLogger().child({ service: 'token-refresh' });
 
+/** Maximum concurrent token refresh operations */
+const TOKEN_REFRESH_CONCURRENCY = 5;
+
 /**
  * Token refresh service
  * Handles automatic refresh of expiring platform tokens
@@ -19,6 +22,7 @@ class TokenRefreshService {
   /**
    * Refresh tokens that are about to expire
    * Called periodically by the worker
+   * Uses parallel processing with concurrency limit for efficiency
    */
   async refreshExpiringTokens(): Promise<{ refreshed: number; failed: number }> {
     const config = getConfig();
@@ -43,30 +47,53 @@ class TokenRefreshService {
       'Found connections with expiring tokens'
     );
 
+    if (expiringConnections.length === 0) {
+      return { refreshed: 0, failed: 0 };
+    }
+
     let refreshed = 0;
     let failed = 0;
 
-    for (const connection of expiringConnections) {
-      try {
-        await this.refreshConnectionToken(connection);
-        refreshed++;
-      } catch (error) {
-        failed++;
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        logger.error(
-          { connectionId: connection.id, platform: connection.platform, error: message },
-          'Failed to refresh token'
-        );
+    // Process connections in parallel batches for efficiency
+    const batches: PlatformConnection[][] = [];
+    for (let i = 0; i < expiringConnections.length; i += TOKEN_REFRESH_CONCURRENCY) {
+      batches.push(expiringConnections.slice(i, i + TOKEN_REFRESH_CONCURRENCY));
+    }
 
-        // Update connection status and error
-        await db
-          .update(schema.platformConnections)
-          .set({
-            status: ConnectionStatus.ERROR,
-            lastError: message,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.platformConnections.id, connection.id));
+    for (const batch of batches) {
+      const results = await Promise.allSettled(
+        batch.map(async (connection) => {
+          try {
+            await this.refreshConnectionToken(connection);
+            return { success: true, connectionId: connection.id };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            logger.error(
+              { connectionId: connection.id, platform: connection.platform, error: message },
+              'Failed to refresh token'
+            );
+
+            // Update connection status and error
+            await db
+              .update(schema.platformConnections)
+              .set({
+                status: ConnectionStatus.ERROR,
+                lastError: message,
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.platformConnections.id, connection.id));
+
+            throw error;
+          }
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          refreshed++;
+        } else {
+          failed++;
+        }
       }
     }
 

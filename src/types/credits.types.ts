@@ -39,6 +39,13 @@ export const SIGNUP_GRANT_CREDITS = 5;
 export const MAX_VIDEO_DURATION_SECONDS = 1800;
 
 /**
+ * Minimum credits that can be spent in a single transaction.
+ * This ensures we never try to spend 0 credits even if the calculated cost
+ * rounds down to 0 (e.g., for very short videos).
+ */
+export const MINIMUM_CREDITS_PER_SPEND = 1;
+
+/**
  * Metadata stored with credit transactions
  */
 export interface CreditTransactionMetadata {

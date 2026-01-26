@@ -106,8 +106,16 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const query = shopifyCallbackQuerySchema.parse(request.query);
 
-      // Verify HMAC
-      if (!shopifyOAuthService.verifyHmac(query as unknown as Record<string, string>)) {
+      // Verify HMAC - convert Zod-parsed query to Record<string, string> for HMAC verification
+      // This is safe because shopifyCallbackQuerySchema ensures all values are strings
+      const hmacParams: Record<string, string> = {
+        code: query.code,
+        shop: query.shop,
+        state: query.state,
+        hmac: query.hmac,
+        timestamp: query.timestamp,
+      };
+      if (!shopifyOAuthService.verifyHmac(hmacParams)) {
         return reply.status(400).send({
           error: 'INVALID_HMAC',
           message: 'Invalid HMAC signature',
@@ -188,6 +196,8 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
         }
 
         // Redirect to success page
+        // Note: In production, consider making this URL configurable via environment variable
+        // or using the stored redirectUri from state for better UX
         return reply.redirect('/api/v1/connections?success=shopify');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';

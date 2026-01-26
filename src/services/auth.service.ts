@@ -281,6 +281,15 @@ class AuthService {
       }
 
       // Link OAuth account to existing user
+      //
+      // Security note: We link accounts based on matching email addresses.
+      // This is safe because:
+      // 1. OAuth providers (Google, Apple) verify email ownership
+      // 2. The email_verified flag from the provider indicates verification status
+      // 3. Users can only link accounts if they control the email address
+      //
+      // If stricter linking is needed, implement explicit account linking flow
+      // where user must be logged in to link additional OAuth providers.
       await db.insert(schema.oauthAccounts).values({
         userId: existingUser.id,
         provider,

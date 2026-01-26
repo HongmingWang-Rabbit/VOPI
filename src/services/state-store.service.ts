@@ -134,10 +134,27 @@ class StateStoreService {
       const redis = getRedis();
       if (redis) {
         const key = `${STATE_PREFIX}${state}`;
-        const data = await redis.get(key);
+        let data: string | null;
 
-        if (deleteAfterGet && data) {
-          await redis.del(key);
+        if (deleteAfterGet) {
+          // Use GETDEL for atomic get-and-delete to prevent race conditions
+          // in concurrent OAuth callbacks (requires Redis 6.2+)
+          // Falls back to GET + DEL if GETDEL is not available
+          try {
+            data = await redis.getdel(key);
+          } catch {
+            // Fallback for older Redis versions - use Lua script for atomicity
+            const luaScript = `
+              local value = redis.call('GET', KEYS[1])
+              if value then
+                redis.call('DEL', KEYS[1])
+              end
+              return value
+            `;
+            data = await redis.eval(luaScript, 1, key) as string | null;
+          }
+        } else {
+          data = await redis.get(key);
         }
 
         if (!data) return null;
@@ -154,7 +171,7 @@ class StateStoreService {
       }
     }
 
-    // Memory fallback
+    // Memory fallback - Map operations are synchronous so no race condition
     const data = memoryStore.get(state);
     if (deleteAfterGet) {
       memoryStore.delete(state);

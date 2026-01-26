@@ -286,8 +286,20 @@ describe('StripeService', () => {
         line_items: [{ price: 'price_pack20', quantity: 1 }],
         success_url: 'https://example.com/success',
         cancel_url: 'https://example.com/cancel',
-        metadata: { userId: mockUserId, packType: 'PACK_20' },
+        metadata: {
+          userId: mockUserId,
+          packType: 'PACK_20',
+          credits: '20',
+          priceUsd: '14.99',
+        },
         client_reference_id: mockUserId,
+        payment_intent_data: {
+          metadata: {
+            userId: mockUserId,
+            packType: 'PACK_20',
+            credits: '20',
+          },
+        },
       });
     });
 

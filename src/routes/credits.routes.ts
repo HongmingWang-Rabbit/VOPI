@@ -223,6 +223,9 @@ export async function creditsRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * Estimate job cost
    * Calculate the credit cost for a job based on video duration and options
+   *
+   * Note: Uses Zod for validation instead of Fastify schema to provide detailed error messages.
+   * Fastify schema is kept for OpenAPI documentation only (no validation duplication).
    */
   fastify.post(
     '/credits/estimate',
@@ -230,6 +233,7 @@ export async function creditsRoutes(fastify: FastifyInstance): Promise<void> {
       schema: {
         description: 'Estimate credit cost for a job based on video duration and options',
         tags: ['Credits'],
+        // Schema for OpenAPI docs only - validation is done by Zod
         body: {
           type: 'object',
           required: ['videoDurationSeconds'],
@@ -268,6 +272,7 @@ export async function creditsRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      // Zod validation provides detailed error messages
       const parseResult = jobCostEstimateSchema.safeParse(request.body);
       if (!parseResult.success) {
         return reply.status(400).send({

@@ -9,9 +9,17 @@ const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
 const KEY_LENGTH = 32;
+/** Maximum derived keys to cache (uses FIFO eviction) */
 const CACHE_MAX_SIZE = 10;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
+/**
+ * Cached derived key entry
+ * Note: Cache uses FIFO eviction when full, which is acceptable because:
+ * 1. Small cache size (10) with long TTL (1 hour) means most keys stay cached
+ * 2. Key derivation is deterministic, so cache misses just re-derive
+ * 3. True LRU would add complexity without significant benefit
+ */
 interface CachedKey {
   key: Buffer;
   createdAt: number;
