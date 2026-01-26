@@ -178,24 +178,30 @@ describe('StripeService', () => {
   });
 
   describe('getOrCreateCustomer', () => {
-    // Helper to setup transaction mock
-    const setupTransactionMock = (executeResult: { rows: unknown[] }, updateMock?: ReturnType<typeof vi.fn>) => {
-      const mockTx = {
-        execute: vi.fn().mockResolvedValue(executeResult),
-        update: updateMock || vi.fn().mockReturnValue({
-          set: vi.fn().mockReturnValue({
-            where: vi.fn().mockResolvedValue(undefined),
+    // Helper to setup select mock for checking existing customer
+    const setupSelectMock = (userResult: { id: string; stripeCustomerId: string | null } | undefined) => {
+      mockDbSelect.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue(userResult ? [userResult] : []),
           }),
         }),
-      };
-      mockDbTransaction.mockImplementation(async (callback) => callback(mockTx));
-      return mockTx;
+      });
+    };
+
+    // Helper to setup update mock for conditional update
+    const setupUpdateMock = (updatedResult: { stripeCustomerId: string } | undefined) => {
+      mockDbUpdate.mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue(updatedResult ? [updatedResult] : []),
+          }),
+        }),
+      });
     };
 
     it('should return existing customer ID if present', async () => {
-      setupTransactionMock({
-        rows: [{ id: mockUserId, stripe_customer_id: mockCustomerId }],
-      });
+      setupSelectMock({ id: mockUserId, stripeCustomerId: mockCustomerId });
 
       const result = await stripeService.getOrCreateCustomer(mockUserId, mockEmail);
 
@@ -204,9 +210,9 @@ describe('StripeService', () => {
     });
 
     it('should create new customer if none exists', async () => {
-      setupTransactionMock({
-        rows: [{ id: mockUserId, stripe_customer_id: null }],
-      });
+      // First select returns user without customer ID
+      setupSelectMock({ id: mockUserId, stripeCustomerId: null });
+      setupUpdateMock({ stripeCustomerId: mockCustomerId });
 
       mockStripeCustomersCreate.mockResolvedValue({ id: mockCustomerId });
 
@@ -220,42 +226,56 @@ describe('StripeService', () => {
     });
 
     it('should throw error if user not found', async () => {
-      setupTransactionMock({ rows: [] });
+      setupSelectMock(undefined);
 
       await expect(
         stripeService.getOrCreateCustomer(mockUserId, mockEmail)
       ).rejects.toThrow(`User ${mockUserId} not found`);
     });
 
-    it('should use row lock to prevent race conditions', async () => {
-      const mockTx = setupTransactionMock({
-        rows: [{ id: mockUserId, stripe_customer_id: null }],
+    it('should handle race condition gracefully when another request creates customer first', async () => {
+      const otherCustomerId = 'cus_other';
+      let selectCallCount = 0;
+
+      // First select returns user without customer ID
+      // Third select (after race condition) returns the winning customer ID
+      mockDbSelect.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockImplementation(() => {
+              selectCallCount++;
+              if (selectCallCount === 1) {
+                return Promise.resolve([{ id: mockUserId, stripeCustomerId: null }]);
+              }
+              return Promise.resolve([{ stripeCustomerId: otherCustomerId }]);
+            }),
+          }),
+        }),
       });
+
+      // Update returns empty (another request won the race)
+      setupUpdateMock(undefined);
 
       mockStripeCustomersCreate.mockResolvedValue({ id: mockCustomerId });
 
-      await stripeService.getOrCreateCustomer(mockUserId, mockEmail);
+      const result = await stripeService.getOrCreateCustomer(mockUserId, mockEmail);
 
-      // Verify that FOR UPDATE lock was used
-      expect(mockTx.execute).toHaveBeenCalled();
+      // Should return the winning customer ID
+      expect(result).toBe(otherCustomerId);
       expect(mockStripeCustomersCreate).toHaveBeenCalled();
     });
   });
 
   describe('createCheckoutSession', () => {
     beforeEach(() => {
-      // Setup default mocks for customer creation using transaction
-      const mockTx = {
-        execute: vi.fn().mockResolvedValue({
-          rows: [{ id: mockUserId, stripe_customer_id: mockCustomerId }],
-        }),
-        update: vi.fn().mockReturnValue({
-          set: vi.fn().mockReturnValue({
-            where: vi.fn().mockResolvedValue(undefined),
+      // Setup default mocks for customer lookup (existing customer)
+      mockDbSelect.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ id: mockUserId, stripeCustomerId: mockCustomerId }]),
           }),
         }),
-      };
-      mockDbTransaction.mockImplementation(async (callback) => callback(mockTx));
+      });
     });
 
     it('should create checkout session successfully', async () => {

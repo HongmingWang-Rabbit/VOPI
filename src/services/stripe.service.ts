@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, and } from 'drizzle-orm';
 import { getConfig } from '../config/index.js';
 import { getDatabase, schema } from '../db/index.js';
 import { getLogger } from '../utils/logger.js';
@@ -119,49 +119,85 @@ class StripeService {
 
   /**
    * Get or create a Stripe customer for a user
-   * Uses row-level locking (FOR UPDATE) to prevent race conditions and orphaned customers
+   *
+   * Uses optimistic approach to minimize database lock time:
+   * 1. Check if customer exists (no lock)
+   * 2. If not, create in Stripe (external call, no lock held)
+   * 3. Use atomic conditional update to save (handles race conditions)
+   *
+   * This prevents holding DB locks during external API calls.
    */
   async getOrCreateCustomer(userId: string, email: string): Promise<string> {
     const db = getDatabase();
     const stripe = this.getStripeClient();
 
-    // Use transaction with row lock to prevent race conditions
-    return await db.transaction(async (tx) => {
-      // Lock the user row to prevent concurrent customer creation
-      const lockResult = await tx.execute(
-        sql`SELECT id, stripe_customer_id FROM users WHERE id = ${userId} FOR UPDATE`
-      );
+    // Step 1: Quick check without locking
+    const [user] = await db
+      .select({ id: schema.users.id, stripeCustomerId: schema.users.stripeCustomerId })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
 
-      const userRow = lockResult.rows[0] as { id: string; stripe_customer_id: string | null } | undefined;
-      if (!userRow) {
-        throw new Error(`User ${userId} not found`);
-      }
+    if (!user) {
+      throw new Error(`User ${userId} not found`);
+    }
 
-      // If customer already exists, return it
-      if (userRow.stripe_customer_id) {
-        return userRow.stripe_customer_id;
-      }
+    // If customer already exists, return it
+    if (user.stripeCustomerId) {
+      return user.stripeCustomerId;
+    }
 
-      // Create Stripe customer (still inside transaction, but Stripe call is external)
-      const customer = await stripe.customers.create({
-        email,
-        metadata: {
-          userId,
-        },
-      });
+    // Step 2: Create Stripe customer (outside any transaction)
+    const customer = await stripe.customers.create({
+      email,
+      metadata: {
+        userId,
+      },
+    });
 
-      // Save customer ID - we have the lock, so no race condition
-      await tx
-        .update(schema.users)
-        .set({
-          stripeCustomerId: customer.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.users.id, userId));
+    // Step 3: Atomic conditional update - only update if still null
+    // This handles race conditions: if another request created a customer
+    // between our check and now, we'll get 0 rows updated
+    const [updated] = await db
+      .update(schema.users)
+      .set({
+        stripeCustomerId: customer.id,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.users.id, userId),
+          sql`${schema.users.stripeCustomerId} IS NULL`
+        )
+      )
+      .returning({ stripeCustomerId: schema.users.stripeCustomerId });
 
+    if (updated) {
+      // We won the race - our customer ID was saved
       logger.info({ userId, customerId: customer.id }, 'Created Stripe customer');
       return customer.id;
-    });
+    }
+
+    // Another request created a customer first - fetch the winning ID
+    // We have an orphaned Stripe customer, but this is rare and acceptable
+    // (Stripe customers are free, unused ones can be cleaned up periodically)
+    logger.warn(
+      { userId, orphanedCustomerId: customer.id },
+      'Race condition: another request created Stripe customer first, orphaned customer created'
+    );
+
+    const [finalUser] = await db
+      .select({ stripeCustomerId: schema.users.stripeCustomerId })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!finalUser?.stripeCustomerId) {
+      // This shouldn't happen - something is very wrong
+      throw new Error('Failed to get or create Stripe customer');
+    }
+
+    return finalUser.stripeCustomerId;
   }
 
   /**

@@ -62,9 +62,10 @@ declare module 'fastify' {
 
 /**
  * Auth context for API key authentication
- * Note: userId is undefined for API key auth since there's no associated user
+ * userId is undefined for API key auth since there's no associated user
  */
 interface ApiKeyAuthContext extends AuthContext {
+  userId: undefined;
   apiKeyId: string;
   apiKeyName?: string;
 }
@@ -145,7 +146,7 @@ async function tryApiKeyAuth(request: FastifyRequest): Promise<boolean> {
     if (!expiresAt || expiresAt > now) {
       request.apiKey = cached.key;
       const apiKeyContext: ApiKeyAuthContext = {
-        userId: '',
+        userId: undefined,
         email: `apikey:${cached.key.name || cached.key.id}`,
         tokenType: 'api_key',
         apiKeyId: cached.key.id,
@@ -186,7 +187,7 @@ async function tryApiKeyAuth(request: FastifyRequest): Promise<boolean> {
     request.apiKey = matchedKey;
     // Note: API key auth has no associated user - use apiKeyId for tracking
     const apiKeyContext: ApiKeyAuthContext = {
-      userId: '', // Empty string indicates API key auth (no user)
+      userId: undefined,
       email: `apikey:${matchedKey.name || matchedKey.id}`,
       tokenType: 'api_key',
       apiKeyId: matchedKey.id,
@@ -203,7 +204,7 @@ async function tryApiKeyAuth(request: FastifyRequest): Promise<boolean> {
 
   if (isValidConfigKey) {
     const configKeyContext: ApiKeyAuthContext = {
-      userId: '', // Empty string indicates API key auth (no user)
+      userId: undefined,
       email: 'apikey:config',
       tokenType: 'api_key',
       apiKeyId: 'config',

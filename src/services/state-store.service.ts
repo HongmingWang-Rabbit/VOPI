@@ -21,6 +21,19 @@ const STATE_PREFIX = 'oauth:state:';
 const DEFAULT_TTL_SECONDS = 600; // 10 minutes
 
 /**
+ * Lua script for atomic GET and DELETE operation
+ * Used as fallback for Redis < 6.2 which doesn't have GETDEL command
+ * The script atomically retrieves a value and deletes it in a single operation
+ */
+const GETDEL_LUA_SCRIPT = `
+  local value = redis.call('GET', KEYS[1])
+  if value then
+    redis.call('DEL', KEYS[1])
+  end
+  return value
+`;
+
+/**
  * In-memory fallback store for development
  */
 const memoryStore = new Map<string, OAuthStateData>();
@@ -151,14 +164,7 @@ class StateStoreService {
             );
 
             // Fallback for older Redis versions - use Lua script for atomicity
-            const luaScript = `
-              local value = redis.call('GET', KEYS[1])
-              if value then
-                redis.call('DEL', KEYS[1])
-              end
-              return value
-            `;
-            data = await redis.eval(luaScript, 1, key) as string | null;
+            data = await redis.eval(GETDEL_LUA_SCRIPT, 1, key) as string | null;
           }
         } else {
           data = await redis.get(key);

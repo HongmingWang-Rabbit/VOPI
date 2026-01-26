@@ -290,6 +290,8 @@ class AuthService {
       //
       // If stricter linking is needed, implement explicit account linking flow
       // where user must be logged in to link additional OAuth providers.
+      //
+      // TODO: Consider sending email notification to user when new OAuth provider is linked
       await db.insert(schema.oauthAccounts).values({
         userId: existingUser.id,
         provider,
@@ -301,6 +303,18 @@ class AuthService {
           : null,
         providerData: profile.providerData,
       });
+
+      // Log account linking for security audit trail
+      logger.info(
+        {
+          userId: existingUser.id,
+          provider,
+          providerAccountId: profile.id,
+          email: profile.email,
+          emailVerified: profile.emailVerified,
+        },
+        'Linked new OAuth provider to existing user account'
+      );
 
       // Update last login and email verification if needed
       await db

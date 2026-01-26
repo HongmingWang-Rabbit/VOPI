@@ -139,10 +139,15 @@ export interface RefreshTokenPayload {
  * Auth context attached to requests
  *
  * For JWT auth: userId is the actual user ID
- * For API key auth: userId is empty string, use apiKeyId instead
+ * For API key auth: userId is undefined, use apiKeyId instead
+ *
+ * To check auth type, use tokenType:
+ * - tokenType === 'access': JWT auth, userId is valid
+ * - tokenType === 'api_key': API key auth, use apiKeyId
  */
 export interface AuthContext {
-  userId: string;
+  /** User ID for JWT auth, undefined for API key auth */
+  userId: string | undefined;
   email: string;
   tokenType: 'access' | 'api_key';
   /** Only set for API key authentication */

@@ -35,7 +35,8 @@ Commands:
 
 Options for 'create':
   --name <name>       Optional name/description for the key
-  --max-uses <n>      Maximum number of job creations (default: 10)
+  --max-uses <n>      Maximum number of job creations (default: 10, 0 = unlimited)
+  --unlimited         Create key with no usage limit (same as --max-uses 0)
   --expires <date>    Expiration date (ISO format, e.g., 2025-12-31)
   --quiet             Only output the API key value (for scripting)
 
@@ -50,6 +51,7 @@ Options for 'info':
 
 Examples:
   npx tsx src/cli/api-keys.ts create --name "John's Beta Access" --max-uses 20
+  npx tsx src/cli/api-keys.ts create --name "Master Key" --unlimited
   npx tsx src/cli/api-keys.ts list
   npx tsx src/cli/api-keys.ts list --all
   npx tsx src/cli/api-keys.ts revoke 550e8400-e29b-41d4-a716-446655440000
@@ -93,19 +95,32 @@ function generateApiKey(): string {
   return randomBytes(32).toString('base64url');
 }
 
+/** Value used in database to represent unlimited usage (max safe integer) */
+const UNLIMITED_USES = Number.MAX_SAFE_INTEGER;
+
 async function createKey(options: Record<string, string | boolean | undefined>): Promise<void> {
   const db = getDatabase();
 
   const name = options['name'] as string | undefined;
-  const maxUses = options['max-uses'] ? parseInt(options['max-uses'] as string, 10) : 10;
+  const unlimited = options['unlimited'] === true;
   const quiet = options['quiet'] === true;
   const expiresAt = options['expires']
     ? new Date(options['expires'] as string)
     : null;
 
-  if (isNaN(maxUses) || maxUses < 1) {
-    console.error('Error: --max-uses must be a positive integer');
-    process.exit(1);
+  // Handle --unlimited flag or --max-uses 0
+  let maxUses: number;
+  if (unlimited) {
+    maxUses = UNLIMITED_USES;
+  } else if (options['max-uses'] !== undefined) {
+    const parsed = parseInt(options['max-uses'] as string, 10);
+    if (isNaN(parsed) || parsed < 0) {
+      console.error('Error: --max-uses must be a non-negative integer (0 = unlimited)');
+      process.exit(1);
+    }
+    maxUses = parsed === 0 ? UNLIMITED_USES : parsed;
+  } else {
+    maxUses = 10; // Default
   }
 
   if (expiresAt && isNaN(expiresAt.getTime())) {
@@ -129,12 +144,13 @@ async function createKey(options: Record<string, string | boolean | undefined>):
     // Only output the key value for scripting/piping
     console.log(created.key);
   } else {
+    const maxUsesDisplay = created.maxUses >= UNLIMITED_USES ? 'Unlimited' : String(created.maxUses);
     console.log('\n✓ API Key Created\n');
     console.log('Key Details:');
     console.log(`  ID:        ${created.id}`);
     console.log(`  Key:       ${created.key}`);
     console.log(`  Name:      ${created.name || '(none)'}`);
-    console.log(`  Max Uses:  ${created.maxUses}`);
+    console.log(`  Max Uses:  ${maxUsesDisplay}`);
     console.log(`  Expires:   ${created.expiresAt?.toISOString() || 'Never'}`);
     console.log(`  Created:   ${created.createdAt.toISOString()}`);
     console.log('\n⚠️  Save this key securely - it cannot be retrieved later!\n');
@@ -181,7 +197,8 @@ async function listKeys(options: Record<string, string | boolean | undefined>): 
       : key.expiresAt && key.expiresAt < now
         ? 'Expired'
         : 'Active';
-    const usage = `${key.usedCount}/${key.maxUses}`;
+    const isUnlimited = key.maxUses >= UNLIMITED_USES;
+    const usage = isUnlimited ? `${key.usedCount}/∞` : `${key.usedCount}/${key.maxUses}`;
     const name = key.name || '(unnamed)';
 
     console.log(
@@ -244,12 +261,16 @@ async function getKeyInfo(keyId: string): Promise<void> {
       ? 'Expired'
       : 'Active';
 
+  const isUnlimited = key.maxUses >= UNLIMITED_USES;
+  const maxUsesDisplay = isUnlimited ? 'Unlimited' : String(key.maxUses);
+  const remainingDisplay = isUnlimited ? 'Unlimited' : String(Math.max(0, key.maxUses - key.usedCount));
+
   console.log('\nAPI Key Details:\n');
   console.log(`  ID:         ${key.id}`);
   console.log(`  Name:       ${key.name || '(none)'}`);
   console.log(`  Status:     ${status}`);
-  console.log(`  Usage:      ${key.usedCount} / ${key.maxUses}`);
-  console.log(`  Remaining:  ${Math.max(0, key.maxUses - key.usedCount)}`);
+  console.log(`  Usage:      ${key.usedCount} / ${maxUsesDisplay}`);
+  console.log(`  Remaining:  ${remainingDisplay}`);
   console.log(`  Created:    ${key.createdAt.toISOString()}`);
   console.log(`  Expires:    ${key.expiresAt?.toISOString() || 'Never'}`);
   console.log(`  Revoked:    ${key.revokedAt?.toISOString() || 'No'}`);
