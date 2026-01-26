@@ -68,6 +68,31 @@ x-api-key: <api_key>
 
 Most endpoints accept either authentication method. User-specific endpoints (credits, profile) require JWT.
 
+### Authentication Error Codes
+
+When authentication fails, the API returns specific error codes for easier debugging:
+
+#### Access Token Errors (401)
+
+| Error Code | Description |
+|------------|-------------|
+| `ACCESS_TOKEN_EXPIRED` | Token has expired |
+| `ACCESS_TOKEN_INVALID` | Signature verification failed |
+| `ACCESS_TOKEN_MALFORMED` | Token is not a valid JWT |
+| `ACCESS_TOKEN_WRONG_TYPE` | Refresh token was provided instead of access token |
+| `USER_NOT_FOUND` | User referenced in token no longer exists |
+| `USER_DELETED` | User account has been deleted |
+| `UNAUTHORIZED` | No authentication provided |
+
+#### Example Error Response
+
+```json
+{
+  "error": "ACCESS_TOKEN_EXPIRED",
+  "message": "Access token has expired"
+}
+```
+
 ---
 
 ### GET /api/v1/auth/providers
@@ -223,11 +248,38 @@ Refresh an expired access token using the refresh token.
 
 **Note**: A new refresh token is returned. Store it and discard the old one.
 
-**Error Response** `401 Unauthorized`
+**Error Responses** `401 Unauthorized`
+
+The refresh endpoint returns specific error codes for easier debugging:
+
+| Error Code | Description |
+|------------|-------------|
+| `REFRESH_TOKEN_EXPIRED` | Token has expired (either JWT expiry or database expiry) |
+| `REFRESH_TOKEN_INVALID` | Token signature verification failed |
+| `REFRESH_TOKEN_REVOKED` | Token was explicitly revoked (user logged out) |
+| `REFRESH_TOKEN_REUSED` | Token has already been used (security alert - possible token theft) |
+| `REFRESH_TOKEN_WRONG_TYPE` | Access token was provided instead of refresh token |
+| `USER_NOT_FOUND` | User referenced in token no longer exists |
+| `USER_DELETED` | User account has been deleted |
+
 ```json
 {
-  "error": "INVALID_TOKEN",
-  "message": "Refresh token is invalid or expired"
+  "error": "REFRESH_TOKEN_EXPIRED",
+  "message": "Refresh token has expired"
+}
+```
+
+```json
+{
+  "error": "REFRESH_TOKEN_REVOKED",
+  "message": "Refresh token has been revoked"
+}
+```
+
+```json
+{
+  "error": "REFRESH_TOKEN_REUSED",
+  "message": "Refresh token has already been used. If you did not do this, your account may be compromised."
 }
 ```
 

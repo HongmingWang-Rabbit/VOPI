@@ -562,7 +562,7 @@ All errors follow this format:
 }
 ```
 
-### Common Error Codes
+### HTTP Status Codes
 
 | Code | Description |
 |------|-------------|
@@ -573,6 +573,68 @@ All errors follow this format:
 | 404 | Not Found - Resource doesn't exist |
 | 500 | Internal Server Error |
 | 503 | Service Unavailable |
+
+### Authentication Error Codes (401)
+
+When authentication fails, check the `error` field for specific error codes:
+
+#### Access Token Errors
+
+| Error Code | Description | Action |
+|------------|-------------|--------|
+| `ACCESS_TOKEN_EXPIRED` | Token has expired | Refresh the token |
+| `ACCESS_TOKEN_INVALID` | Signature verification failed | Re-authenticate |
+| `ACCESS_TOKEN_MALFORMED` | Token is not valid JWT | Re-authenticate |
+| `UNAUTHORIZED` | No token provided | Login required |
+
+#### Refresh Token Errors
+
+| Error Code | Description | Action |
+|------------|-------------|--------|
+| `REFRESH_TOKEN_EXPIRED` | Token has expired | Re-authenticate |
+| `REFRESH_TOKEN_REVOKED` | Token was revoked (logout) | Re-authenticate |
+| `REFRESH_TOKEN_REUSED` | Security alert: possible token theft | Clear all tokens, re-authenticate |
+
+#### User Errors
+
+| Error Code | Description | Action |
+|------------|-------------|--------|
+| `USER_NOT_FOUND` | User account deleted | Re-authenticate or contact support |
+| `USER_DELETED` | Account was deactivated | Contact support |
+
+#### Handling Auth Errors
+
+```typescript
+async function handleAuthError(response: Response) {
+  const data = await response.json();
+
+  switch (data.error) {
+    case 'ACCESS_TOKEN_EXPIRED':
+      // Try refreshing the token
+      return await refreshTokenAndRetry(request);
+
+    case 'REFRESH_TOKEN_EXPIRED':
+    case 'REFRESH_TOKEN_REVOKED':
+    case 'USER_NOT_FOUND':
+    case 'USER_DELETED':
+      // Need to re-authenticate
+      clearAuthTokens();
+      navigateToLogin();
+      break;
+
+    case 'REFRESH_TOKEN_REUSED':
+      // Security alert - possible token theft
+      clearAuthTokens();
+      showSecurityAlert('Your session may have been compromised. Please sign in again.');
+      navigateToLogin();
+      break;
+
+    default:
+      // Generic auth error
+      navigateToLogin();
+  }
+}
+```
 
 ---
 

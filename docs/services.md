@@ -6,6 +6,8 @@ The `/src/services/` directory contains the core business logic modules. Each se
 
 | Service | File | Purpose |
 |---------|------|---------|
+| **Auth** | `auth.service.ts` | JWT token generation, verification, and user management |
+| **Credits** | `credits.service.ts` | User credits balance and transaction management |
 | **Video** | `video.service.ts` | FFmpeg operations for frame extraction |
 | **Frame Scoring** | `frame-scoring.service.ts` | Quality analysis and candidate selection |
 | **Gemini** | `gemini.service.ts` | AI classification via Google Gemini |
@@ -17,6 +19,106 @@ The `/src/services/` directory contains the core business logic modules. Each se
 | **Storage** | `storage.service.ts` | S3/MinIO file operations |
 | **Pipeline** | `pipeline.service.ts` | Orchestrates the full processing pipeline |
 | **Global Config** | `global-config.service.ts` | Runtime configuration with caching |
+| **Stripe** | `stripe.service.ts` | Payment processing and checkout sessions |
+| **State Store** | `state-store.service.ts` | OAuth state storage (Redis/memory) |
+
+---
+
+## Auth Service
+
+**File**: `src/services/auth.service.ts`
+
+Handles JWT token generation, verification, refresh token rotation, and user management for OAuth authentication.
+
+### Methods
+
+#### `generateAccessToken(user): string`
+
+Generate a JWT access token for a user.
+
+**Parameters**:
+- `user` - Object with `id` and `email` fields
+
+**Returns**: JWT access token string (expires based on `JWT_ACCESS_TOKEN_EXPIRES_IN`)
+
+#### `generateRefreshToken(user, deviceInfo?): Promise<string>`
+
+Generate a refresh token and store its hash in the database.
+
+**Parameters**:
+- `user` - Object with `id` field
+- `deviceInfo` - Optional device identification for tracking
+
+**Returns**: Refresh token string
+
+**Note**: Token hash is stored in `refresh_tokens` table for validation and revocation.
+
+#### `verifyAccessToken(token): JwtPayload`
+
+Verify and decode an access token.
+
+**Throws**:
+- `AccessTokenExpiredError` - Token has expired
+- `AccessTokenInvalidError` - Signature verification failed
+- `AccessTokenMalformedError` - Token is not valid JWT format
+- `AccessTokenWrongTypeError` - Token type is not "access"
+
+#### `refreshAccessToken(refreshToken, deviceInfo?): Promise<TokenPair>`
+
+Refresh an expired access token using a refresh token. Implements token rotation for security.
+
+**Returns**:
+```typescript
+{
+  accessToken: string;
+  refreshToken: string;  // New token (old one is revoked)
+  expiresIn: number;     // Seconds until access token expires
+}
+```
+
+**Throws**:
+- `RefreshTokenExpiredError` - Token has expired
+- `RefreshTokenInvalidError` - Signature verification failed
+- `RefreshTokenRevokedError` - Token was explicitly revoked
+- `RefreshTokenReusedError` - Token was already used (security alert)
+- `UserNotFoundError` - User no longer exists
+- `UserDeletedError` - User account was deleted
+
+#### `findOrCreateUserFromOAuth(provider, profile, tokens, deviceInfo?): Promise<User>`
+
+Find existing user or create new one from OAuth profile.
+
+**Behavior**:
+1. If OAuth account exists → update tokens, return user
+2. If user email exists → link OAuth account, return user
+3. Otherwise → create new user + OAuth account
+
+**Note**: New users automatically receive signup credits (abuse-protected).
+
+#### `revokeRefreshToken(token): Promise<void>`
+
+Revoke a specific refresh token (for logout).
+
+#### `revokeAllRefreshTokens(userId): Promise<void>`
+
+Revoke all refresh tokens for a user (logout from all devices).
+
+### Error Classes
+
+Auth errors are defined in `src/utils/auth-errors.ts`:
+
+| Error Class | Code | Description |
+|-------------|------|-------------|
+| `AccessTokenExpiredError` | `ACCESS_TOKEN_EXPIRED` | JWT has expired |
+| `AccessTokenInvalidError` | `ACCESS_TOKEN_INVALID` | Signature verification failed |
+| `AccessTokenMalformedError` | `ACCESS_TOKEN_MALFORMED` | Not a valid JWT structure |
+| `AccessTokenWrongTypeError` | `ACCESS_TOKEN_WRONG_TYPE` | Wrong token type |
+| `RefreshTokenExpiredError` | `REFRESH_TOKEN_EXPIRED` | Token has expired |
+| `RefreshTokenInvalidError` | `REFRESH_TOKEN_INVALID` | Signature verification failed |
+| `RefreshTokenRevokedError` | `REFRESH_TOKEN_REVOKED` | Token was explicitly revoked |
+| `RefreshTokenReusedError` | `REFRESH_TOKEN_REUSED` | Possible token theft |
+| `UserNotFoundError` | `USER_NOT_FOUND` | User doesn't exist |
+| `UserDeletedError` | `USER_DELETED` | User account deleted |
 
 ---
 
