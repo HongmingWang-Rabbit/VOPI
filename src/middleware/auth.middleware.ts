@@ -3,7 +3,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { and, isNull, or, gt, eq } from 'drizzle-orm';
 import { getConfig } from '../config/index.js';
 import { getDatabase, schema } from '../db/index.js';
-import { UnauthorizedError } from '../utils/errors.js';
+// UnauthorizedError removed - using inline error construction for better error messages
 import { authService } from '../services/auth.service.js';
 import { getLogger } from '../utils/logger.js';
 import type { ApiKey, User } from '../db/schema.js';
@@ -86,13 +86,22 @@ function safeCompare(a: string, b: string): boolean {
 }
 
 /**
- * Try to authenticate using JWT Bearer token
- * Returns true if successful, false if no Bearer token present
+ * JWT auth failure reasons (for better error responses)
  */
-async function tryJwtAuth(request: FastifyRequest): Promise<boolean> {
+type JwtAuthFailure =
+  | { reason: 'no_token' }
+  | { reason: 'invalid_token'; error: string }
+  | { reason: 'user_not_found'; userId: string }
+  | { reason: 'user_deleted'; userId: string };
+
+/**
+ * Try to authenticate using JWT Bearer token
+ * Returns true if successful, or failure info if auth fails
+ */
+async function tryJwtAuth(request: FastifyRequest): Promise<true | JwtAuthFailure> {
   const authHeader = request.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return false;
+    return { reason: 'no_token' };
   }
 
   const token = authHeader.slice(7); // Remove 'Bearer ' prefix
@@ -102,8 +111,10 @@ async function tryJwtAuth(request: FastifyRequest): Promise<boolean> {
     const user = await authService.getUserById(payload.sub);
 
     if (!user) {
-      logger.debug({ userId: payload.sub }, 'JWT valid but user not found');
-      return false;
+      // Log at WARN level since this indicates a potential issue
+      // (valid token for non-existent/deleted user)
+      logger.warn({ userId: payload.sub }, 'JWT valid but user not found in database');
+      return { reason: 'user_not_found', userId: payload.sub };
     }
 
     request.user = user;
@@ -115,13 +126,10 @@ async function tryJwtAuth(request: FastifyRequest): Promise<boolean> {
 
     return true;
   } catch (error) {
-    // JWT verification failed - log at debug level for troubleshooting
-    // Include full error context for non-Error objects to aid debugging
-    const errorDetails = error instanceof Error
-      ? { message: error.message, name: error.name }
-      : { rawError: String(error), type: typeof error };
-    logger.debug({ error: errorDetails }, 'JWT verification failed');
-    return false;
+    // JWT verification failed - log at INFO level for production debugging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.info({ error: errorMessage }, 'JWT verification failed');
+    return { reason: 'invalid_token', error: errorMessage };
   }
 }
 
@@ -227,7 +235,8 @@ export async function authMiddleware(
   reply: FastifyReply
 ): Promise<void> {
   // Try JWT auth first
-  if (await tryJwtAuth(request)) {
+  const jwtResult = await tryJwtAuth(request);
+  if (jwtResult === true) {
     return;
   }
 
@@ -236,11 +245,31 @@ export async function authMiddleware(
     return;
   }
 
-  // No valid authentication found
-  const error = new UnauthorizedError('Authentication required');
+  // No valid authentication found - provide specific error message
+  let errorMessage = 'Authentication required';
+  let errorCode = 'UNAUTHORIZED';
+
+  // If a Bearer token was provided but failed, give specific feedback
+  if (jwtResult.reason !== 'no_token') {
+    switch (jwtResult.reason) {
+      case 'invalid_token':
+        errorMessage = `Invalid token: ${jwtResult.error}`;
+        errorCode = 'INVALID_TOKEN';
+        break;
+      case 'user_not_found':
+        errorMessage = 'User account not found';
+        errorCode = 'USER_NOT_FOUND';
+        break;
+      case 'user_deleted':
+        errorMessage = 'User account has been deleted';
+        errorCode = 'USER_DELETED';
+        break;
+    }
+  }
+
   reply.status(401).send({
-    error: error.code,
-    message: error.message,
+    error: errorCode,
+    message: errorMessage,
   });
 }
 
@@ -306,7 +335,8 @@ export async function requireUserAuth(
  */
 export async function optionalAuth(request: FastifyRequest): Promise<void> {
   // Try JWT auth first
-  if (await tryJwtAuth(request)) {
+  const jwtResult = await tryJwtAuth(request);
+  if (jwtResult === true) {
     return;
   }
 
