@@ -62,8 +62,18 @@ export class PipelineService {
     const effectiveConfig = await globalConfigService.getEffectiveConfig();
 
     // Determine stack to use
-    const stackId = stackConfig?.stackId || config.stack?.stackId || getDefaultStackId(effectiveConfig.pipelineStrategy);
+    const configStackId = stackConfig?.stackId || config.stack?.stackId;
+    const defaultStackId = getDefaultStackId(effectiveConfig.pipelineStrategy);
+    const stackId = configStackId || defaultStackId;
     const stack = getStackTemplate(stackId);
+
+    logger.info({
+      jobId,
+      pipelineStrategy: effectiveConfig.pipelineStrategy,
+      configStackId,
+      defaultStackId,
+      resolvedStackId: stackId,
+    }, 'Resolved pipeline stack from config');
 
     if (!stack) {
       throw new Error(`Stack template '${stackId}' not found`);

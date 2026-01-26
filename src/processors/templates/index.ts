@@ -355,7 +355,16 @@ export function getStackTemplateIds(): string[] {
 
 /**
  * Default stack ID based on strategy
+ *
+ * The strategy value is typically the stack template ID itself.
+ * If the strategy corresponds to a valid template, use it directly.
+ * Otherwise fall back to 'classic'.
  */
 export function getDefaultStackId(strategy: PipelineStrategy): string {
-  return strategy === PipelineStrategy.GEMINI_VIDEO ? 'gemini_video' : 'classic';
+  // If the strategy is a valid stack template ID, use it directly
+  if (stackTemplates[strategy]) {
+    return strategy;
+  }
+  // Fall back to classic for unknown strategies
+  return 'classic';
 }

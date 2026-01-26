@@ -16,6 +16,8 @@ export const PipelineStrategy = {
   GEMINI_VIDEO: 'gemini_video',
   /** Unified Video Analyzer: Single Gemini call for audio + video analysis */
   UNIFIED_VIDEO_ANALYZER: 'unified_video_analyzer',
+  /** Full Gemini: Uses Gemini for both video analysis AND image generation (no external APIs) */
+  FULL_GEMINI: 'full_gemini',
 } as const;
 
 /**
