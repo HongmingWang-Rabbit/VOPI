@@ -277,11 +277,36 @@ export async function authMiddleware(
 }
 
 /**
- * Skip auth for certain paths (health checks, docs)
+ * Paths that skip authentication (health checks, docs, public auth endpoints)
+ *
+ * IMPORTANT: Use specific paths, not broad prefixes like '/api/v1/auth'
+ * because that would skip auth for protected endpoints like /api/v1/auth/me
+ */
+const AUTH_SKIP_PATHS = [
+  // Health and monitoring
+  '/health',
+  '/ready',
+
+  // API documentation
+  '/docs',
+
+  // Public auth endpoints (login flow)
+  '/api/v1/auth/oauth',      // OAuth init and callback
+  '/api/v1/auth/refresh',    // Token refresh
+  '/api/v1/auth/logout',     // Logout (uses refresh token, not access token)
+  '/api/v1/auth/providers',  // List available OAuth providers
+  '/api/v1/auth/debug',      // Debug endpoints (non-production)
+
+  // Public credit endpoints
+  '/api/v1/credits/webhook', // Stripe webhook
+  '/api/v1/credits/packs',   // List available credit packs
+] as const;
+
+/**
+ * Skip auth for certain paths (health checks, docs, public auth endpoints)
  */
 export function shouldSkipAuth(path: string): boolean {
-  const config = getConfig();
-  return config.auth.skipPaths.some((p) => path.startsWith(p));
+  return AUTH_SKIP_PATHS.some((p) => path.startsWith(p));
 }
 
 /**

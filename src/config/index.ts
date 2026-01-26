@@ -23,7 +23,6 @@ export interface AppConfig {
   auth: {
     apiKeys: string[];
     adminApiKeys: string[];
-    skipPaths: string[];
   };
   cors: {
     allowedDomains: string[];
@@ -174,7 +173,6 @@ export function buildConfig(env: Env): AppConfig {
     auth: {
       apiKeys: env.API_KEYS,
       adminApiKeys: env.ADMIN_API_KEYS,
-      skipPaths: env.AUTH_SKIP_PATHS,
     },
     cors: {
       allowedDomains: env.CORS_ALLOWED_DOMAINS,

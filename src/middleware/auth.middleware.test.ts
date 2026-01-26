@@ -7,7 +7,6 @@ vi.mock('../config/index.js', () => ({
   getConfig: vi.fn(() => ({
     auth: {
       apiKeys: ['valid-config-key'],
-      skipPaths: ['/health', '/ready', '/docs'],
     },
     server: {
       env: 'test',
@@ -87,6 +86,28 @@ describe('auth.middleware', () => {
     it('should return false for /healthcheck (not exact match)', () => {
       // This starts with /health so it should match
       expect(shouldSkipAuth('/healthcheck')).toBe(true);
+    });
+
+    // Important: /api/v1/auth/me should NOT be skipped (it's a protected endpoint)
+    it('should return false for /api/v1/auth/me (protected endpoint)', () => {
+      expect(shouldSkipAuth('/api/v1/auth/me')).toBe(false);
+    });
+
+    it('should return true for public auth endpoints', () => {
+      expect(shouldSkipAuth('/api/v1/auth/oauth/init')).toBe(true);
+      expect(shouldSkipAuth('/api/v1/auth/oauth/callback')).toBe(true);
+      expect(shouldSkipAuth('/api/v1/auth/refresh')).toBe(true);
+      expect(shouldSkipAuth('/api/v1/auth/logout')).toBe(true);
+      expect(shouldSkipAuth('/api/v1/auth/providers')).toBe(true);
+    });
+
+    it('should return true for public credit endpoints', () => {
+      expect(shouldSkipAuth('/api/v1/credits/webhook')).toBe(true);
+      expect(shouldSkipAuth('/api/v1/credits/packs')).toBe(true);
+    });
+
+    it('should return false for protected credit endpoints', () => {
+      expect(shouldSkipAuth('/api/v1/credits/balance')).toBe(false);
     });
   });
 

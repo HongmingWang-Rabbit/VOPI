@@ -99,13 +99,6 @@ export const envSchema = z.object({
     .default('24rabbit\\.com')
     .transform((val) => val.split(',').map((d) => d.trim()).filter(Boolean)),
 
-  // Auth
-  // Note: Using specific paths instead of prefix matching to avoid accidentally skipping auth
-  // for protected routes like /api/v1/auth/me that need authentication
-  AUTH_SKIP_PATHS: z
-    .string()
-    .default('/health,/ready,/docs,/api/v1/auth/oauth,/api/v1/auth/refresh,/api/v1/auth/logout,/api/v1/auth/providers,/api/v1/auth/debug,/api/v1/credits/webhook,/api/v1/credits/packs')
-    .transform((val) => val.split(',').map((p) => p.trim()).filter(Boolean)),
 
   // Callback SSRF protection
   CALLBACK_ALLOWED_DOMAINS: z

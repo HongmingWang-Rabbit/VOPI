@@ -225,36 +225,6 @@ describe('envSchema', () => {
     });
   });
 
-  describe('AUTH_SKIP_PATHS transformation', () => {
-    it('should use default skip paths', () => {
-      const result = envSchema.safeParse({
-        DATABASE_URL: 'postgres://localhost/test',
-        API_KEYS: VALID_API_KEY,
-        S3_BUCKET: 'bucket',
-        S3_ENDPOINT: 'http://localhost:9000',
-        S3_ACCESS_KEY_ID: 'key',
-        S3_SECRET_ACCESS_KEY: 'secret',
-        GOOGLE_AI_API_KEY: 'key',
-        PHOTOROOM_API_KEY: 'key',
-      });
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.AUTH_SKIP_PATHS).toEqual([
-          '/health',
-          '/ready',
-          '/docs',
-          '/api/v1/auth/oauth',
-          '/api/v1/auth/refresh',
-          '/api/v1/auth/logout',
-          '/api/v1/auth/providers',
-          '/api/v1/auth/debug',
-          '/api/v1/credits/webhook',
-          '/api/v1/credits/packs',
-        ]);
-      }
-    });
-  });
-
   describe('CALLBACK_ALLOWED_DOMAINS transformation', () => {
     it('should default to empty array', () => {
       const result = envSchema.safeParse({
