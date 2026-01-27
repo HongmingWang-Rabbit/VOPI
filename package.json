@@ -17,6 +17,7 @@
     "db:push": "drizzle-kit push:pg",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed-credits.ts",
+    "db:seed:config": "tsx src/db/seed-global-config.ts",
     "extract": "node src/smartFrameExtractor/index.js",
     "extract:help": "node src/smartFrameExtractor/index.js --help",
     "commercial": "node src/smartFrameExtractor/generateCommercial.js",

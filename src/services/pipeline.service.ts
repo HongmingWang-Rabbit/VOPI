@@ -67,17 +67,26 @@ export class PipelineService {
     const stackId = configStackId || defaultStackId;
     const stack = getStackTemplate(stackId);
 
+    if (!stack) {
+      logger.error({
+        jobId,
+        pipelineStrategy: effectiveConfig.pipelineStrategy,
+        configStackId,
+        defaultStackId,
+        resolvedStackId: stackId,
+      }, `Stack template '${stackId}' not found`);
+      throw new Error(`Stack template '${stackId}' not found`);
+    }
+
     logger.info({
       jobId,
       pipelineStrategy: effectiveConfig.pipelineStrategy,
       configStackId,
       defaultStackId,
       resolvedStackId: stackId,
+      stackName: stack.name,
+      processorCount: stack.steps.length,
     }, 'Resolved pipeline stack from config');
-
-    if (!stack) {
-      throw new Error(`Stack template '${stackId}' not found`);
-    }
 
     // Merge stack configs (job config takes precedence)
     const mergedStackConfig: StackConfig = {

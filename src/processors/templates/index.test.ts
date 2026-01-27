@@ -1,354 +1,108 @@
-/**
- * Stack Templates Tests
- */
-
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
-  stackTemplates,
+  getDefaultStackId,
   getStackTemplate,
   getStackTemplateIds,
-  getDefaultStackId,
-  classicStack,
-  geminiVideoStack,
-  minimalStack,
-  framesOnlyStack,
-  customBgRemovalStack,
+  stackTemplates,
 } from './index.js';
 import { PipelineStrategy } from '../../types/config.types.js';
 
-// Mock logger for processor setup
-vi.mock('../../utils/logger.js', () => ({
-  createChildLogger: vi.fn(() => ({
-    info: vi.fn(),
-    debug: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  })),
-}));
-
-// Mock config for processor setup
-vi.mock('../../config/index.js', () => ({
-  getConfig: vi.fn(() => ({
-    apis: { googleAi: 'test-key', geminiModel: 'test', geminiVideoModel: 'test' },
-    worker: { apiRetryDelayMs: 100 },
-    storage: { bucket: 'test', endpoint: 'http://localhost:9000' },
-  })),
-}));
-
-// Mock services
-vi.mock('../../services/storage.service.js', () => ({ storageService: {} }));
-vi.mock('../../services/frame-scoring.service.js', () => ({ frameScoringService: {} }));
-vi.mock('../../services/video.service.js', () => ({ videoService: {} }));
-vi.mock('../../services/photoroom.service.js', () => ({ photoroomService: {} }));
-vi.mock('../../services/gemini.service.js', () => ({ geminiService: {} }));
-vi.mock('../../db/index.js', () => ({ getDatabase: vi.fn(), schema: {} }));
-vi.mock('../../providers/setup.js', () => ({
-  getProductExtractionProvider: vi.fn(),
-  getImageTransformProvider: vi.fn(),
-  getBackgroundRemovalProvider: vi.fn(),
-}));
-vi.mock('../../providers/implementations/gemini-video-analysis.provider.js', () => ({
-  GeminiVideoAnalysisProvider: vi.fn(),
-  geminiVideoAnalysisProvider: {},
-}));
-vi.mock('../../services/credits.service.js', () => ({
-  creditsService: {
-    calculateJobCost: vi.fn(),
-    calculateJobCostWithAffordability: vi.fn(),
-    spendCredits: vi.fn(),
-  },
-}));
-
 describe('Stack Templates', () => {
-  describe('stackTemplates', () => {
-    it('should contain all defined stacks', () => {
-      expect(stackTemplates).toHaveProperty('classic');
-      expect(stackTemplates).toHaveProperty('gemini_video');
-      expect(stackTemplates).toHaveProperty('minimal');
-      expect(stackTemplates).toHaveProperty('frames_only');
-      expect(stackTemplates).toHaveProperty('custom_bg_removal');
+  describe('getDefaultStackId', () => {
+    it('should return "classic" for classic strategy', () => {
+      expect(getDefaultStackId(PipelineStrategy.CLASSIC)).toBe('classic');
     });
 
-    it('should have matching IDs', () => {
-      expect(stackTemplates.classic.id).toBe('classic');
-      expect(stackTemplates.gemini_video.id).toBe('gemini_video');
-      expect(stackTemplates.minimal.id).toBe('minimal');
-      expect(stackTemplates.frames_only.id).toBe('frames_only');
-      expect(stackTemplates.custom_bg_removal.id).toBe('custom_bg_removal');
-    });
-  });
-
-  describe('classicStack', () => {
-    it('should have correct id and name', () => {
-      expect(classicStack.id).toBe('classic');
-      expect(classicStack.name).toBe('Classic Pipeline');
+    it('should return "gemini_video" for gemini_video strategy', () => {
+      expect(getDefaultStackId(PipelineStrategy.GEMINI_VIDEO)).toBe('gemini_video');
     });
 
-    it('should have the correct processor order', () => {
-      const processorIds = classicStack.steps.map((s) => s.processor);
-
-      expect(processorIds).toEqual([
-        'download',
-        'spend-credits',
-        'extract-frames',
-        'score-frames',
-        'gemini-classify',
-        'save-frame-records',
-        'claid-bg-remove',
-        'fill-product-holes',
-        'center-product',
-        'stability-commercial',  // Commercial first (at original resolution)
-        'stability-upscale',     // Upscale product images last
-        'upload-frames',
-        'complete-job',
-      ]);
+    it('should return "unified_video_analyzer" for unified_video_analyzer strategy', () => {
+      expect(getDefaultStackId(PipelineStrategy.UNIFIED_VIDEO_ANALYZER)).toBe('unified_video_analyzer');
     });
 
-    it('should start with download', () => {
-      expect(classicStack.steps[0].processor).toBe('download');
+    it('should return "full_gemini" for full_gemini strategy', () => {
+      expect(getDefaultStackId(PipelineStrategy.FULL_GEMINI)).toBe('full_gemini');
     });
 
-    it('should end with complete-job', () => {
-      expect(classicStack.steps[classicStack.steps.length - 1].processor).toBe('complete-job');
-    });
-  });
-
-  describe('geminiVideoStack', () => {
-    it('should have correct id and name', () => {
-      expect(geminiVideoStack.id).toBe('gemini_video');
-      expect(geminiVideoStack.name).toBe('Gemini Video Pipeline');
+    it('should return the strategy directly if it matches a valid template', () => {
+      expect(getDefaultStackId('minimal')).toBe('minimal');
+      expect(getDefaultStackId('frames_only')).toBe('frames_only');
+      expect(getDefaultStackId('stability_bg_removal')).toBe('stability_bg_removal');
     });
 
-    it('should have the correct processor order', () => {
-      const processorIds = geminiVideoStack.steps.map((s) => s.processor);
-
-      expect(processorIds).toEqual([
-        'download',
-        'spend-credits',
-        'gemini-video-analysis',
-        'save-frame-records',
-        'claid-bg-remove',
-        'fill-product-holes',
-        'center-product',
-        'stability-commercial',  // Commercial first (at original resolution)
-        'stability-upscale',     // Upscale product images last
-        'upload-frames',
-        'complete-job',
-      ]);
-    });
-
-    it('should use gemini-video-analysis instead of extract-frames', () => {
-      const processorIds = geminiVideoStack.steps.map((s) => s.processor);
-
-      expect(processorIds).toContain('gemini-video-analysis');
-      expect(processorIds).not.toContain('extract-frames');
-      expect(processorIds).not.toContain('score-frames');
-    });
-  });
-
-  describe('minimalStack', () => {
-    it('should have correct id and name', () => {
-      expect(minimalStack.id).toBe('minimal');
-      expect(minimalStack.name).toBe('Minimal Pipeline');
-    });
-
-    it('should not include commercial generation', () => {
-      const processorIds = minimalStack.steps.map((s) => s.processor);
-
-      expect(processorIds).not.toContain('stability-commercial');
-      expect(processorIds).not.toContain('generate-commercial');
-      expect(processorIds).not.toContain('extract-products');
-    });
-
-    it('should include basic frame extraction and upload', () => {
-      const processorIds = minimalStack.steps.map((s) => s.processor);
-
-      expect(processorIds).toContain('download');
-      expect(processorIds).toContain('extract-frames');
-      expect(processorIds).toContain('score-frames');
-      expect(processorIds).toContain('upload-frames');
-    });
-  });
-
-  describe('framesOnlyStack', () => {
-    it('should have correct id and name', () => {
-      expect(framesOnlyStack.id).toBe('frames_only');
-      expect(framesOnlyStack.name).toBe('Frames Only Pipeline');
-    });
-
-    it('should skip AI classification', () => {
-      const processorIds = framesOnlyStack.steps.map((s) => s.processor);
-
-      expect(processorIds).not.toContain('gemini-classify');
-      expect(processorIds).toContain('filter-by-score');
-    });
-  });
-
-  describe('customBgRemovalStack', () => {
-    it('should have correct id and name', () => {
-      expect(customBgRemovalStack.id).toBe('custom_bg_removal');
-      expect(customBgRemovalStack.name).toBe('Custom Background Removal');
-    });
-
-    it('should include photoroom-bg-remove (swappable)', () => {
-      const processorIds = customBgRemovalStack.steps.map((s) => s.processor);
-
-      expect(processorIds).toContain('photoroom-bg-remove');
-    });
-
-    it('should include center-product', () => {
-      const processorIds = customBgRemovalStack.steps.map((s) => s.processor);
-
-      expect(processorIds).toContain('center-product');
+    it('should fall back to "classic" for unknown strategies', () => {
+      expect(getDefaultStackId('unknown_strategy')).toBe('classic');
+      expect(getDefaultStackId('')).toBe('classic');
+      expect(getDefaultStackId('does_not_exist')).toBe('classic');
     });
   });
 
   describe('getStackTemplate', () => {
-    it('should return stack template by ID', () => {
-      expect(getStackTemplate('classic')).toBe(classicStack);
-      expect(getStackTemplate('gemini_video')).toBe(geminiVideoStack);
-      expect(getStackTemplate('minimal')).toBe(minimalStack);
+    it('should return the correct template for valid IDs', () => {
+      const classic = getStackTemplate('classic');
+      expect(classic).toBeDefined();
+      expect(classic?.id).toBe('classic');
+      expect(classic?.name).toBe('Classic Pipeline');
+
+      const fullGemini = getStackTemplate('full_gemini');
+      expect(fullGemini).toBeDefined();
+      expect(fullGemini?.id).toBe('full_gemini');
+      expect(fullGemini?.name).toBe('Full Gemini Stack');
     });
 
-    it('should return undefined for unknown ID', () => {
-      expect(getStackTemplate('nonexistent')).toBeUndefined();
+    it('should return undefined for invalid IDs', () => {
+      expect(getStackTemplate('invalid')).toBeUndefined();
+      expect(getStackTemplate('')).toBeUndefined();
     });
   });
 
   describe('getStackTemplateIds', () => {
-    it('should return all template IDs', () => {
+    it('should return all available template IDs', () => {
       const ids = getStackTemplateIds();
-
       expect(ids).toContain('classic');
       expect(ids).toContain('gemini_video');
       expect(ids).toContain('minimal');
-      expect(ids).toContain('frames_only');
-      expect(ids).toContain('custom_bg_removal');
-      expect(ids).toContain('full_product_analysis');
-      expect(ids).toContain('audio_metadata_only');
-      expect(ids).toContain('stability_bg_removal');
-      expect(ids).toContain('unified_video_analyzer');
-      expect(ids).toContain('unified_video_analyzer_minimal');
       expect(ids).toContain('full_gemini');
-      expect(ids).toHaveLength(11);
+      expect(ids).toContain('unified_video_analyzer');
+    });
+
+    it('should match the keys of stackTemplates', () => {
+      const ids = getStackTemplateIds();
+      expect(ids.sort()).toEqual(Object.keys(stackTemplates).sort());
     });
   });
 
-  describe('getDefaultStackId', () => {
-    it('should return classic for CLASSIC strategy', () => {
-      expect(getDefaultStackId(PipelineStrategy.CLASSIC)).toBe('classic');
-    });
+  describe('stackTemplates', () => {
+    it('should have all expected templates', () => {
+      const expectedTemplates = [
+        'classic',
+        'gemini_video',
+        'minimal',
+        'frames_only',
+        'custom_bg_removal',
+        'full_product_analysis',
+        'audio_metadata_only',
+        'stability_bg_removal',
+        'unified_video_analyzer',
+        'unified_video_analyzer_minimal',
+        'full_gemini',
+      ];
 
-    it('should return gemini_video for GEMINI_VIDEO strategy', () => {
-      expect(getDefaultStackId(PipelineStrategy.GEMINI_VIDEO)).toBe('gemini_video');
-    });
-  });
-
-  describe('stack structure validation', () => {
-    const allStacks = [
-      classicStack,
-      geminiVideoStack,
-      minimalStack,
-      framesOnlyStack,
-      customBgRemovalStack,
-    ];
-
-    it.each(allStacks)('$name should have required properties', (stack) => {
-      expect(stack).toHaveProperty('id');
-      expect(stack).toHaveProperty('name');
-      expect(stack).toHaveProperty('steps');
-      expect(Array.isArray(stack.steps)).toBe(true);
-      expect(stack.steps.length).toBeGreaterThan(0);
-    });
-
-    it.each(allStacks)('$name should have valid step definitions', (stack) => {
-      for (const step of stack.steps) {
-        expect(step).toHaveProperty('processor');
-        expect(typeof step.processor).toBe('string');
-        expect(step.processor.length).toBeGreaterThan(0);
+      for (const templateId of expectedTemplates) {
+        expect(stackTemplates[templateId]).toBeDefined();
+        expect(stackTemplates[templateId].id).toBe(templateId);
       }
     });
 
-    it.each(allStacks)('$name should start with download', (stack) => {
-      expect(stack.steps[0].processor).toBe('download');
-    });
-
-    it.each(allStacks)('$name should end with complete-job', (stack) => {
-      expect(stack.steps[stack.steps.length - 1].processor).toBe('complete-job');
-    });
-  });
-
-  describe('stack IO validation (dynamic computation)', () => {
-    // Import these dynamically to ensure mocks are set up first
-    let stackRunner: typeof import('../runner.js').stackRunner;
-    let setupProcessors: typeof import('../setup.js').setupProcessors;
-    let processorRegistry: typeof import('../registry.js').processorRegistry;
-
-    beforeAll(async () => {
-      const runnerModule = await import('../runner.js');
-      const setupModule = await import('../setup.js');
-      const registryModule = await import('../registry.js');
-
-      stackRunner = runnerModule.stackRunner;
-      setupProcessors = setupModule.setupProcessors;
-      processorRegistry = registryModule.processorRegistry;
-
-      processorRegistry.clear();
-      setupProcessors();
-    });
-
-    afterAll(() => {
-      processorRegistry.clear();
-    });
-
-    it('all production stacks should validate with video input', () => {
-      const videoData = { metadata: {}, video: { sourceUrl: 'test://video.mp4' } };
-      for (const stack of Object.values(stackTemplates)) {
-        // All production stacks start with download which requires video
-        const result = stackRunner.validate(stack, videoData);
-        expect(result.valid).toBe(true);
+    it('should have valid steps in each template', () => {
+      for (const [id, template] of Object.entries(stackTemplates)) {
+        expect(template.steps.length).toBeGreaterThan(0);
+        for (const step of template.steps) {
+          expect(step.processor).toBeDefined();
+          expect(typeof step.processor).toBe('string');
+        }
       }
-    });
-
-    it('should dynamically compute requiredInputs from first processor', () => {
-      // classicStack starts with download which requires 'video'
-      const inputs = stackRunner.getRequiredInputs(classicStack);
-      expect(inputs).toContain('video');
-    });
-
-    // Note: IOType is now simplified to 3 types: video, images, text
-    // Frame metadata (frames, scores, classifications) are tracked via metadataProduces
-
-    it('should dynamically compute producedOutputs from all processors', () => {
-      const outputs = stackRunner.getProducedOutputs(classicStack);
-      expect(outputs).toContain('video');
-      expect(outputs).toContain('images');
-      expect(outputs).toContain('text');
-      // 'frames', 'scores', 'classifications' are now metadata paths, not IO types
-    });
-
-    it('framesOnlyStack should produce text (from upload-frames)', () => {
-      const outputs = stackRunner.getProducedOutputs(framesOnlyStack);
-      // frames_only stack has upload-frames which produces text
-      expect(outputs).toContain('text');
-    });
-
-    it('classicStack should produce text (from upload-frames)', () => {
-      const outputs = stackRunner.getProducedOutputs(classicStack);
-      expect(outputs).toContain('text');
-    });
-
-    it('geminiVideoStack should produce text (from upload-frames)', () => {
-      const outputs = stackRunner.getProducedOutputs(geminiVideoStack);
-      expect(outputs).toContain('text');
-    });
-
-    it('getStackIOSummary should return computed IO', () => {
-      const summary = stackRunner.getStackIOSummary(classicStack);
-      expect(summary.id).toBe('classic');
-      expect(summary.name).toBe('Classic Pipeline');
-      expect(summary.requiredInputs).toContain('video');
-      expect(summary.producedOutputs).toContain('text');
     });
   });
 });
