@@ -262,24 +262,21 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
       const response = result.response;
       const text = response.text();
 
-      logger.info({
-        responseLength: text.length,
-        responsePreview: text.substring(0, 500),
-      }, 'Gemini quality filter raw response');
+      logger.info(`[QF] Raw response length=${text.length} preview=${text.substring(0, 300)}`);
 
       const parsed = parseJsonResponse<GeminiBatchEvaluationResponse>(
         text,
         'quality filter response'
       );
 
-      logger.info({
-        evaluationCount: parsed.evaluations?.length ?? 0,
-        keptByAI: parsed.evaluations?.filter(e => e.keep).length ?? 0,
-        filteredByAI: parsed.evaluations?.filter(e => !e.keep).length ?? 0,
-        summaryKept: parsed.summary?.totalKept,
-        summaryFiltered: parsed.summary?.totalFiltered,
-        filterReasons: parsed.summary?.filterReasons,
-      }, 'Parsed quality filter evaluations');
+      const keptCount = parsed.evaluations?.filter(e => e.keep).length ?? 0;
+      const filteredCount = parsed.evaluations?.filter(e => !e.keep).length ?? 0;
+      logger.info(`[QF] Parsed: ${parsed.evaluations?.length ?? 0} evaluations, kept=${keptCount}, filtered=${filteredCount}, reasons=${JSON.stringify(parsed.summary?.filterReasons)}`);
+
+      // Log each evaluation decision
+      for (const ev of (parsed.evaluations || [])) {
+        logger.info(`[QF] ${ev.imageId}: keep=${ev.keep} score=${ev.qualityScore} reason="${ev.reason}" issues=${JSON.stringify(ev.issues?.map(i => i.type))}`);
+      }
 
       // Convert to our format
       const kept: ImageQualityEvaluation[] = [];

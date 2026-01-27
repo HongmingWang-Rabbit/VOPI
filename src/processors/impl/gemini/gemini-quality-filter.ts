@@ -307,15 +307,7 @@ export const geminiQualityFilterProcessor: Processor = {
       }
     }
 
-    logger.info({
-      jobId,
-      inputCount: successfulImages.length,
-      keptCount: filterResult.stats.totalKept,
-      filteredCount: filterResult.stats.totalFiltered,
-      copiedCount: updatedCommercialImages.length,
-      commercialUrlFrameIds: Object.keys(updatedCommercialImageUrls),
-      filterReasons: filterResult.stats.filterReasons,
-    }, 'AI quality filter complete');
+    logger.info(`[QF-PROC] jobId=${jobId} input=${successfulImages.length} kept=${filterResult.stats.totalKept} filtered=${filterResult.stats.totalFiltered} copied=${updatedCommercialImages.length} urlFrameIds=${JSON.stringify(Object.keys(updatedCommercialImageUrls))} reasons=${JSON.stringify(filterResult.stats.filterReasons)}`);
 
     await onProgress?.({
       status: JobStatus.GENERATING,
