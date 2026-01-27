@@ -323,30 +323,13 @@ export const geminiQualityFilterProcessor: Processor = {
       message: `Approved ${updatedCommercialImages.length} of ${successfulImages.length} images`,
     });
 
-    // If ALL images were filtered out, preserve the original commercial URLs
-    // so the user still sees something rather than empty results
-    const originalCommercialImageUrls = data.metadata?.commercialImageUrls || {};
-    const finalCommercialImages = updatedCommercialImages.length > 0
-      ? updatedCommercialImages
-      : commercialImages;
-    const finalCommercialImageUrls = Object.keys(updatedCommercialImageUrls).length > 0
-      ? updatedCommercialImageUrls
-      : originalCommercialImageUrls;
-
-    if (updatedCommercialImages.length === 0 && Object.keys(originalCommercialImageUrls).length > 0) {
-      logger.warn({
-        jobId,
-        originalCount: Object.keys(originalCommercialImageUrls).length,
-      }, 'All images filtered out - preserving original commercial images');
-    }
-
     return {
       success: true,
       data: {
-        commercialImages: finalCommercialImages,
+        commercialImages: updatedCommercialImages,
         metadata: {
           ...data.metadata,
-          commercialImageUrls: finalCommercialImageUrls,
+          commercialImageUrls: updatedCommercialImageUrls,
           extensions: {
             ...data.metadata?.extensions,
             qualityFilterStats: {
@@ -354,7 +337,6 @@ export const geminiQualityFilterProcessor: Processor = {
               totalKept: filterResult.stats.totalKept,
               totalFiltered: filterResult.stats.totalFiltered,
               filterReasons: filterResult.stats.filterReasons,
-              preservedOriginals: updatedCommercialImages.length === 0,
             },
           },
         },
