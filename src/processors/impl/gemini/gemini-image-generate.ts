@@ -382,6 +382,7 @@ export const geminiImageGenerateProcessor: Processor = {
       successfulFrames,
       totalFrames: inputFrames.length,
       totalImagesExpected: inputFrames.length * variants.length,
+      commercialUrlFrameIds: Object.keys(commercialImageUrls),
     }, 'Gemini image generation complete');
 
     return {

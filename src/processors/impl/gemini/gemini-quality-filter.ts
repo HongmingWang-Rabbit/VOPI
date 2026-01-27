@@ -313,6 +313,7 @@ export const geminiQualityFilterProcessor: Processor = {
       keptCount: filterResult.stats.totalKept,
       filteredCount: filterResult.stats.totalFiltered,
       copiedCount: updatedCommercialImages.length,
+      commercialUrlFrameIds: Object.keys(updatedCommercialImageUrls),
       filterReasons: filterResult.stats.filterReasons,
     }, 'AI quality filter complete');
 

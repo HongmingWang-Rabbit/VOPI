@@ -129,9 +129,18 @@ export const completeJobProcessor: Processor = {
       logger.warn({ jobId, error: (error as Error).message }, 'Could not update job record - may be running in test mode');
     }
 
+    const commercialImageCount = Object.keys(commercialImageUrls).reduce(
+      (total, frameId) => total + Object.keys(commercialImageUrls[frameId] || {}).length,
+      0
+    );
+
     logger.info({
       jobId,
       variantsDiscovered: result.variantsDiscovered,
+      framesAnalyzed: result.framesAnalyzed,
+      finalFramesCount: result.finalFrames.length,
+      commercialImageCount,
+      commercialFrameIds: Object.keys(commercialImageUrls),
       hasMetadata: !!metadataOutput,
     }, 'Pipeline completed');
 
