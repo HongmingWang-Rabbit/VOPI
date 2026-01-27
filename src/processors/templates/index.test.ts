@@ -96,7 +96,7 @@ describe('Stack Templates', () => {
     });
 
     it('should have valid steps in each template', () => {
-      for (const [id, template] of Object.entries(stackTemplates)) {
+      for (const [, template] of Object.entries(stackTemplates)) {
         expect(template.steps.length).toBeGreaterThan(0);
         for (const step of template.steps) {
           expect(step.processor).toBeDefined();

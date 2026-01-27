@@ -5,6 +5,7 @@
  * Stores product metadata directly in the database if audio analysis was performed.
  */
 
+import path from 'path';
 import { eq } from 'drizzle-orm';
 import type { Processor, ProcessorContext, PipelineData, ProcessorResult } from '../../types.js';
 import { getDatabase, schema } from '../../../db/index.js';
@@ -12,6 +13,9 @@ import { JobStatus, type JobResult } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
 import type { ProductMetadata, MetadataFileOutput } from '../../../types/product-metadata.types.js';
 import { createMetadataFileOutput } from '../../../types/product-metadata.types.js';
+import { storageService } from '../../../services/storage.service.js';
+import { extractS3KeyFromUrl } from '../../../utils/s3-url.js';
+import { getConfig } from '../../../config/index.js';
 
 const logger = createChildLogger({ service: 'processor:complete-job' });
 
@@ -88,6 +92,41 @@ export const completeJobProcessor: Processor = {
     const uploadedUrls = data.uploadedUrls || [];
     const commercialImageUrls = data.metadata?.commercialImageUrls || {};
 
+    // Copy all commercial images to final/ prefix for canonical access
+    const config = getConfig();
+    const finalImageUrls: Record<string, Record<string, string>> = {};
+    const copyTasks: Promise<void>[] = [];
+    for (const [frameId, variants] of Object.entries(commercialImageUrls)) {
+      finalImageUrls[frameId] = {};
+      for (const [variantName, url] of Object.entries(variants as Record<string, string>)) {
+        copyTasks.push(
+          (async () => {
+            const s3Key = extractS3KeyFromUrl(url, config.storage, { allowAnyHost: true });
+            if (s3Key) {
+              const filename = path.basename(s3Key);
+              const destKey = storageService.getJobKey(jobId, 'final', frameId, filename);
+              try {
+                const finalUrl = await storageService.copyObject(s3Key, destKey);
+                finalImageUrls[frameId][variantName] = finalUrl;
+              } catch (error) {
+                logger.warn({ jobId, frameId, variantName, s3Key, error: (error as Error).message }, 'Failed to copy image to final/, using original URL');
+                finalImageUrls[frameId][variantName] = url;
+              }
+            } else {
+              logger.warn({ jobId, frameId, variantName, url }, 'Could not extract S3 key from URL, using original');
+              finalImageUrls[frameId][variantName] = url;
+            }
+          })()
+        );
+      }
+    }
+    await Promise.all(copyTasks);
+
+    const totalCopied = Object.values(finalImageUrls).reduce(
+      (sum, variants) => sum + Object.keys(variants).length, 0
+    );
+    logger.info({ jobId, copiedImages: totalCopied }, 'Copied commercial images to final/ prefix');
+
     // Build metadata file output if product metadata was extracted
     let metadataOutput: MetadataFileOutput | undefined;
     const productMetadata = buildFullProductMetadata(data);
@@ -102,7 +141,7 @@ export const completeJobProcessor: Processor = {
       variantsDiscovered: recommendedFrames.length,
       framesAnalyzed,
       finalFrames: uploadedUrls,
-      commercialImages: commercialImageUrls,
+      commercialImages: finalImageUrls,
     };
 
     await onProgress?.({
@@ -129,8 +168,8 @@ export const completeJobProcessor: Processor = {
       logger.warn({ jobId, error: (error as Error).message }, 'Could not update job record - may be running in test mode');
     }
 
-    const commercialImageCount = Object.keys(commercialImageUrls).reduce(
-      (total, frameId) => total + Object.keys(commercialImageUrls[frameId] || {}).length,
+    const commercialImageCount = Object.keys(finalImageUrls).reduce(
+      (total, frameId) => total + Object.keys(finalImageUrls[frameId] || {}).length,
       0
     );
 
@@ -144,7 +183,7 @@ export const completeJobProcessor: Processor = {
       framesAnalyzed: result.framesAnalyzed,
       finalFramesCount: result.finalFrames.length,
       commercialImageCount,
-      commercialFrameIds: Object.keys(commercialImageUrls),
+      commercialFrameIds: Object.keys(finalImageUrls),
       hasMetadata: !!metadataOutput,
     }, 'Pipeline completed');
 

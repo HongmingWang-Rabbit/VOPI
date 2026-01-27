@@ -5,6 +5,7 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
+  CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -415,6 +416,26 @@ export class StorageService {
 
     // Virtual-hosted-style URL: endpoint/key (for AWS S3, set endpoint to https://bucket.s3.region.amazonaws.com)
     return `${endpoint}/${s3Key}`;
+  }
+
+  /**
+   * Copy an S3 object to a new key within the same bucket
+   */
+  async copyObject(sourceKey: string, destinationKey: string): Promise<string> {
+    const client = this.init();
+    const bucket = this.getBucket();
+
+    await client.send(
+      new CopyObjectCommand({
+        Bucket: bucket,
+        CopySource: `${bucket}/${encodeURIComponent(sourceKey)}`,
+        Key: destinationKey,
+      })
+    );
+
+    const url = this.getPublicUrl(destinationKey);
+    logger.info({ sourceKey, destinationKey }, 'S3 object copied');
+    return url;
   }
 
   /**
