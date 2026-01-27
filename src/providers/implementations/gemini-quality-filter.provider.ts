@@ -229,7 +229,7 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
         const mimeType = getImageMimeType(image.path);
 
         parts.push({
-          text: `\n--- Generated Image: ${image.id} (${image.variant}) ---\n`,
+          text: `\n--- Generated Image ID: "${image.id}" ---\n`,
         });
         parts.push({
           inlineData: {
@@ -284,7 +284,17 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
       const filterReasons: Record<string, number> = {};
 
       for (const evaluation of parsed.evaluations) {
-        const image = images.find(img => img.id === evaluation.imageId);
+        // Normalize imageId: Gemini may echo back extra text (e.g. "id (variant)")
+        // Try exact match first, then try matching just the start of the returned ID
+        const rawId = evaluation.imageId;
+        let image = images.find(img => img.id === rawId);
+        if (!image) {
+          image = images.find(img => rawId.startsWith(img.id));
+          if (image) {
+            logger.debug(`[QF] Normalized imageId "${rawId}" -> "${image.id}"`);
+            evaluation.imageId = image.id;
+          }
+        }
         const imagePath = image?.path || '';
 
         const eval_: ImageQualityEvaluation = {
