@@ -52,12 +52,14 @@ For WHITE-STUDIO images (white background):
 
 ## Output Format
 
+IMPORTANT: The "imageId" field MUST be the EXACT string from the "Generated Image ID" label. Copy it exactly, do not add or remove any text.
+
 Return a JSON object:
 \`\`\`json
 {
   "evaluations": [
     {
-      "imageId": "frame_00001_lifestyle",
+      "imageId": "frame_00001::lifestyle",
       "qualityScore": 85,
       "keep": true,
       "reason": "Product matches reference, professional quality, no hands",
@@ -67,7 +69,7 @@ Return a JSON object:
       "backgroundType": "lifestyle"
     },
     {
-      "imageId": "frame_00003_white-studio",
+      "imageId": "frame_00003::white-studio",
       "qualityScore": 0,
       "keep": false,
       "reason": "Decorative elements floating in white background",
@@ -80,7 +82,7 @@ Return a JSON object:
   "summary": {
     "totalKept": 3,
     "totalFiltered": 5,
-    "keptImages": ["frame_00001_lifestyle", ...],
+    "keptImages": ["frame_00001::lifestyle", ...],
     "filterReasons": {"human_hand": 2, "product_modified": 2, "background_artifacts": 1}
   }
 }
@@ -171,7 +173,7 @@ export function buildEvaluationRules(
 ## Evaluation Rules:
 - Minimum quality score to keep: ${minQualityScore}
 - Allow images with hands: ${allowHands}
-${hasReferences ? '- REJECT any image where the product looks different from the REFERENCE images\n- REJECT white-studio images with ANY decorative elements in the background' : ''}
+${hasReferences ? '- REJECT any image where the product looks different from the REFERENCE images\n- REJECT white-studio images with PROMINENT decorative elements competing with the product' : ''}
 
 Keep ALL images that meet quality standards. Do NOT artificially limit the count.
 Now evaluate all ${imageCount} generated images and return the JSON response.`;

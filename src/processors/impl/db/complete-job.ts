@@ -134,6 +134,10 @@ export const completeJobProcessor: Processor = {
       0
     );
 
+    if (commercialImageCount === 0) {
+      logger.warn({ jobId }, 'Pipeline completed with no commercial images - quality filter may have removed all');
+    }
+
     logger.info({
       jobId,
       variantsDiscovered: result.variantsDiscovered,

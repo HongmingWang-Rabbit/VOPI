@@ -262,7 +262,7 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
       const response = result.response;
       const text = response.text();
 
-      logger.info(`[QF] Raw response length=${text.length} preview=${text.substring(0, 300)}`);
+      logger.debug(`[QF] Raw response length=${text.length} preview=${text.substring(0, 300)}`);
 
       const parsed = parseJsonResponse<GeminiBatchEvaluationResponse>(
         text,
@@ -273,10 +273,13 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
       const filteredCount = parsed.evaluations?.filter(e => !e.keep).length ?? 0;
       logger.info(`[QF] Parsed: ${parsed.evaluations?.length ?? 0} evaluations, kept=${keptCount}, filtered=${filteredCount}, reasons=${JSON.stringify(parsed.summary?.filterReasons)}`);
 
-      // Log each evaluation decision
+      // Log each evaluation decision at debug level
       for (const ev of (parsed.evaluations || [])) {
-        logger.info(`[QF] ${ev.imageId}: keep=${ev.keep} score=${ev.qualityScore} reason="${ev.reason}" issues=${JSON.stringify(ev.issues?.map(i => i.type))}`);
+        logger.debug(`[QF] ${ev.imageId}: keep=${ev.keep} score=${ev.qualityScore} reason="${ev.reason}" issues=${JSON.stringify((ev.issues || []).map(i => i.type))}`);
       }
+
+      // Build a lookup map from image id to image for normalization
+      const imageById = new Map(images.map(img => [img.id, img]));
 
       // Convert to our format
       const kept: ImageQualityEvaluation[] = [];
@@ -285,17 +288,20 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
 
       for (const evaluation of parsed.evaluations) {
         // Normalize imageId: Gemini may echo back extra text (e.g. "id (variant)")
-        // Try exact match first, then try matching just the start of the returned ID
+        // Strip known suffixes: trailing parenthesized text, surrounding quotes/whitespace
         const rawId = evaluation.imageId;
-        let image = images.find(img => img.id === rawId);
+        let image = imageById.get(rawId);
         if (!image) {
-          image = images.find(img => rawId.startsWith(img.id));
+          // Strip trailing " (variant)" or similar parenthesized text
+          const cleaned = rawId.replace(/\s*\(.*\)\s*$/, '').trim();
+          image = imageById.get(cleaned);
           if (image) {
             logger.debug(`[QF] Normalized imageId "${rawId}" -> "${image.id}"`);
             evaluation.imageId = image.id;
           }
         }
         const imagePath = image?.path || '';
+        const issues = evaluation.issues || [];
 
         const eval_: ImageQualityEvaluation = {
           imageId: evaluation.imageId,
@@ -303,7 +309,7 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
           qualityScore: evaluation.qualityScore,
           keep: evaluation.keep,
           reason: evaluation.reason,
-          issues: evaluation.issues.map(issue => ({
+          issues: issues.map(issue => ({
             type: issue.type as ImageQualityIssue['type'],
             severity: issue.severity as ImageQualityIssue['severity'],
             description: issue.description,
@@ -318,10 +324,10 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
         } else {
           filtered.push(eval_);
           // Count filter reasons
-          for (const issue of evaluation.issues) {
+          for (const issue of issues) {
             filterReasons[issue.type] = (filterReasons[issue.type] || 0) + 1;
           }
-          if (evaluation.issues.length === 0) {
+          if (issues.length === 0) {
             filterReasons['low_quality'] = (filterReasons['low_quality'] || 0) + 1;
           }
         }
@@ -360,7 +366,7 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
         kept: images.map(img => ({
           imageId: img.id,
           imagePath: img.path,
-          qualityScore: 50,
+          qualityScore: opts.minQualityScore,
           keep: true,
           reason: `Evaluation failed, keeping by default: ${errorMessage}`,
           issues: [],

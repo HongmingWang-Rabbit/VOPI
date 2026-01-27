@@ -174,7 +174,6 @@ export const geminiQualityFilterProcessor: Processor = {
 
     // Separate kept and filtered images with proper validation using type guard
     const keptImages: (CommercialImageData & { path: string; s3Url: string })[] = [];
-    const db = getDatabase();
 
     for (const img of commercialImages) {
       const imageId = buildImageId(img.frameId, img.version);
@@ -196,56 +195,59 @@ export const geminiQualityFilterProcessor: Processor = {
     }
 
     // Update database records for filtered images
-    for (const evaluation of filterResult.filtered) {
-      // Parse imageId using safe parser
-      const parsed = parseImageId(evaluation.imageId);
-      if (!parsed) {
-        logger.warn({
-          imageId: evaluation.imageId,
-          reason: evaluation.reason,
-        }, 'Failed to parse imageId for filtered image, skipping DB update');
-        continue;
-      }
+    if (filterResult.filtered.length > 0) {
+      const db = getDatabase();
+      await Promise.all(filterResult.filtered.map(async (evaluation) => {
+        // Parse imageId using safe parser
+        const parsed = parseImageId(evaluation.imageId);
+        if (!parsed) {
+          logger.warn({
+            imageId: evaluation.imageId,
+            reason: evaluation.reason,
+          }, 'Failed to parse imageId for filtered image, skipping DB update');
+          return;
+        }
 
-      const { version } = parsed;
+        const { version } = parsed;
 
-      // Get the original image data to find the database frame ID
-      const originalImg = imageIdToData.get(evaluation.imageId);
+        // Get the original image data to find the database frame ID
+        const originalImg = imageIdToData.get(evaluation.imageId);
 
-      // Require localPath for precise database updates
-      // This prevents accidentally updating wrong records when version alone is ambiguous
-      if (!originalImg?.path) {
-        logger.warn({
-          imageId: evaluation.imageId,
-          version,
-          reason: evaluation.reason,
-        }, 'No localPath for filtered image, skipping DB update to avoid ambiguity');
-        continue;
-      }
+        // Require localPath for precise database updates
+        // This prevents accidentally updating wrong records when version alone is ambiguous
+        if (!originalImg?.path) {
+          logger.warn({
+            imageId: evaluation.imageId,
+            version,
+            reason: evaluation.reason,
+          }, 'No localPath for filtered image, skipping DB update to avoid ambiguity');
+          return;
+        }
 
-      try {
-        // Use jobId, version, AND localPath for precise updates
-        await db
-          .update(schema.commercialImages)
-          .set({
-            success: false,
-            error: `Quality filtered: ${evaluation.reason}`,
-          })
-          .where(
-            and(
-              eq(schema.commercialImages.jobId, jobId),
-              eq(schema.commercialImages.version, version),
-              eq(schema.commercialImages.localPath, originalImg.path)
-            )
-          );
-      } catch (err) {
-        logger.warn({
-          error: (err as Error).message,
-          imageId: evaluation.imageId,
-          version,
-          localPath: originalImg.path,
-        }, 'Failed to update filtered image record');
-      }
+        try {
+          // Use jobId, version, AND localPath for precise updates
+          await db
+            .update(schema.commercialImages)
+            .set({
+              success: false,
+              error: `Quality filtered: ${evaluation.reason}`,
+            })
+            .where(
+              and(
+                eq(schema.commercialImages.jobId, jobId),
+                eq(schema.commercialImages.version, version),
+                eq(schema.commercialImages.localPath, originalImg.path)
+              )
+            );
+        } catch (err) {
+          logger.warn({
+            error: (err as Error).message,
+            imageId: evaluation.imageId,
+            version,
+            localPath: originalImg.path,
+          }, 'Failed to update filtered image record');
+        }
+      }));
     }
 
     // Create agent-filtered directory
@@ -262,7 +264,7 @@ export const geminiQualityFilterProcessor: Processor = {
       message: `Copying ${keptImages.length} approved images`,
     });
 
-    for (const img of keptImages) {
+    await Promise.all(keptImages.map(async (img) => {
       try {
         const filename = path.basename(img.path);
         const filteredPath = path.join(filteredDir, filename);
@@ -305,9 +307,17 @@ export const geminiQualityFilterProcessor: Processor = {
           version: img.version,
         }, 'Failed to copy approved image');
       }
-    }
+    }));
 
-    logger.info(`[QF-PROC] jobId=${jobId} input=${successfulImages.length} kept=${filterResult.stats.totalKept} filtered=${filterResult.stats.totalFiltered} copied=${updatedCommercialImages.length} urlFrameIds=${JSON.stringify(Object.keys(updatedCommercialImageUrls))} reasons=${JSON.stringify(filterResult.stats.filterReasons)}`);
+    logger.info({
+      jobId,
+      inputCount: successfulImages.length,
+      keptCount: filterResult.stats.totalKept,
+      filteredCount: filterResult.stats.totalFiltered,
+      copiedCount: updatedCommercialImages.length,
+      commercialUrlFrameIds: Object.keys(updatedCommercialImageUrls),
+      filterReasons: filterResult.stats.filterReasons,
+    }, `Quality filter: ${filterResult.stats.totalKept} kept, ${filterResult.stats.totalFiltered} filtered, ${updatedCommercialImages.length} copied`);
 
     await onProgress?.({
       status: JobStatus.GENERATING,
