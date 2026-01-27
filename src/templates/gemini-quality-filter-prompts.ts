@@ -25,20 +25,20 @@ Compare each GENERATED image against the REFERENCE images and decide which to KE
 - This is the #1 priority - be very strict
 
 ### 2. WRONG PRODUCT (product_modified)
-- Compare to REFERENCE images - the product design MUST match
-- If text/logos are different = REJECT
-- If patterns/decorations are in DIFFERENT positions = REJECT
-- If patterns are MISSING from the product = REJECT
-- If colors are significantly different = REJECT
-- If the product shape is different = REJECT
-- If it looks like a DIFFERENT product entirely = REJECT
+- Compare to REFERENCE images - it should be the SAME TYPE of product
+- If it's a COMPLETELY DIFFERENT product category = REJECT
+- If the product shape is fundamentally different = REJECT
+- ACCEPT: minor color variations, lighting differences, artistic styling
+- ACCEPT: different angle or perspective of the same product
+- Only reject if the product is clearly NOT the same item
 
 ### 3. BACKGROUND CONTAMINATION (background_artifacts)
 For WHITE-STUDIO images (white background):
-- If there are ANY decorative elements in the background = REJECT
-- Floating flowers, branches, fans, or patterns beside the product = REJECT
-- The background must be PURE WHITE with only a shadow = KEEP
-- Props or accessories around the product = REJECT
+- If there are PROMINENT distracting elements that compete with the product = REJECT
+- If decorative elements are larger than the product = REJECT
+- ACCEPT: subtle shadows, gradients, or soft lighting effects
+- ACCEPT: small decorative elements that complement but don't overwhelm
+- The focus should be on the product - minor background styling is OK
 
 ### 4. QUALITY ISSUES
 - **blurry**: Not sharp or in focus = REJECT
@@ -86,11 +86,17 @@ Return a JSON object:
 \`\`\`
 
 ## STRICTNESS CRITERIA:
-- If ANY human body part is visible (even partially): REJECT immediately
-- If the product looks >10% different from references: REJECT
-- If white-studio has ANY elements besides product and shadow: REJECT
+- If ANY human hand or finger is clearly visible: REJECT immediately
+- If the product is a COMPLETELY DIFFERENT item (wrong category): REJECT
+- If white-studio has PROMINENT decorative elements competing with product: REJECT
 - Quality score below minimum threshold: REJECT
-- When uncertain about product match: REJECT (false negatives are safer than false positives)`;
+
+## LENIENCY FOR AI-GENERATED IMAGES:
+- ACCEPT minor color/lighting variations - these are expected
+- ACCEPT subtle background gradients or soft shadows - these enhance the image
+- ACCEPT small artistic additions that don't distract from the product
+- When the product is clearly the same item with minor styling differences: KEEP IT
+- Err on the side of KEEPING images unless there are MAJOR issues`;
 
 /**
  * Prompt for evaluating WITHOUT reference images (fallback)
@@ -116,11 +122,15 @@ export const BATCH_EVALUATION_PROMPT_NO_REFS = `You are an expert e-commerce ima
 Return JSON with evaluations array and summary.
 
 ## STRICTNESS CRITERIA:
-- If ANY human body part is visible (even partially): REJECT immediately
+- If ANY human hand or finger is clearly visible: REJECT immediately
 - If image appears blurry or out of focus: REJECT
-- If product is partially cut off: REJECT
+- If product is significantly cut off: REJECT
 - Quality score below minimum threshold: REJECT
-- When uncertain: REJECT (false negatives are safer than false positives)`;
+
+## LENIENCY FOR AI-GENERATED IMAGES:
+- ACCEPT minor styling variations and artistic elements
+- ACCEPT subtle background enhancements
+- Err on the side of KEEPING images unless there are MAJOR issues`;
 
 /**
  * Reference images introduction for quality filter
