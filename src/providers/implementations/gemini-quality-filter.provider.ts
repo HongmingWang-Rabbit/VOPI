@@ -262,10 +262,24 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
       const response = result.response;
       const text = response.text();
 
+      logger.info({
+        responseLength: text.length,
+        responsePreview: text.substring(0, 500),
+      }, 'Gemini quality filter raw response');
+
       const parsed = parseJsonResponse<GeminiBatchEvaluationResponse>(
         text,
         'quality filter response'
       );
+
+      logger.info({
+        evaluationCount: parsed.evaluations?.length ?? 0,
+        keptByAI: parsed.evaluations?.filter(e => e.keep).length ?? 0,
+        filteredByAI: parsed.evaluations?.filter(e => !e.keep).length ?? 0,
+        summaryKept: parsed.summary?.totalKept,
+        summaryFiltered: parsed.summary?.totalFiltered,
+        filterReasons: parsed.summary?.filterReasons,
+      }, 'Parsed quality filter evaluations');
 
       // Convert to our format
       const kept: ImageQualityEvaluation[] = [];
@@ -327,34 +341,32 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error({
         error: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
         imageCount: images.length,
         referenceCount: referenceImages.length,
-      }, 'Quality filtering failed - marking all images as evaluation_failed');
+      }, 'Quality filtering failed - keeping all images (fail-open)');
 
-      // On error, fail closed - mark all images as filtered with evaluation_failed reason
-      // This prevents potentially bad images from reaching production
+      // On error, fail open - keep all images rather than rejecting everything
+      // The images have already been generated and uploaded; losing them all is worse
+      // than potentially keeping a few low-quality ones
       return {
-        kept: [],
-        filtered: images.map(img => ({
+        kept: images.map(img => ({
           imageId: img.id,
           imagePath: img.path,
-          qualityScore: 0,
-          keep: false,
-          reason: `Evaluation failed: ${errorMessage}`,
-          issues: [{
-            type: 'low_quality' as const,
-            severity: 'high' as const,
-            description: `Quality evaluation API error: ${errorMessage}`,
-          }],
-          category: 'evaluation_failed',
+          qualityScore: 50,
+          keep: true,
+          reason: `Evaluation failed, keeping by default: ${errorMessage}`,
+          issues: [],
+          category: 'evaluation_error',
           angleType: 'unknown',
           backgroundType: 'other' as const,
         })),
+        filtered: [],
         stats: {
           totalInput: images.length,
-          totalKept: 0,
-          totalFiltered: images.length,
-          filterReasons: { evaluation_failed: images.length },
+          totalKept: images.length,
+          totalFiltered: 0,
+          filterReasons: {},
         },
       };
     }
