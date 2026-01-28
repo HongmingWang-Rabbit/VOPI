@@ -4,7 +4,6 @@ import os from 'os';
 
 import { createChildLogger } from '../utils/logger.js';
 import { getConfig } from '../config/index.js';
-import { extractS3KeyFromUrl } from '../utils/s3-url.js';
 import { PipelineTimer } from '../utils/timer.js';
 import { getDatabase, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
@@ -191,25 +190,7 @@ export class PipelineService {
    * Cleanup uploaded video from S3 if it was uploaded through our presigned URL endpoint
    */
   private async cleanupUploadedVideo(videoUrl: string): Promise<void> {
-    try {
-      const config = getConfig();
-      const storageConfig = {
-        bucket: config.storage.bucket,
-        endpoint: config.storage.endpoint,
-        region: config.storage.region,
-      };
-
-      // Check if this is an S3 URL from our bucket's uploads prefix
-      const s3Key = extractS3KeyFromUrl(videoUrl, storageConfig, { allowAnyHost: true });
-
-      if (s3Key && s3Key.startsWith('uploads/')) {
-        await storageService.deleteFile(s3Key);
-        logger.info({ s3Key }, 'Uploaded video cleaned up from S3');
-      }
-    } catch (error) {
-      // Log but don't fail the job if cleanup fails
-      logger.warn({ videoUrl, error: (error as Error).message }, 'Failed to cleanup uploaded video');
-    }
+    await storageService.deleteUploadedVideo(videoUrl);
   }
 
   /**

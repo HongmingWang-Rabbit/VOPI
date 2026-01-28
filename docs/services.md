@@ -696,6 +696,15 @@ Generate a presigned URL for temporary access.
 
 Get the public URL for an S3 object.
 
+#### `deleteUploadedVideo(videoUrl: string): Promise<boolean>`
+
+Delete an uploaded video from S3 if the URL points to the `uploads/` prefix.
+Best-effort: logs warnings on failure but does not throw.
+
+**Returns**: `true` if a file was deleted, `false` otherwise.
+
+Used by both `pipeline.service.ts` (on job completion) and `jobs.controller.ts` (on job deletion) to clean up user-uploaded videos stored outside the `jobs/{jobId}/` prefix.
+
 #### `getJobKey(jobId, category, filename): string`
 
 Generate standardized S3 key for job assets.
@@ -1622,7 +1631,7 @@ interface GeminiImageGenerateAllResult {
 | Variant | Description | Prompt Focus |
 |---------|-------------|--------------|
 | `white-studio` | Clean white background | Professional e-commerce lighting, soft shadows |
-| `lifestyle` | Contextual scene | Natural environment matching product category |
+| `lifestyle` | Contextual scene | Natural environment matching product category; product metadata (title, category, description) injected into prompt when available |
 
 ### Reference Frames
 

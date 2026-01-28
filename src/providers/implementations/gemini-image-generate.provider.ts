@@ -156,9 +156,13 @@ export class GeminiImageGenerateProviderImpl implements GeminiImageGenerateProvi
       });
 
       // Build and add prompt using templates
-      // Note: Product context is provided via reference frames and is used
-      // by the model to understand the product visually
-      const prompt = getImageGeneratePrompt(options.variant);
+      // Product metadata (title, category, description) is injected into the
+      // lifestyle prompt so Gemini can generate a contextually appropriate scene
+      const prompt = getImageGeneratePrompt(options.variant, {
+        title: options.productTitle,
+        description: options.productDescription,
+        category: options.productCategory,
+      });
       parts.push({ text: prompt });
 
       // Get model

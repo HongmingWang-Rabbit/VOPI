@@ -54,9 +54,9 @@ The EXACT same product from the input image, extracted and placed on pure white 
 `;
 
 /**
- * Lifestyle prompt - creates contextual scene while preserving product
+ * Lifestyle prompt base — everything before the BACKGROUND section
  */
-export const LIFESTYLE_PROMPT = `
+const LIFESTYLE_PROMPT_BASE = `
 You are creating a lifestyle product photo in a natural setting.
 
 ## STEP 1 - STUDY THE REFERENCE IMAGES:
@@ -85,16 +85,30 @@ Reproduce the EXACT same product:
 ## ALLOWED IMPROVEMENTS:
 - Straighten the product (upright, not tilted)
 - Smooth packaging wrinkles
-- Natural, soft lighting
+- Natural, soft lighting`;
 
+/**
+ * Generic background section (no product context available)
+ */
+const LIFESTYLE_BACKGROUND_GENERIC = `
 ## BACKGROUND:
 - Appropriate lifestyle setting for the product type
 - Natural contextual scene
-- Props should complement but not distract
+- Props should complement but not distract`;
 
+/**
+ * Lifestyle prompt footer
+ */
+const LIFESTYLE_PROMPT_FOOTER = `
 ## OUTPUT:
 The EXACT product from references in a lifestyle setting. Product design must match references exactly.
 `;
+
+/**
+ * Pre-composed lifestyle prompt for the no-context fallback path.
+ * Exported for backward compatibility with any code referencing it.
+ */
+export const LIFESTYLE_PROMPT = LIFESTYLE_PROMPT_BASE + LIFESTYLE_BACKGROUND_GENERIC + LIFESTYLE_PROMPT_FOOTER;
 
 /**
  * Reference frame introduction text for white-studio variant
@@ -142,15 +156,61 @@ The product must look identical to the references.
  * @param variant - The image variant type
  * @returns The prompt template
  */
-export function getImageGeneratePrompt(variant: GeminiImageVariant): string {
+export function getImageGeneratePrompt(
+  variant: GeminiImageVariant,
+  productContext?: { title?: string; description?: string; category?: string },
+): string {
   switch (variant) {
     case 'white-studio':
       return WHITE_STUDIO_PROMPT;
     case 'lifestyle':
-      return LIFESTYLE_PROMPT;
+      return buildLifestylePrompt(productContext);
     default:
       return WHITE_STUDIO_PROMPT;
   }
+}
+
+/**
+ * Build lifestyle prompt with optional product context injected.
+ * Uses structural composition (base + background + footer) rather than
+ * string replacement to avoid silent failures if prompt text changes.
+ */
+function buildLifestylePrompt(
+  productContext?: { title?: string; description?: string; category?: string },
+): string {
+  const hasContext = productContext &&
+    (productContext.title || productContext.description || productContext.category);
+
+  if (!hasContext) {
+    return LIFESTYLE_PROMPT;
+  }
+
+  // Build product context section
+  const contextLines: string[] = ['## PRODUCT CONTEXT:'];
+  if (productContext.title) {
+    contextLines.push(`- Product: ${productContext.title}`);
+  }
+  if (productContext.category) {
+    contextLines.push(`- Category: ${productContext.category}`);
+  }
+  if (productContext.description) {
+    // Truncate description to ~200 chars to avoid bloating the prompt
+    const desc = productContext.description.length > 200
+      ? productContext.description.slice(0, 200) + '…'
+      : productContext.description;
+    contextLines.push(`- Description: ${desc}`);
+  }
+
+  const contextAwareBackground = `
+${contextLines.join('\n')}
+
+## BACKGROUND:
+- Create a lifestyle setting that is NATURAL and APPROPRIATE for this specific product
+- The scene should match where this product would actually be used or displayed
+- Props should complement the product's category and purpose
+- Do NOT use generic settings — choose a scene that makes sense for this exact product`;
+
+  return LIFESTYLE_PROMPT_BASE + contextAwareBackground + LIFESTYLE_PROMPT_FOOTER;
 }
 
 /**

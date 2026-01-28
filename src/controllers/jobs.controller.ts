@@ -310,6 +310,9 @@ export class JobsController {
       logger.warn({ jobId, s3Prefix, error }, 'Failed to delete S3 artifacts, proceeding with DB deletion');
     }
 
+    // Also clean up uploaded video if it lives under the uploads/ prefix
+    await storageService.deleteUploadedVideo(job.videoUrl);
+
     // Delete job (cascades to related records)
     await db.delete(schema.jobs).where(eq(schema.jobs.id, jobId));
 

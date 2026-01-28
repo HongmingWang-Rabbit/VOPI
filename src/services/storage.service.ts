@@ -479,6 +479,28 @@ export class StorageService {
   }
 
   /**
+   * Delete an uploaded video from S3 if the URL points to the uploads/ prefix.
+   * Best-effort: logs warnings on failure but does not throw.
+   *
+   * @param videoUrl - The video URL to check and potentially delete
+   * @returns true if a file was deleted, false otherwise
+   */
+  async deleteUploadedVideo(videoUrl: string): Promise<boolean> {
+    try {
+      const config = getConfig();
+      const s3Key = extractS3KeyFromUrl(videoUrl, config.storage, { allowAnyHost: true });
+      if (s3Key && s3Key.startsWith('uploads/')) {
+        await this.deleteFile(s3Key);
+        logger.info({ s3Key }, 'Uploaded video cleaned up from S3');
+        return true;
+      }
+    } catch (error) {
+      logger.warn({ videoUrl, error: (error as Error).message }, 'Failed to cleanup uploaded video');
+    }
+    return false;
+  }
+
+  /**
    * Sanitize a path segment for S3 key usage
    * Removes path traversal attempts and invalid characters
    */
