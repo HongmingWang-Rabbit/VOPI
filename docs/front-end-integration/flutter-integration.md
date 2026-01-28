@@ -189,8 +189,23 @@ class VOPIClient {
   }
 
   Future<CancelJobResponse> cancelJob(String jobId) async {
-    final response = await _dio.delete('/api/v1/jobs/$jobId');
+    final response = await _dio.post('/api/v1/jobs/$jobId/cancel');
     return CancelJobResponse.fromJson(response.data);
+  }
+
+  Future<void> deleteJob(String jobId) async {
+    await _dio.delete('/api/v1/jobs/$jobId');
+  }
+
+  Future<Map<String, Map<String, String>>> deleteJobImage(
+    String jobId,
+    String frameId,
+    String version,
+  ) async {
+    final response = await _dio.delete('/api/v1/jobs/$jobId/images/$frameId/$version');
+    return (response.data['commercialImages'] as Map).map(
+      (k, v) => MapEntry(k as String, (v as Map).cast<String, String>()),
+    );
   }
 
   Future<JobListResponse> listJobs({

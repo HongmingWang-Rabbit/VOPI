@@ -1034,7 +1034,7 @@ Lightweight endpoint for polling job status.
 
 ---
 
-### DELETE /api/v1/jobs/:id
+### POST /api/v1/jobs/:id/cancel
 
 Cancel a pending job. Uses atomic update to prevent race conditions.
 
@@ -1054,6 +1054,71 @@ Cancel a pending job. Uses atomic update to prevent race conditions.
 {
   "error": "Job cannot be cancelled - status is not pending",
   "statusCode": 400
+}
+```
+
+---
+
+### DELETE /api/v1/jobs/:id
+
+Delete a job and all associated data (database records and S3 artifacts). Only jobs in terminal statuses (`completed`, `failed`, `cancelled`) or `pending` can be deleted. Actively processing jobs must be cancelled first.
+
+**Response** `204 No Content`
+
+**Response** `409 Conflict` (job is actively processing)
+```json
+{
+  "error": "CONFLICT",
+  "message": "Cannot delete job in 'extracting' status. Cancel the job first or wait for it to finish."
+}
+```
+
+**Response** `404 Not Found`
+```json
+{
+  "error": "NOT_FOUND",
+  "message": "Job {id} not found"
+}
+```
+
+---
+
+### DELETE /api/v1/jobs/:id/images/:frameId/:version
+
+Delete a specific commercial image variant from a completed job. Removes the image from both S3 and the job result in the database.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | string (UUID) | Job ID |
+| `frameId` | string | The frame/product key in `commercialImages` (e.g. `hero`, `product_1_variant_hero`) |
+| `version` | string | The variant name (e.g. `white-studio`, `lifestyle`, `transparent`, `solid`) |
+
+**Response** `200 OK`
+```json
+{
+  "commercialImages": {
+    "hero": {
+      "solid": "https://s3.amazonaws.com/bucket/jobs/{id}/commercial/hero_solid.png",
+      "real": "https://s3.amazonaws.com/bucket/jobs/{id}/commercial/hero_real.png"
+    }
+  }
+}
+```
+
+**Response** `400 Bad Request` (job not completed)
+```json
+{
+  "error": "BAD_REQUEST",
+  "message": "Can only delete images from completed jobs"
+}
+```
+
+**Response** `404 Not Found` (variant not found)
+```json
+{
+  "error": "NOT_FOUND",
+  "message": "Image variant 'lifestyle' not found for frame 'hero'"
 }
 ```
 
@@ -1376,6 +1441,7 @@ All errors follow this format:
 | 400 | Bad Request - Invalid input |
 | 401 | Unauthorized - Missing or invalid API key |
 | 404 | Not Found - Resource doesn't exist |
+| 409 | Conflict - Action not allowed in current state |
 | 500 | Internal Server Error |
 | 503 | Service Unavailable - Dependencies down |
 

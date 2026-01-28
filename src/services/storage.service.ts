@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
   CopyObjectCommand,
@@ -324,20 +325,27 @@ export class StorageService {
   }
 
   /**
-   * List files in a prefix
+   * List files in a prefix (handles pagination for >1000 objects)
    */
   async listFiles(prefix: string): Promise<string[]> {
     const client = this.init();
     const bucket = this.getBucket();
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
 
-    const response = await client.send(
-      new ListObjectsV2Command({
-        Bucket: bucket,
-        Prefix: prefix,
-      })
-    );
+    do {
+      const response = await client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        })
+      );
+      keys.push(...(response.Contents || []).map((obj) => obj.Key!).filter(Boolean));
+      continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+    } while (continuationToken);
 
-    return (response.Contents || []).map((obj) => obj.Key!).filter(Boolean);
+    return keys;
   }
 
   /**
@@ -436,6 +444,35 @@ export class StorageService {
     const url = this.getPublicUrl(destinationKey);
     logger.info({ sourceKey, destinationKey }, 'S3 object copied');
     return url;
+  }
+
+  /**
+   * Delete all objects under a prefix
+   */
+  async deletePrefix(prefix: string): Promise<number> {
+    const keys = await this.listFiles(prefix);
+    if (keys.length === 0) return 0;
+
+    const client = this.init();
+    const bucket = this.getBucket();
+
+    // DeleteObjectsCommand supports up to 1000 keys per request
+    const batchSize = 1000;
+    for (let i = 0; i < keys.length; i += batchSize) {
+      const batch = keys.slice(i, i + batchSize);
+      await client.send(
+        new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: {
+            Objects: batch.map((Key) => ({ Key })),
+            Quiet: true,
+          },
+        })
+      );
+    }
+
+    logger.info({ prefix, count: keys.length }, 'Deleted all objects under prefix');
+    return keys.length;
   }
 
   /**

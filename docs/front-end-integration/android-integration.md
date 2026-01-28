@@ -110,10 +110,24 @@ interface VOPIService {
     ): Response<JobStatus>
 
     // Cancel job
-    @DELETE("api/v1/jobs/{id}")
+    @POST("api/v1/jobs/{id}/cancel")
     suspend fun cancelJob(
         @Path("id") jobId: String
     ): Response<CancelJobResponse>
+
+    // Delete job and all associated data (S3 + DB)
+    @DELETE("api/v1/jobs/{id}")
+    suspend fun deleteJob(
+        @Path("id") jobId: String
+    ): Response<Unit>
+
+    // Delete a specific commercial image variant
+    @DELETE("api/v1/jobs/{id}/images/{frameId}/{version}")
+    suspend fun deleteJobImage(
+        @Path("id") jobId: String,
+        @Path("frameId") frameId: String,
+        @Path("version") version: String
+    ): Response<DeleteJobImageResponse>
 
     // Get grouped images
     @GET("api/v1/jobs/{id}/images/grouped")
@@ -290,6 +304,10 @@ data class CancelJobResponse(
     val id: String,
     val status: JobStatusType,
     val message: String
+)
+
+data class DeleteJobImageResponse(
+    val commercialImages: Map<String, Map<String, String>>
 )
 
 // Download URLs (for private S3 bucket)

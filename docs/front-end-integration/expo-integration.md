@@ -678,7 +678,12 @@ export const vopiService = {
 
   getJobStatus: (jobId: string) => apiClient.get<JobStatus>(`/api/v1/jobs/${jobId}/status`),
 
-  cancelJob: (jobId: string) => apiClient.delete<{ id: string; status: string; message: string }>(`/api/v1/jobs/${jobId}`),
+  cancelJob: (jobId: string) => apiClient.post<{ id: string; status: string; message: string }>(`/api/v1/jobs/${jobId}/cancel`),
+
+  deleteJob: (jobId: string) => apiClient.delete(`/api/v1/jobs/${jobId}`),
+
+  deleteJobImage: (jobId: string, frameId: string, version: string) =>
+    apiClient.delete<{ commercialImages: Record<string, Record<string, string>> }>(`/api/v1/jobs/${jobId}/images/${frameId}/${version}`),
 
   listJobs: (params?: { status?: string; limit?: number; offset?: number }) =>
     apiClient.get<{ jobs: Job[]; total: number }>('/api/v1/jobs', params),

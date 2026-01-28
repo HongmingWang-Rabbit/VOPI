@@ -16,6 +16,11 @@ const jobIdParamsSchema = z.object({
   id: z.string().uuid(),
 });
 
+const imageDeleteParamsSchema = jobIdParamsSchema.extend({
+  frameId: z.string(),
+  version: z.string(),
+});
+
 const presignBodySchema = z.object({
   filename: z.string().max(255).optional(),
   contentType: z.enum(['video/mp4', 'video/quicktime', 'video/webm']).default('video/mp4'),
@@ -253,10 +258,10 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   /**
-   * Cancel a job
+   * Cancel a pending job
    */
-  fastify.delete(
-    '/jobs/:id',
+  fastify.post(
+    '/jobs/:id/cancel',
     {
       preHandler: [requireUserAuth],
       schema: {
@@ -289,6 +294,77 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
         status: job.status,
         message: 'Job cancelled successfully',
       });
+    }
+  );
+
+  /**
+   * Delete a job and all its data (DB + S3)
+   */
+  fastify.delete(
+    '/jobs/:id',
+    {
+      preHandler: [requireUserAuth],
+      schema: {
+        description: 'Delete a job and all associated data. Returns 409 if job is actively processing.',
+        tags: ['Jobs'],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+        response: {
+          204: { type: 'null' },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = jobIdParamsSchema.parse(request.params);
+      await jobsController.deleteJob(id, request.user!.id);
+      return reply.status(204).send();
+    }
+  );
+
+  /**
+   * Delete a specific commercial image variant from a completed job
+   */
+  fastify.delete(
+    '/jobs/:id/images/:frameId/:version',
+    {
+      preHandler: [requireUserAuth],
+      schema: {
+        description: 'Delete a specific commercial image variant from a completed job',
+        tags: ['Jobs'],
+        params: {
+          type: 'object',
+          required: ['id', 'frameId', 'version'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            frameId: { type: 'string' },
+            version: { type: 'string' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              commercialImages: { type: 'object' },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const params = imageDeleteParamsSchema.parse(request.params);
+
+      const commercialImages = await jobsController.deleteJobImage(
+        params.id,
+        request.user!.id,
+        params.frameId,
+        params.version
+      );
+      return reply.send({ commercialImages });
     }
   );
 

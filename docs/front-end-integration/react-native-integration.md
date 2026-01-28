@@ -523,8 +523,23 @@ class VOPIClient {
   }
 
   async cancelJob(jobId: string): Promise<CancelJobResponse> {
-    const { data } = await this.client.delete<CancelJobResponse>(
-      `/api/v1/jobs/${jobId}`
+    const { data } = await this.client.post<CancelJobResponse>(
+      `/api/v1/jobs/${jobId}/cancel`
+    );
+    return data;
+  }
+
+  async deleteJob(jobId: string): Promise<void> {
+    await this.client.delete(`/api/v1/jobs/${jobId}`);
+  }
+
+  async deleteJobImage(
+    jobId: string,
+    frameId: string,
+    version: string
+  ): Promise<{ commercialImages: Record<string, Record<string, string>> }> {
+    const { data } = await this.client.delete(
+      `/api/v1/jobs/${jobId}/images/${frameId}/${version}`
     );
     return data;
   }
@@ -700,6 +715,10 @@ export interface CancelJobResponse {
   id: string;
   status: JobStatusType;
   message: string;
+}
+
+export interface DeleteJobImageResponse {
+  commercialImages: Record<string, Record<string, string>>;
 }
 
 // Download URLs (for private S3 bucket)

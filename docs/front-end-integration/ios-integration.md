@@ -209,7 +209,21 @@ class VOPIClient {
 
     func cancelJob(id: String) async throws -> CancelJobResponse {
         return try await request(
+            path: "/api/v1/jobs/\(id)/cancel",
+            method: "POST"
+        )
+    }
+
+    func deleteJob(id: String) async throws {
+        let _: EmptyResponse = try await request(
             path: "/api/v1/jobs/\(id)",
+            method: "DELETE"
+        )
+    }
+
+    func deleteJobImage(jobId: String, frameId: String, version: String) async throws -> DeleteJobImageResponse {
+        return try await request(
+            path: "/api/v1/jobs/\(jobId)/images/\(frameId)/\(version)",
             method: "DELETE"
         )
     }
@@ -366,6 +380,12 @@ struct CancelJobResponse: Decodable {
     let id: String
     let status: JobStatusType
     let message: String
+}
+
+struct EmptyResponse: Decodable {}
+
+struct DeleteJobImageResponse: Decodable {
+    let commercialImages: [String: [String: String]]
 }
 
 // MARK: - Download URLs (for private S3 bucket)

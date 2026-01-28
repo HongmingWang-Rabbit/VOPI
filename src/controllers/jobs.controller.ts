@@ -1,10 +1,13 @@
 import { getDatabase, schema } from '../db/index.js';
 import { eq, desc, and, SQL, sql, lt } from 'drizzle-orm';
 import { createChildLogger } from '../utils/logger.js';
-import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors.js';
+import { NotFoundError, BadRequestError, ForbiddenError, ConflictError } from '../utils/errors.js';
 import { addPipelineJob } from '../queues/pipeline.queue.js';
 import { validateCallbackUrlComprehensive } from '../utils/url-validator.js';
 import { creditsService } from '../services/credits.service.js';
+import { storageService } from '../services/storage.service.js';
+import { extractS3KeyFromUrl } from '../utils/s3-url.js';
+import { getConfig } from '../config/index.js';
 import {
   jobConfigSchema,
   type CreateJobRequest,
@@ -274,7 +277,7 @@ export class JobsController {
   }
 
   /**
-   * Delete a job and its associated data
+   * Delete a job and its associated data (DB + S3)
    * @param jobId - The job ID to delete
    * @param userId - The user ID to verify ownership
    */
@@ -291,10 +294,95 @@ export class JobsController {
       throw new NotFoundError(`Job ${jobId} not found`);
     }
 
+    // Only allow deletion of jobs in terminal or pending statuses
+    const deletableStatuses = ['completed', 'failed', 'cancelled', 'pending'];
+    if (!deletableStatuses.includes(job.status)) {
+      throw new ConflictError(
+        `Cannot delete job in '${job.status}' status. Cancel the job first or wait for it to finish.`
+      );
+    }
+
+    // Clean up S3 artifacts (best-effort — don't block DB deletion on S3 failure)
+    const s3Prefix = `jobs/${jobId}/`;
+    try {
+      await storageService.deletePrefix(s3Prefix);
+    } catch (error) {
+      logger.warn({ jobId, s3Prefix, error }, 'Failed to delete S3 artifacts, proceeding with DB deletion');
+    }
+
     // Delete job (cascades to related records)
     await db.delete(schema.jobs).where(eq(schema.jobs.id, jobId));
 
     logger.info({ jobId, userId }, 'Job deleted');
+  }
+
+  /**
+   * Delete a specific commercial image variant from a completed job
+   * @param jobId - The job ID
+   * @param userId - The user ID to verify ownership
+   * @param frameId - The frame/product key in commercialImages
+   * @param version - The variant name (e.g. "white-studio", "lifestyle")
+   */
+  async deleteJobImage(
+    jobId: string,
+    userId: string,
+    frameId: string,
+    version: string
+  ): Promise<Record<string, Record<string, string>>> {
+    const db = getDatabase();
+
+    const [job] = await db
+      .select()
+      .from(schema.jobs)
+      .where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.userId, userId)))
+      .limit(1);
+
+    if (!job) {
+      throw new NotFoundError(`Job ${jobId} not found`);
+    }
+
+    if (job.status !== 'completed') {
+      throw new BadRequestError('Can only delete images from completed jobs');
+    }
+
+    if (!job.result) {
+      throw new BadRequestError('Job has no result data');
+    }
+
+    const commercialImages = (job.result.commercialImages || {}) as Record<string, Record<string, string>>;
+    const frameImages = commercialImages[frameId];
+    if (!frameImages || typeof frameImages !== 'object' || typeof frameImages[version] !== 'string') {
+      throw new NotFoundError(`Image variant '${version}' not found for frame '${frameId}'`);
+    }
+
+    // Delete from S3
+    const imageUrl = frameImages[version];
+    const config = getConfig();
+    const s3Key = extractS3KeyFromUrl(imageUrl, config.storage, { allowAnyHost: true });
+    if (s3Key) {
+      await storageService.deleteFile(s3Key);
+    } else {
+      logger.warn({ imageUrl, frameId, version }, 'Could not extract S3 key from image URL, S3 artifact may be orphaned');
+    }
+
+    // Remove from result and update DB
+    delete frameImages[version];
+    // If no versions left for this frame, remove the frame entry
+    if (Object.keys(frameImages).length === 0) {
+      delete commercialImages[frameId];
+    }
+
+    await db
+      .update(schema.jobs)
+      .set({
+        result: { ...job.result, commercialImages },
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.jobs.id, jobId));
+
+    logger.info({ jobId, frameId, version }, 'Commercial image variant deleted');
+
+    return commercialImages;
   }
 
   /**
