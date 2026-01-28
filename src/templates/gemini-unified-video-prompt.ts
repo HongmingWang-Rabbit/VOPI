@@ -121,7 +121,12 @@ Return a JSON object with this EXACT structure:
         "unit": "lb"
       },
       "care_instructions": ["Care instruction if mentioned"],
-      "warnings": ["Warning if mentioned"]
+      "warnings": ["Warning if mentioned"],
+      "gender": "Men/Women/Unisex if mentioned",
+      "target_audience": "adults/teens/children if mentioned",
+      "age_group": "adult/child/infant if mentioned",
+      "style": "casual/formal/athletic if mentioned",
+      "model_number": "Model number if mentioned"
     },
     "confidence": {
       "overall": 85,

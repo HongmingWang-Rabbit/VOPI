@@ -392,6 +392,13 @@ export class GeminiAudioAnalysisProvider implements AudioAnalysisProvider {
       };
     }
 
+    // Add demographics and style fields
+    productMetadata.gender = this.nullToUndefined(product.gender);
+    productMetadata.targetAudience = this.nullToUndefined(product.targetAudience);
+    productMetadata.ageGroup = this.nullToUndefined(product.ageGroup);
+    productMetadata.style = this.nullToUndefined(product.style);
+    productMetadata.modelNumber = this.nullToUndefined(product.modelNumber);
+
     return {
       transcript: response.transcript,
       language: response.language || 'en',

@@ -445,8 +445,11 @@ interface ProductMetadata {
 
   // Brand & classification
   brand?: string;
+  manufacturer?: string;
+  countryOfOrigin?: string;
   category?: string;
   subcategory?: string;
+  productType?: string;
   keywords?: string[];
   tags?: string[];
 
@@ -454,12 +457,22 @@ interface ProductMetadata {
   materials?: string[];
   color?: string;
   colors?: string[];
+  pattern?: string;
   size?: string;
   sizes?: string[];
 
   // Pricing (if mentioned in audio)
   price?: number;
   currency?: string;
+  compareAtPrice?: number;
+  costPerItem?: number;
+
+  // Demographics
+  gender?: string;          // "Men", "Women", "Unisex"
+  targetAudience?: string;  // "adults", "teens", "children"
+  ageGroup?: string;        // "adult", "child", "infant"
+  style?: string;           // "casual", "formal", "athletic"
+  modelNumber?: string;     // Separate from MPN
 
   // Confidence tracking
   confidence: {
@@ -480,11 +493,13 @@ interface ProductMetadata {
 
 The provider includes helper functions to format metadata for specific platforms:
 
-| Function | Output Format |
-|----------|---------------|
-| `formatForShopify()` | Shopify GraphQL `productCreate` format |
-| `formatForAmazon()` | SP-API Listings Items JSON |
-| `formatForEbay()` | eBay Inventory API format |
+| Function | Output Format | Key Mappings |
+|----------|---------------|--------------|
+| `formatForShopify()` | Shopify GraphQL `productCreate` format | Adds `metafields` for materials, care instructions, gender |
+| `formatForAmazon()` | SP-API Listings Items JSON | Maps `gender` → `department`, `targetAudience` → `target_audience_keyword`, `price` → `standard_price` |
+| `formatForEbay()` | eBay Inventory API format | Adds `Gender`, `Style`, `Age Group`, `Pattern` aspects; maps `price` → `pricingSummary` |
+
+Currency defaults to `USD` when not specified in Amazon and eBay formatters.
 
 ### Configuration
 

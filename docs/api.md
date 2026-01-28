@@ -1171,6 +1171,156 @@ Get presigned download URLs for job assets. Since the S3 bucket is private, this
 
 ---
 
+### GET /api/v1/jobs/:id/metadata
+
+Get product metadata extracted from audio analysis. Returns the universal product metadata along with platform-specific formatted versions for Shopify, Amazon, and eBay.
+
+**Response** `200 OK`
+```json
+{
+  "transcript": "This is a premium leather wallet...",
+  "product": {
+    "title": "Premium Leather Bifold Wallet with RFID Protection",
+    "description": "Full product description...",
+    "shortDescription": "Slim RFID-blocking leather wallet",
+    "bulletPoints": ["Genuine full-grain leather", "RFID protection"],
+    "brand": "WalletCo",
+    "category": "Accessories",
+    "materials": ["leather"],
+    "color": "Brown",
+    "price": 49.99,
+    "currency": "USD",
+    "gender": "Men",
+    "targetAudience": "adults",
+    "ageGroup": "adult",
+    "style": "casual",
+    "modelNumber": "WC-BF-100",
+    "confidence": {
+      "overall": 85,
+      "title": 90,
+      "description": 80
+    },
+    "extractedFromAudio": true
+  },
+  "platforms": {
+    "shopify": { "title": "...", "descriptionHtml": "...", "metafields": [] },
+    "amazon": { "item_name": "...", "department": "Men", "standard_price": {} },
+    "ebay": { "title": "...", "aspects": {}, "pricingSummary": {} }
+  },
+  "extractedAt": "2026-01-28T10:00:00.000Z",
+  "audioDuration": 45.5,
+  "pipelineVersion": "2.1.0"
+}
+```
+
+**Response** `404 Not Found`
+```json
+{
+  "error": "NOT_FOUND",
+  "message": "Job has no product metadata. Metadata is only available for jobs processed with audio analysis."
+}
+```
+
+---
+
+### PATCH /api/v1/jobs/:id/metadata
+
+Update product metadata for a job. Users can edit AI-extracted fields before uploading to e-commerce platforms. Returns the updated metadata with re-formatted platform outputs.
+
+**Request Body** (all fields optional, at least one required)
+
+```json
+{
+  "title": "Updated Product Title",
+  "description": "Updated description",
+  "shortDescription": "Updated summary",
+  "bulletPoints": ["Feature 1", "Feature 2"],
+  "brand": "BrandName",
+  "category": "Electronics",
+  "subcategory": "Accessories",
+  "materials": ["cotton", "polyester"],
+  "color": "Blue",
+  "colors": ["Blue", "Red"],
+  "size": "Medium",
+  "sizes": ["S", "M", "L"],
+  "keywords": ["keyword1", "keyword2"],
+  "tags": ["tag1", "tag2"],
+  "price": 29.99,
+  "currency": "USD",
+  "sku": "SKU-123",
+  "barcode": "012345678901",
+  "condition": "new",
+  "careInstructions": ["Machine wash cold"],
+  "warnings": ["Keep away from heat"],
+  "compareAtPrice": 39.99,
+  "costPerItem": 12.50,
+  "countryOfOrigin": "USA",
+  "manufacturer": "Acme Corp",
+  "pattern": "striped",
+  "productType": "T-Shirt",
+  "gender": "Women",
+  "targetAudience": "adults",
+  "ageGroup": "adult",
+  "style": "casual",
+  "modelNumber": "AC-100"
+}
+```
+
+| Field | Type | Validation |
+|-------|------|------------|
+| `title` | string | 1-500 chars |
+| `description` | string | max 10000 chars |
+| `shortDescription` | string | max 500 chars |
+| `bulletPoints` | string[] | max 10 items, 500 chars each |
+| `brand` | string | max 100 chars |
+| `category` | string | max 100 chars |
+| `subcategory` | string | max 100 chars |
+| `materials` | string[] | max 20 items |
+| `color` | string | max 50 chars |
+| `colors` | string[] | max 20 items |
+| `size` | string | max 50 chars |
+| `sizes` | string[] | max 20 items |
+| `keywords` | string[] | max 50 items |
+| `tags` | string[] | max 50 items |
+| `price` | number | >= 0 |
+| `currency` | string | exactly 3 chars (ISO 4217) |
+| `sku` | string | max 100 chars |
+| `barcode` | string | max 50 chars |
+| `condition` | string | `new`, `refurbished`, `used`, `open_box` |
+| `careInstructions` | string[] | max 10 items |
+| `warnings` | string[] | max 10 items |
+| `compareAtPrice` | number | >= 0 |
+| `costPerItem` | number | >= 0 |
+| `countryOfOrigin` | string | max 100 chars |
+| `manufacturer` | string | max 200 chars |
+| `pattern` | string | max 100 chars |
+| `productType` | string | max 100 chars |
+| `gender` | string | max 50 chars |
+| `targetAudience` | string | max 100 chars |
+| `ageGroup` | string | max 50 chars |
+| `style` | string | max 100 chars |
+| `modelNumber` | string | max 100 chars |
+
+**Response** `200 OK` — Same format as `GET /api/v1/jobs/:id/metadata` with updated values and re-formatted platform outputs.
+
+**Response** `400 Bad Request`
+```json
+{
+  "error": "BAD_REQUEST",
+  "message": "No fields to update. Provide at least one field to update."
+}
+```
+
+**Response** `404 Not Found`
+```json
+{
+  "error": "NOT_FOUND",
+  "message": "Job has no product metadata. Metadata is only available for jobs processed with audio analysis."
+}
+```
+
+---
+
 ## Upload Endpoints
 
 ### POST /api/v1/uploads/presign

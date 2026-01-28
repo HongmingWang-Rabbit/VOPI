@@ -103,9 +103,10 @@ Google Gemini analyzes candidate frames to:
 
 VOPI can extract and analyze audio from product videos to generate structured e-commerce metadata:
 - **Transcription** - Full transcript using Gemini 2.0 Flash
-- **Metadata extraction** - Title, description, bullet points, materials, colors, sizes
-- **Platform formatting** - Auto-convert to Shopify, Amazon, and eBay listing formats
+- **Metadata extraction** - Title, description, bullet points, materials, colors, sizes, gender, target audience, age group, style, model number
+- **Platform formatting** - Auto-convert to Shopify (with metafields), Amazon SP-API, and eBay Inventory API listing formats
 - **Confidence scores** - Per-field confidence ratings for extracted data
+- **User editing** - PATCH endpoint allows editing metadata before e-commerce upload
 
 The extracted metadata is stored directly in the database's `product_metadata` JSONB column, including the transcript and platform-specific formatted data for Shopify, Amazon, and eBay.
 

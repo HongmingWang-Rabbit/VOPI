@@ -121,6 +121,11 @@ interface GeminiUnifiedVideoResponse {
       };
       care_instructions?: string[];
       warnings?: string[];
+      gender?: string;
+      target_audience?: string;
+      age_group?: string;
+      style?: string;
+      model_number?: string;
     };
     confidence?: {
       overall: number;
@@ -519,6 +524,13 @@ export class GeminiUnifiedVideoAnalyzerProvider implements UnifiedVideoAnalyzerP
           unit: validateWeightUnit(p.weight.unit),
         };
       }
+
+      // Add demographics and style fields
+      if (p.gender) productMetadata.gender = p.gender;
+      if (p.target_audience) productMetadata.targetAudience = p.target_audience;
+      if (p.age_group) productMetadata.ageGroup = p.age_group;
+      if (p.style) productMetadata.style = p.style;
+      if (p.model_number) productMetadata.modelNumber = p.model_number;
 
       result.productMetadata = productMetadata;
       result.confidence = audio.confidence;

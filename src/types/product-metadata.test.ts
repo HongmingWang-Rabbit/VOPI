@@ -184,6 +184,58 @@ describe('product-metadata types', () => {
       expect(result.options).toContain('Color');
       expect(result.options).toContain('Size');
     });
+
+    it('should add metafields for materials', () => {
+      const result = formatForShopify({
+        ...baseMetadata,
+        materials: ['Cotton', 'Polyester'],
+      });
+
+      expect(result.metafields).toBeDefined();
+      const materialsMeta = result.metafields!.find(m => m.key === 'materials');
+      expect(materialsMeta).toEqual({
+        namespace: 'custom',
+        key: 'materials',
+        value: JSON.stringify(['Cotton', 'Polyester']),
+        type: 'list.single_line_text_field',
+      });
+    });
+
+    it('should add metafields for care instructions', () => {
+      const result = formatForShopify({
+        ...baseMetadata,
+        careInstructions: ['Machine wash cold', 'Tumble dry low'],
+      });
+
+      const careMeta = result.metafields!.find(m => m.key === 'care_instructions');
+      expect(careMeta).toEqual({
+        namespace: 'custom',
+        key: 'care_instructions',
+        value: JSON.stringify(['Machine wash cold', 'Tumble dry low']),
+        type: 'list.single_line_text_field',
+      });
+    });
+
+    it('should add metafield for gender', () => {
+      const result = formatForShopify({
+        ...baseMetadata,
+        gender: 'Women',
+      });
+
+      const genderMeta = result.metafields!.find(m => m.key === 'gender');
+      expect(genderMeta).toEqual({
+        namespace: 'custom',
+        key: 'gender',
+        value: 'Women',
+        type: 'single_line_text_field',
+      });
+    });
+
+    it('should not add metafields when no filterable attributes exist', () => {
+      const result = formatForShopify(baseMetadata);
+
+      expect(result.metafields).toBeUndefined();
+    });
   });
 
   describe('formatForAmazon', () => {
@@ -270,6 +322,57 @@ describe('product-metadata types', () => {
       expect(result.warranty_description).toBe('1 year warranty');
       expect(result.batteries_required).toBe(true);
       expect(result.are_batteries_included).toBe(false);
+    });
+
+    it('should include standard_price with currency', () => {
+      const result = formatForAmazon({
+        ...baseMetadata,
+        price: 49.99,
+        currency: 'EUR',
+      });
+
+      expect(result.standard_price).toEqual({ value: 49.99, currency: 'EUR' });
+    });
+
+    it('should default currency to USD for standard_price', () => {
+      const result = formatForAmazon({
+        ...baseMetadata,
+        price: 29.99,
+      });
+
+      expect(result.standard_price).toEqual({ value: 29.99, currency: 'USD' });
+    });
+
+    it('should map demographics and style fields', () => {
+      const result = formatForAmazon({
+        ...baseMetadata,
+        gender: 'Women',
+        targetAudience: 'adults',
+        ageGroup: 'adult',
+        modelNumber: 'XY-100',
+        style: 'casual',
+        size: 'Medium',
+        pattern: 'striped',
+      });
+
+      expect(result.department).toBe('Women');
+      expect(result.target_audience_keyword).toEqual(['adults']);
+      expect(result.age_range_description).toBe('adult');
+      expect(result.model_number).toBe('XY-100');
+      expect(result.style).toBe('casual');
+      expect(result.size).toBe('Medium');
+      expect(result.pattern).toBe('striped');
+    });
+
+    it('should omit demographics fields when not provided', () => {
+      const result = formatForAmazon(baseMetadata);
+
+      expect(result.department).toBeUndefined();
+      expect(result.target_audience_keyword).toBeUndefined();
+      expect(result.age_range_description).toBeUndefined();
+      expect(result.model_number).toBeUndefined();
+      expect(result.style).toBeUndefined();
+      expect(result.standard_price).toBeUndefined();
     });
 
     it('should handle missing optional fields gracefully', () => {
@@ -411,6 +514,60 @@ describe('product-metadata types', () => {
         value: 0.5,
         unit: 'KILOGRAM',
       });
+    });
+
+    it('should add demographics aspects', () => {
+      const result = formatForEbay({
+        ...baseMetadata,
+        gender: 'Men',
+        style: 'athletic',
+        ageGroup: 'adult',
+        pattern: 'solid',
+      });
+
+      expect(result.aspects?.['Gender']).toEqual(['Men']);
+      expect(result.aspects?.['Style']).toEqual(['athletic']);
+      expect(result.aspects?.['Age Group']).toEqual(['adult']);
+      expect(result.aspects?.['Pattern']).toEqual(['solid']);
+    });
+
+    it('should not overwrite demographics aspects from itemSpecifics', () => {
+      const result = formatForEbay({
+        ...baseMetadata,
+        gender: 'Unisex',
+        itemSpecifics: { 'Gender': 'Men' },
+      });
+
+      expect(result.aspects?.['Gender']).toEqual(['Men']);
+    });
+
+    it('should add pricingSummary when price is present', () => {
+      const result = formatForEbay({
+        ...baseMetadata,
+        price: 39.99,
+        currency: 'GBP',
+      });
+
+      expect(result.pricingSummary).toEqual({
+        price: { value: '39.99', currency: 'GBP' },
+      });
+    });
+
+    it('should default pricingSummary currency to USD', () => {
+      const result = formatForEbay({
+        ...baseMetadata,
+        price: 19.99,
+      });
+
+      expect(result.pricingSummary).toEqual({
+        price: { value: '19.99', currency: 'USD' },
+      });
+    });
+
+    it('should not add pricingSummary when price is absent', () => {
+      const result = formatForEbay(baseMetadata);
+
+      expect(result.pricingSummary).toBeUndefined();
     });
   });
 
@@ -633,6 +790,45 @@ describe('product-metadata types', () => {
         };
         const result = geminiAudioAnalysisResponseSchema.safeParse(invalid);
         expect(result.success).toBe(false);
+      });
+
+      it('should accept new demographics fields', () => {
+        const withDemographics = {
+          ...validResponse,
+          product: {
+            ...validResponse.product,
+            gender: 'Women',
+            targetAudience: 'adults',
+            ageGroup: 'adult',
+            style: 'casual',
+            modelNumber: 'ABC-123',
+          },
+        };
+        const result = geminiAudioAnalysisResponseSchema.safeParse(withDemographics);
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.product.gender).toBe('Women');
+          expect(result.data.product.targetAudience).toBe('adults');
+          expect(result.data.product.ageGroup).toBe('adult');
+          expect(result.data.product.style).toBe('casual');
+          expect(result.data.product.modelNumber).toBe('ABC-123');
+        }
+      });
+
+      it('should accept null values for demographics fields', () => {
+        const withNulls = {
+          ...validResponse,
+          product: {
+            ...validResponse.product,
+            gender: null,
+            targetAudience: null,
+            ageGroup: null,
+            style: null,
+            modelNumber: null,
+          },
+        };
+        const result = geminiAudioAnalysisResponseSchema.safeParse(withNulls);
+        expect(result.success).toBe(true);
       });
     });
 

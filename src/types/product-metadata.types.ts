@@ -150,6 +150,18 @@ export interface ProductMetadata {
   condition?: 'new' | 'refurbished' | 'used' | 'open_box';
   conditionDescription?: string;
 
+  // === DEMOGRAPHICS ===
+  /** Gender/department (e.g., "Men", "Women", "Unisex") */
+  gender?: string;
+  /** Target audience (e.g., "adults", "teens") */
+  targetAudience?: string;
+  /** Age group (e.g., "adult", "child", "infant") */
+  ageGroup?: string;
+  /** Style (e.g., "casual", "formal", "athletic") */
+  style?: string;
+  /** Model number (separate from MPN) */
+  modelNumber?: string;
+
   // === IDENTIFIERS ===
   sku?: string;
   /** UPC, EAN, ISBN barcode */
@@ -268,6 +280,22 @@ export interface AmazonListingInput {
   batteries_required?: boolean;
   /** Batteries included */
   are_batteries_included?: boolean;
+  /** Pricing */
+  standard_price?: { value: number; currency: string };
+  /** Gender/department */
+  department?: string;
+  /** Target audience keywords */
+  target_audience_keyword?: string[];
+  /** Age range description */
+  age_range_description?: string;
+  /** Model number */
+  model_number?: string;
+  /** Style */
+  style?: string;
+  /** Size */
+  size?: string;
+  /** Pattern */
+  pattern?: string;
 }
 
 /**
@@ -294,6 +322,10 @@ export interface EbayListingInput {
     upc?: string[];
     ean?: string[];
     isbn?: string[];
+  };
+  /** Pricing summary for fixed-price listings */
+  pricingSummary?: {
+    price: { value: string; currency: string };
   };
   /** Package weight and dimensions */
   packageWeightAndSize?: {
@@ -447,6 +479,11 @@ export const geminiAudioAnalysisResponseSchema = z.object({
     }).nullish(),
     careInstructions: z.array(z.string()).nullish(),
     warnings: z.array(z.string()).nullish(),
+    gender: z.string().nullish(),
+    targetAudience: z.string().nullish(),
+    ageGroup: z.string().nullish(),
+    style: z.string().nullish(),
+    modelNumber: z.string().nullish(),
   }),
   confidence: z.object({
     overall: z.number().min(0).max(100),
@@ -521,6 +558,36 @@ export function formatForShopify(metadata: ProductMetadata): ShopifyProductInput
     shopify.options = [...(shopify.options || []), 'Size'];
   }
 
+  // Add metafields for filterable attributes
+  const metafields: ShopifyProductInput['metafields'] = [];
+  if (metadata.materials && metadata.materials.length > 0) {
+    metafields.push({
+      namespace: 'custom',
+      key: 'materials',
+      value: JSON.stringify(metadata.materials),
+      type: 'list.single_line_text_field',
+    });
+  }
+  if (metadata.careInstructions && metadata.careInstructions.length > 0) {
+    metafields.push({
+      namespace: 'custom',
+      key: 'care_instructions',
+      value: JSON.stringify(metadata.careInstructions),
+      type: 'list.single_line_text_field',
+    });
+  }
+  if (metadata.gender) {
+    metafields.push({
+      namespace: 'custom',
+      key: 'gender',
+      value: metadata.gender,
+      type: 'single_line_text_field',
+    });
+  }
+  if (metafields.length > 0) {
+    shopify.metafields = metafields;
+  }
+
   return shopify;
 }
 
@@ -591,6 +658,20 @@ export function formatForAmazon(metadata: ProductMetadata): AmazonListingInput {
   amazon.batteries_required = metadata.batteriesRequired;
   amazon.are_batteries_included = metadata.batteriesIncluded;
 
+  // Add pricing (default currency to USD if not specified)
+  if (metadata.price !== undefined) {
+    amazon.standard_price = { value: metadata.price, currency: metadata.currency || 'USD' };
+  }
+
+  // Add demographics and style fields
+  if (metadata.gender) amazon.department = metadata.gender;
+  if (metadata.targetAudience) amazon.target_audience_keyword = [metadata.targetAudience];
+  if (metadata.ageGroup) amazon.age_range_description = metadata.ageGroup;
+  if (metadata.modelNumber) amazon.model_number = metadata.modelNumber;
+  if (metadata.style) amazon.style = metadata.style;
+  if (metadata.size) amazon.size = metadata.size;
+  if (metadata.pattern) amazon.pattern = metadata.pattern;
+
   return amazon;
 }
 
@@ -653,9 +734,28 @@ export function formatForEbay(metadata: ProductMetadata): EbayListingInput {
   if (metadata.size && !aspects['Size']) {
     aspects['Size'] = [metadata.size];
   }
+  if (metadata.gender && !aspects['Gender']) {
+    aspects['Gender'] = [metadata.gender];
+  }
+  if (metadata.style && !aspects['Style']) {
+    aspects['Style'] = [metadata.style];
+  }
+  if (metadata.ageGroup && !aspects['Age Group']) {
+    aspects['Age Group'] = [metadata.ageGroup];
+  }
+  if (metadata.pattern && !aspects['Pattern']) {
+    aspects['Pattern'] = [metadata.pattern];
+  }
 
   if (Object.keys(aspects).length > 0) {
     ebay.aspects = aspects;
+  }
+
+  // Add pricing (default currency to USD if not specified)
+  if (metadata.price !== undefined) {
+    ebay.pricingSummary = {
+      price: { value: metadata.price.toFixed(2), currency: metadata.currency || 'USD' },
+    };
   }
 
   // Add product identifiers
