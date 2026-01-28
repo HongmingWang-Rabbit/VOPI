@@ -17,8 +17,8 @@ const jobIdParamsSchema = z.object({
 });
 
 const imageDeleteParamsSchema = jobIdParamsSchema.extend({
-  frameId: z.string(),
-  version: z.string(),
+  frameId: z.string().regex(/^[\w\-.]+$/, 'Invalid frameId format'),
+  version: z.string().regex(/^[\w\-.]+$/, 'Invalid version format'),
 });
 
 const presignBodySchema = z.object({
@@ -98,7 +98,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
               id: { type: 'string' },
               status: { type: 'string' },
               videoUrl: { type: 'string' },
-              config: { type: 'object' },
+              config: { type: 'object', additionalProperties: true },
               createdAt: { type: 'string' },
             },
           },
@@ -156,7 +156,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
                     id: { type: 'string' },
                     status: { type: 'string' },
                     videoUrl: { type: 'string' },
-                    progress: { type: 'object' },
+                    progress: { type: 'object', additionalProperties: true },
                     createdAt: { type: 'string' },
                     updatedAt: { type: 'string' },
                   },
@@ -199,9 +199,9 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
               id: { type: 'string' },
               status: { type: 'string' },
               videoUrl: { type: 'string' },
-              config: { type: 'object' },
-              progress: { type: 'object' },
-              result: { type: 'object' },
+              config: { type: 'object', additionalProperties: true },
+              progress: { type: 'object', additionalProperties: true },
+              result: { type: 'object', additionalProperties: true },
               error: { type: 'string' },
               createdAt: { type: 'string' },
               updatedAt: { type: 'string' },
@@ -242,7 +242,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
             properties: {
               id: { type: 'string' },
               status: { type: 'string' },
-              progress: { type: 'object' },
+              progress: { type: 'object', additionalProperties: true },
               createdAt: { type: 'string' },
               updatedAt: { type: 'string' },
             },
@@ -349,7 +349,7 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
           200: {
             type: 'object',
             properties: {
-              commercialImages: { type: 'object' },
+              commercialImages: { type: 'object', additionalProperties: true },
             },
           },
         },
@@ -421,12 +421,10 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
                   additionalProperties: { type: 'string' },
                 },
               },
-              metadata: {
+              productMetadata: {
                 type: 'object',
                 nullable: true,
-                properties: {
-                  downloadUrl: { type: 'string' },
-                },
+                additionalProperties: true,
               },
             },
           },
@@ -531,13 +529,14 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
             type: 'object',
             properties: {
               transcript: { type: 'string' },
-              product: { type: 'object' },
+              product: { type: 'object', additionalProperties: true },
               platforms: {
                 type: 'object',
+                additionalProperties: true,
                 properties: {
-                  shopify: { type: 'object' },
-                  amazon: { type: 'object' },
-                  ebay: { type: 'object' },
+                  shopify: { type: 'object', additionalProperties: true },
+                  amazon: { type: 'object', additionalProperties: true },
+                  ebay: { type: 'object', additionalProperties: true },
                 },
               },
               extractedAt: { type: 'string' },
@@ -619,13 +618,14 @@ export async function jobsRoutes(fastify: FastifyInstance): Promise<void> {
             type: 'object',
             properties: {
               transcript: { type: 'string' },
-              product: { type: 'object' },
+              product: { type: 'object', additionalProperties: true },
               platforms: {
                 type: 'object',
+                additionalProperties: true,
                 properties: {
-                  shopify: { type: 'object' },
-                  amazon: { type: 'object' },
-                  ebay: { type: 'object' },
+                  shopify: { type: 'object', additionalProperties: true },
+                  amazon: { type: 'object', additionalProperties: true },
+                  ebay: { type: 'object', additionalProperties: true },
                 },
               },
               extractedAt: { type: 'string' },

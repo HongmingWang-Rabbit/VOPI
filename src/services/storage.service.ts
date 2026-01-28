@@ -341,7 +341,7 @@ export class StorageService {
           ContinuationToken: continuationToken,
         })
       );
-      keys.push(...(response.Contents || []).map((obj) => obj.Key!).filter(Boolean));
+      keys.push(...(response.Contents || []).map((obj) => obj.Key).filter((key): key is string => !!key));
       continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
     } while (continuationToken);
 
@@ -460,7 +460,7 @@ export class StorageService {
     const batchSize = 1000;
     for (let i = 0; i < keys.length; i += batchSize) {
       const batch = keys.slice(i, i + batchSize);
-      await client.send(
+      const response = await client.send(
         new DeleteObjectsCommand({
           Bucket: bucket,
           Delete: {
@@ -469,6 +469,9 @@ export class StorageService {
           },
         })
       );
+      if (response.Errors && response.Errors.length > 0) {
+        logger.warn({ prefix, errorCount: response.Errors.length, errors: response.Errors.slice(0, 5) }, 'Some S3 objects failed to delete');
+      }
     }
 
     logger.info({ prefix, count: keys.length }, 'Deleted all objects under prefix');

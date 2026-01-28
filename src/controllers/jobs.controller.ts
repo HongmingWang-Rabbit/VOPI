@@ -355,17 +355,10 @@ export class JobsController {
       throw new NotFoundError(`Image variant '${version}' not found for frame '${frameId}'`);
     }
 
-    // Delete from S3
-    const imageUrl = frameImages[version];
-    const config = getConfig();
-    const s3Key = extractS3KeyFromUrl(imageUrl, config.storage, { allowAnyHost: true });
-    if (s3Key) {
-      await storageService.deleteFile(s3Key);
-    } else {
-      logger.warn({ imageUrl, frameId, version }, 'Could not extract S3 key from image URL, S3 artifact may be orphaned');
-    }
+    // Capture URL before removing from the map
+    const imageUrlForCleanup = frameImages[version];
 
-    // Remove from result and update DB
+    // Remove from result and update DB first to ensure consistency
     delete frameImages[version];
     // If no versions left for this frame, remove the frame entry
     if (Object.keys(frameImages).length === 0) {
@@ -379,6 +372,20 @@ export class JobsController {
         updatedAt: new Date(),
       })
       .where(eq(schema.jobs.id, jobId));
+
+    // Best-effort S3 cleanup after DB update
+    const imageUrl = imageUrlForCleanup;
+    const config = getConfig();
+    const s3Key = extractS3KeyFromUrl(imageUrl, config.storage, { allowAnyHost: true });
+    if (s3Key) {
+      try {
+        await storageService.deleteFile(s3Key);
+      } catch (error) {
+        logger.warn({ jobId, frameId, version, s3Key, error }, 'Failed to delete S3 artifact, may be orphaned');
+      }
+    } else {
+      logger.warn({ imageUrl, frameId, version }, 'Could not extract S3 key from image URL, S3 artifact may be orphaned');
+    }
 
     logger.info({ jobId, frameId, version }, 'Commercial image variant deleted');
 
