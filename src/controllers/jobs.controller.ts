@@ -376,6 +376,29 @@ export class JobsController {
       })
       .where(eq(schema.jobs.id, jobId));
 
+    // Delete the commercial_images DB row (best-effort)
+    try {
+      const [frame] = await db
+        .select({ id: schema.frames.id })
+        .from(schema.frames)
+        .where(and(eq(schema.frames.jobId, jobId), eq(schema.frames.frameId, frameId)))
+        .limit(1);
+
+      if (frame) {
+        await db
+          .delete(schema.commercialImages)
+          .where(
+            and(
+              eq(schema.commercialImages.jobId, jobId),
+              eq(schema.commercialImages.frameId, frame.id),
+              eq(schema.commercialImages.version, version)
+            )
+          );
+      }
+    } catch (error) {
+      logger.warn({ jobId, frameId, version, error }, 'Failed to delete commercial_images DB row');
+    }
+
     // Best-effort S3 cleanup after DB update
     const imageUrl = imageUrlForCleanup;
     const config = getConfig();
