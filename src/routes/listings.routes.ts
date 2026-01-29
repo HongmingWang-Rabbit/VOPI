@@ -49,7 +49,7 @@ async function executePush(params: {
   };
   job: {
     productMetadata: { product?: Record<string, unknown> } | null;
-    result?: { finalFrames?: string[] } | null;
+    result?: { finalFrames?: string[]; commercialImages?: Record<string, Record<string, string>> } | null;
   };
   options?: {
     publishAsDraft?: boolean;
@@ -127,8 +127,27 @@ async function executePush(params: {
     }
 
     // Upload images if not skipped
-    if (!options?.skipImages && job.result?.finalFrames?.length) {
-      const rawUrls = job.result.finalFrames.slice(0, 10); // Limit to 10 images
+    // Prefer commercial images (processed with backgrounds removed, lifestyle shots, etc.)
+    // over raw finalFrames (unprocessed video frames)
+    let rawUrls: string[] = [];
+    if (!options?.skipImages) {
+      const commercialImages = job.result?.commercialImages;
+      if (commercialImages && Object.keys(commercialImages).length > 0) {
+        // Extract all commercial image URLs, flatten frameId -> variant -> url
+        for (const variants of Object.values(commercialImages)) {
+          for (const url of Object.values(variants)) {
+            rawUrls.push(url);
+          }
+        }
+        rawUrls = rawUrls.slice(0, 10);
+        logger.info({ imageCount: rawUrls.length }, 'Using commercial images for listing push');
+      } else if (job.result?.finalFrames?.length) {
+        rawUrls = job.result.finalFrames.slice(0, 10);
+        logger.info({ imageCount: rawUrls.length }, 'No commercial images, falling back to raw frames');
+      }
+    }
+
+    if (rawUrls.length > 0) {
 
       // Convert private S3 URLs to presigned public URLs so Shopify/platforms can fetch them
       const config = getConfig();
@@ -345,7 +364,7 @@ export async function listingsRoutes(fastify: FastifyInstance): Promise<void> {
         },
         job: {
           productMetadata,
-          result: job.result as { finalFrames?: string[] } | null,
+          result: job.result as { finalFrames?: string[]; commercialImages?: Record<string, Record<string, string>> } | null,
         },
         options: body.options,
       });
@@ -679,7 +698,7 @@ export async function listingsRoutes(fastify: FastifyInstance): Promise<void> {
         },
         job: {
           productMetadata,
-          result: job.result as { finalFrames?: string[] } | null,
+          result: job.result as { finalFrames?: string[]; commercialImages?: Record<string, Record<string, string>> } | null,
         },
         options: {
           publishAsDraft: true,
