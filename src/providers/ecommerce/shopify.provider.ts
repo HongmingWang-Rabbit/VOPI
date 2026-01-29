@@ -9,11 +9,6 @@ import { SHOPIFY_API_VERSION } from '../../utils/constants.js';
 
 const logger = getLogger().child({ provider: 'shopify-ecommerce' });
 
-interface ShopifyMediaInput {
-  originalSource: string;
-  mediaContentType: 'IMAGE';
-}
-
 interface ProductSetResponse {
   productSet: {
     product?: { id: string; handle: string; onlineStoreUrl?: string };
@@ -304,7 +299,117 @@ class ShopifyProvider implements EcommerceProvider {
   }
 
   /**
-   * Upload images to a product
+   * Create staged uploads for images via Shopify's stagedUploadsCreate mutation.
+   * Returns resourceUrls that can be used as originalSource in productCreateMedia.
+   */
+  private async createStagedUploads(
+    shop: string,
+    accessToken: string,
+    imageUrls: string[]
+  ): Promise<Array<{ resourceUrl: string; uploadUrl: string; parameters: Array<{ name: string; value: string }> } | null>> {
+    const mutation = `
+      mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+        stagedUploadsCreate(input: $input) {
+          stagedTargets {
+            resourceUrl
+            url
+            parameters {
+              name
+              value
+            }
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const input = imageUrls.map((_, i) => ({
+      resource: 'IMAGE' as const,
+      filename: `product_image_${i}.png`,
+      mimeType: 'image/png',
+      httpMethod: 'POST' as const,
+    }));
+
+    const result = await this.graphqlRequest(shop, accessToken, mutation, { input }) as {
+      stagedUploadsCreate: {
+        stagedTargets: Array<{
+          resourceUrl: string;
+          url: string;
+          parameters: Array<{ name: string; value: string }>;
+        }>;
+        userErrors: Array<{ field: string[]; message: string }>;
+      };
+    };
+
+    if (result.stagedUploadsCreate.userErrors.length > 0) {
+      const errors = result.stagedUploadsCreate.userErrors.map((e) => e.message).join(', ');
+      throw new Error(`Staged upload creation failed: ${errors}`);
+    }
+
+    return result.stagedUploadsCreate.stagedTargets.map((target) => ({
+      resourceUrl: target.resourceUrl,
+      uploadUrl: target.url,
+      parameters: target.parameters,
+    }));
+  }
+
+  /**
+   * Upload a single image to a Shopify staged upload target.
+   * Downloads from source URL, then uploads to Shopify's staging storage.
+   */
+  private async uploadToStagedTarget(
+    sourceUrl: string,
+    target: { uploadUrl: string; parameters: Array<{ name: string; value: string }> }
+  ): Promise<void> {
+    // Download the image from our S3
+    const imageResponse = await fetch(sourceUrl);
+    if (!imageResponse.ok) {
+      throw new Error(`Failed to download image from ${sourceUrl}: ${imageResponse.status}`);
+    }
+    const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+
+    // Build multipart form data for Shopify's staged upload
+    const boundary = `----FormBoundary${Date.now()}`;
+    const parts: Buffer[] = [];
+
+    for (const param of target.parameters) {
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${param.name}"\r\n\r\n${param.value}\r\n`
+      ));
+    }
+
+    // Add the file part
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="image.png"\r\nContent-Type: image/png\r\n\r\n`
+    ));
+    parts.push(imageBuffer);
+    parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+    const body = Buffer.concat(parts);
+
+    const uploadResponse = await fetch(target.uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length.toString(),
+      },
+      body,
+    });
+
+    if (!uploadResponse.ok) {
+      const errorText = await uploadResponse.text();
+      throw new Error(`Staged upload failed (${uploadResponse.status}): ${errorText}`);
+    }
+  }
+
+  /**
+   * Upload images to a product using Shopify's staged upload flow.
+   * 1. Create staged upload targets
+   * 2. Download images from source and upload to staged targets
+   * 3. Attach staged images to product via productCreateMedia
    */
   async uploadImages(
     accessToken: string,
@@ -320,13 +425,42 @@ class ShopifyProvider implements EcommerceProvider {
     try {
       logger.debug(
         { shop, productId, imageCount: imageUrls.length },
-        'Uploading images to Shopify product'
+        'Uploading images to Shopify product via staged uploads'
       );
 
-      // Prepare media input
-      const media: ShopifyMediaInput[] = imageUrls.map((url) => ({
+      // Step 1: Create staged upload targets
+      const stagedTargets = await this.createStagedUploads(shop, accessToken, imageUrls);
+
+      // Step 2: Upload images to staged targets in parallel
+      const uploadResults = await Promise.all(
+        imageUrls.map(async (url, i) => {
+          const target = stagedTargets[i];
+          if (!target) {
+            logger.warn({ index: i }, 'No staged target for image, skipping');
+            return null;
+          }
+
+          try {
+            await this.uploadToStagedTarget(url, target);
+            logger.debug({ index: i, resourceUrl: target.resourceUrl }, 'Image uploaded to staged target');
+            return target.resourceUrl;
+          } catch (uploadError) {
+            const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+            logger.error({ index: i, error: msg }, 'Failed to upload image to staged target');
+            return null;
+          }
+        })
+      );
+      const resourceUrls = uploadResults.filter((url): url is string => url !== null);
+
+      if (resourceUrls.length === 0) {
+        return imageUrls.map(() => ({ success: false, error: 'All staged uploads failed' }));
+      }
+
+      // Step 3: Attach staged images to product
+      const media = resourceUrls.map((url) => ({
         originalSource: url,
-        mediaContentType: 'IMAGE',
+        mediaContentType: 'IMAGE' as const,
       }));
 
       const mutation = `
@@ -362,12 +496,13 @@ class ShopifyProvider implements EcommerceProvider {
         const errors = result.productCreateMedia.mediaUserErrors
           .map((e) => e.message)
           .join(', ');
+        logger.error({ shop, productId, errors }, 'Shopify media errors');
         return imageUrls.map(() => ({ success: false, error: errors }));
       }
 
       logger.info(
         { shop, productId, uploaded: result.productCreateMedia.media.length },
-        'Images uploaded to Shopify'
+        'Images uploaded to Shopify via staged uploads'
       );
 
       return result.productCreateMedia.media.map((m) => ({

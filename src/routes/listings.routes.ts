@@ -17,6 +17,12 @@ import type {
   EbayConnectionMetadata,
 } from '../types/auth.types.js';
 import { z } from 'zod';
+import { storageService } from '../services/storage.service.js';
+import { extractS3KeyFromUrl } from '../utils/s3-url.js';
+import { getConfig } from '../config/index.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger().child({ service: 'listings' });
 
 const listingIdParamsSchema = z.object({
   id: z.string().uuid(),
@@ -122,7 +128,20 @@ async function executePush(params: {
 
     // Upload images if not skipped
     if (!options?.skipImages && job.result?.finalFrames?.length) {
-      const imageUrls = job.result.finalFrames.slice(0, 10); // Limit to 10 images
+      const rawUrls = job.result.finalFrames.slice(0, 10); // Limit to 10 images
+
+      // Convert private S3 URLs to presigned public URLs so Shopify/platforms can fetch them
+      const config = getConfig();
+      const imageUrls = await Promise.all(
+        rawUrls.map(async (url) => {
+          const s3Key = extractS3KeyFromUrl(url, config.storage, { allowAnyHost: true });
+          if (s3Key) {
+            return storageService.getPresignedUrl(s3Key, 3600); // 1 hour expiry
+          }
+          logger.warn({ url }, 'Could not extract S3 key from image URL, using raw URL');
+          return url;
+        })
+      );
 
       switch (connection.platform) {
         case PlatformType.SHOPIFY: {
