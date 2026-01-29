@@ -107,7 +107,7 @@ export const envSchema = z.object({
     .transform((val) => val.split(',').map((d) => d.trim()).filter(Boolean)),
 
   // OAuth success redirect URL (for platform connections like Shopify)
-  OAUTH_SUCCESS_REDIRECT_URL: z.string().default('/api/v1/connections?success=shopify'),
+  OAUTH_SUCCESS_REDIRECT_URL: z.string().default('/api/v1/oauth/success'),
 
   // Allowed URL schemes for OAuth successRedirect parameter (comma-separated, e.g., "myapp,vopi")
   // Only custom schemes and relative paths are allowed; https:// is never permitted to prevent open redirects

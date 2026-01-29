@@ -261,7 +261,11 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
         // fall back to OAUTH_SUCCESS_REDIRECT_URL env var.
         // Validate successRedirect to prevent open redirect attacks.
         const config = getConfig();
-        let successUrl = config.oauthSuccessRedirectUrl;
+        const defaultRedirect = config.oauthSuccessRedirectUrl;
+        // Append platform query param to default redirect if it's a relative path
+        let successUrl = defaultRedirect.startsWith('/')
+          ? `${defaultRedirect}${defaultRedirect.includes('?') ? '&' : '?'}platform=shopify`
+          : defaultRedirect;
 
         if (storedState.successRedirect) {
           const redirect = storedState.successRedirect;
@@ -866,6 +870,47 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
           message,
         });
       }
+    }
+  );
+
+  // =========================================================================
+  // OAuth Success Page (no auth required)
+  // =========================================================================
+
+  /**
+   * Simple success page shown after OAuth callback redirect.
+   * No auth required — this is the redirect target after platform OAuth completes.
+   */
+  fastify.get(
+    '/oauth/success',
+    {
+      schema: {
+        description: 'OAuth success page (no auth required)',
+        tags: ['Platform OAuth'],
+        querystring: {
+          type: 'object',
+          properties: {
+            platform: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { platform } = request.query as { platform?: string };
+      const platformName = platform ? platform.charAt(0).toUpperCase() + platform.slice(1) : 'Platform';
+
+      return reply
+        .type('text/html')
+        .send(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connection Successful</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f5f5f5}
+.card{background:#fff;border-radius:12px;padding:40px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.1);max-width:400px}
+.check{font-size:48px;margin-bottom:16px}h1{margin:0 0 8px;font-size:20px;color:#1a1a1a}
+p{margin:0;color:#666;font-size:14px}</style></head>
+<body><div class="card"><div class="check">&#10003;</div>
+<h1>${platformName} Connected</h1>
+<p>You can close this window and return to the app.</p></div></body></html>`);
     }
   );
 }

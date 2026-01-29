@@ -297,10 +297,11 @@ const AUTH_SKIP_PATHS = [
   '/api/v1/auth/providers',  // List available OAuth providers
   '/api/v1/auth/debug',      // Debug endpoints (non-production)
 
-  // Platform OAuth callbacks (called by external providers, no auth headers)
+  // Platform OAuth callbacks and success page (called by external providers, no auth headers)
   '/api/v1/oauth/shopify/callback',
   '/api/v1/oauth/amazon/callback',
   '/api/v1/oauth/ebay/callback',
+  '/api/v1/oauth/success',
 
   // Public credit endpoints
   '/api/v1/credits/webhook', // Stripe webhook
