@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eq, and } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
+import { getLogger } from '../utils/logger.js';
 import { requireUserAuth } from '../middleware/auth.middleware.js';
 import { getDatabase, schema } from '../db/index.js';
 import { getConfig } from '../config/index.js';
@@ -26,6 +27,8 @@ import type { ShopifyConnectionMetadata, AmazonConnectionMetadata, EbayConnectio
  * Platform OAuth routes for connecting e-commerce platforms
  */
 export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
+  const logger = getLogger().child({ route: 'oauth' });
+
   // =========================================================================
   // Platform Availability
   // =========================================================================
@@ -260,8 +263,25 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
         }
 
         // Redirect to success page: use successRedirect from state (mobile deep link),
-        // fall back to OAUTH_SUCCESS_REDIRECT_URL env var
-        const successUrl = storedState.successRedirect || getConfig().oauthSuccessRedirectUrl;
+        // fall back to OAUTH_SUCCESS_REDIRECT_URL env var.
+        // Validate successRedirect to prevent open redirect attacks.
+        const config = getConfig();
+        let successUrl = config.oauthSuccessRedirectUrl;
+
+        if (storedState.successRedirect) {
+          const redirect = storedState.successRedirect;
+          const isRelativePath = redirect.startsWith('/');
+          const allowedSchemes = config.oauthAllowedRedirectSchemes;
+          const hasAllowedScheme = allowedSchemes.length > 0 &&
+            allowedSchemes.some((scheme) => redirect.startsWith(`${scheme}://`));
+
+          if (isRelativePath || hasAllowedScheme) {
+            successUrl = redirect;
+          } else {
+            logger.warn({ redirect }, 'Blocked disallowed successRedirect scheme');
+          }
+        }
+
         return reply.redirect(successUrl);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';

@@ -109,6 +109,13 @@ export const envSchema = z.object({
   // OAuth success redirect URL (for platform connections like Shopify)
   OAUTH_SUCCESS_REDIRECT_URL: z.string().default('/api/v1/connections?success=shopify'),
 
+  // Allowed URL schemes for OAuth successRedirect parameter (comma-separated, e.g., "myapp,vopi")
+  // Only custom schemes and relative paths are allowed; https:// is never permitted to prevent open redirects
+  OAUTH_ALLOWED_REDIRECT_SCHEMES: z
+    .string()
+    .default('')
+    .transform((val) => val.split(',').map((d) => d.trim()).filter(Boolean)),
+
   // FFmpeg
   FFMPEG_PATH: z.string().default('ffmpeg'),
   FFPROBE_PATH: z.string().default('ffprobe'),

@@ -32,6 +32,8 @@ export interface AppConfig {
   };
   /** OAuth success redirect URL for platform connections (e.g., Shopify) */
   oauthSuccessRedirectUrl: string;
+  /** Allowed URL schemes for OAuth successRedirect param (e.g., ['myapp', 'vopi']) */
+  oauthAllowedRedirectSchemes: string[];
   storage: {
     bucket: string;
     region: string;
@@ -181,6 +183,7 @@ export function buildConfig(env: Env): AppConfig {
       allowedDomains: env.CALLBACK_ALLOWED_DOMAINS,
     },
     oauthSuccessRedirectUrl: env.OAUTH_SUCCESS_REDIRECT_URL,
+    oauthAllowedRedirectSchemes: env.OAUTH_ALLOWED_REDIRECT_SCHEMES,
     storage: {
       bucket: env.S3_BUCKET,
       region: env.S3_REGION,
