@@ -27,6 +27,51 @@ import type { ShopifyConnectionMetadata, AmazonConnectionMetadata, EbayConnectio
  */
 export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
   // =========================================================================
+  // Platform Availability
+  // =========================================================================
+
+  /**
+   * Check which platforms are configured
+   */
+  fastify.get(
+    '/platforms/available',
+    {
+      preHandler: [requireUserAuth],
+      schema: {
+        description: 'Check which OAuth platforms are configured and available',
+        tags: ['Platforms'],
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              platforms: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    platform: { type: 'string' },
+                    configured: { type: 'boolean' },
+                    name: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      return reply.send({
+        platforms: [
+          { platform: PlatformType.SHOPIFY, configured: shopifyOAuthService.isConfigured(), name: 'Shopify' },
+          { platform: PlatformType.AMAZON, configured: amazonOAuthService.isConfigured(), name: 'Amazon' },
+          { platform: PlatformType.EBAY, configured: ebayOAuthService.isConfigured(), name: 'eBay' },
+        ],
+      });
+    }
+  );
+
+  // =========================================================================
   // Shopify OAuth
   // =========================================================================
 
@@ -563,6 +608,7 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
                     platformAccountId: { type: 'string' },
                     status: { type: 'string' },
                     metadata: { type: 'object' },
+                    lastError: { type: 'string', nullable: true },
                     lastUsedAt: { type: 'string' },
                     createdAt: { type: 'string' },
                   },

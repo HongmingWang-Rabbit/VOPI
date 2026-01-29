@@ -471,6 +471,23 @@ export async function listingsRoutes(fastify: FastifyInstance): Promise<void> {
             id: { type: 'string', format: 'uuid' },
           },
         },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              connectionId: { type: 'string' },
+              jobId: { type: 'string' },
+              platform: { type: 'string' },
+              platformProductId: { type: 'string', nullable: true },
+              status: { type: 'string' },
+              metadata: { type: 'object', nullable: true },
+              lastError: { type: 'string', nullable: true },
+              createdAt: { type: 'string' },
+              updatedAt: { type: 'string' },
+            },
+          },
+        },
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {

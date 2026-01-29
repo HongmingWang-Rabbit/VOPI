@@ -4,24 +4,32 @@ import type {
   ProductCreationResult,
   ImageUploadResult,
 } from '../../types/auth.types.js';
+import { mapWeightUnitToShopify } from '../../types/product-metadata.types.js';
 
 const logger = getLogger().child({ provider: 'shopify-ecommerce' });
 
-const SHOPIFY_API_VERSION = '2024-01';
-
-interface ShopifyProductInput {
-  title: string;
-  descriptionHtml?: string;
-  vendor?: string;
-  productType?: string;
-  tags?: string[];
-  status?: 'ACTIVE' | 'ARCHIVED' | 'DRAFT';
-}
+const SHOPIFY_API_VERSION = '2026-01';
 
 interface ShopifyMediaInput {
   originalSource: string;
   mediaContentType: 'IMAGE';
 }
+
+const PRODUCT_SET_MUTATION = `
+  mutation productSet($input: ProductSetInput!) {
+    productSet(input: $input) {
+      product {
+        id
+        handle
+        onlineStoreUrl
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
 
 /**
  * Shopify E-Commerce Provider
@@ -64,7 +72,135 @@ class ShopifyProvider implements EcommerceProvider {
   }
 
   /**
-   * Create a product in Shopify
+   * Build metafields array from metadata attributes
+   */
+  private buildMetafields(metadata: {
+    materials?: string[];
+    color?: string;
+    gender?: string;
+    style?: string;
+  }): Array<{ namespace: string; key: string; value: string; type: string }> {
+    const metafields: Array<{ namespace: string; key: string; value: string; type: string }> = [];
+
+    if (metadata.materials && metadata.materials.length > 0) {
+      metafields.push({
+        namespace: 'custom',
+        key: 'materials',
+        value: JSON.stringify(metadata.materials),
+        type: 'list.single_line_text_field',
+      });
+    }
+
+    const singleLineFields = [
+      { key: 'color', value: metadata.color },
+      { key: 'gender', value: metadata.gender },
+      { key: 'style', value: metadata.style },
+    ] as const;
+
+    for (const field of singleLineFields) {
+      if (field.value) {
+        metafields.push({
+          namespace: 'custom',
+          key: field.key,
+          value: field.value,
+          type: 'single_line_text_field',
+        });
+      }
+    }
+
+    return metafields;
+  }
+
+  /**
+   * Build a ProductSetInput from metadata for productSet mutation
+   */
+  private buildProductSetInput(
+    metadata: Record<string, unknown>,
+    options?: { publishAsDraft?: boolean; productId?: string }
+  ): Record<string, unknown> {
+    const title = (metadata.title as string) || 'Untitled Product';
+    const description = metadata.description as string | undefined;
+    const brand = metadata.brand as string | undefined;
+    const category = metadata.category as string | undefined;
+    const tags = metadata.tags as string[] | undefined;
+    const price = metadata.price as number | undefined;
+    const compareAtPrice = metadata.compareAtPrice as number | undefined;
+    const sku = metadata.sku as string | undefined;
+    const barcode = metadata.barcode as string | undefined;
+    const weight = metadata.weight as { value?: number; unit?: string } | undefined;
+    const shortDescription = metadata.shortDescription as string | undefined;
+    const materials = metadata.materials as string[] | undefined;
+    const color = metadata.color as string | undefined;
+    const gender = metadata.gender as string | undefined;
+    const style = metadata.style as string | undefined;
+
+    const input: Record<string, unknown> = {
+      title,
+      descriptionHtml: description,
+      vendor: brand,
+      productType: category,
+      tags,
+    };
+
+    if (options?.productId) {
+      input.id = options.productId;
+    }
+
+    // Only set status on create (no productId)
+    if (!options?.productId) {
+      input.status = options?.publishAsDraft !== false ? 'DRAFT' : 'ACTIVE';
+    }
+
+    // SEO - only set when shortDescription is available
+    if (shortDescription) {
+      input.seo = {
+        title,
+        description: shortDescription,
+      };
+    }
+
+    // Variant with pricing, SKU, barcode, weight
+    if (price !== undefined || compareAtPrice !== undefined || sku || barcode || weight?.value) {
+      const variant: Record<string, unknown> = {};
+      if (price !== undefined) variant.price = price.toFixed(2);
+      if (compareAtPrice !== undefined) variant.compareAtPrice = compareAtPrice.toFixed(2);
+      if (sku) variant.sku = sku;
+      if (barcode) variant.barcode = barcode;
+      if (weight?.value) {
+        const weightUnit = weight.unit ? mapWeightUnitToShopify(weight.unit as 'g' | 'kg' | 'oz' | 'lb' | 'pounds') : undefined;
+        if (!weightUnit) {
+          logger.debug({ unit: weight.unit }, 'Unknown weight unit, falling back to POUNDS');
+        }
+        variant.inventoryItem = {
+          measurement: {
+            weight: {
+              value: weight.value,
+              unit: weightUnit || 'POUNDS',
+            },
+          },
+        };
+      }
+      input.variants = [variant];
+    }
+
+    // Metafields
+    const metafields = this.buildMetafields({ materials, color, gender, style });
+    if (metafields.length > 0) {
+      input.metafields = metafields;
+    }
+
+    // Remove undefined fields
+    for (const key of Object.keys(input)) {
+      if (input[key] === undefined) {
+        delete input[key];
+      }
+    }
+
+    return input;
+  }
+
+  /**
+   * Create a product in Shopify using productSet mutation
    */
   async createProduct(
     accessToken: string,
@@ -77,64 +213,35 @@ class ShopifyProvider implements EcommerceProvider {
     }
 
     try {
-      // Extract fields from metadata with type safety
-      const title = (metadata.title as string) || 'Untitled Product';
-      const description = metadata.description as string | undefined;
-      const brand = metadata.brand as string | undefined;
-      const category = metadata.category as string | undefined;
-      const tags = metadata.tags as string[] | undefined;
+      const input = this.buildProductSetInput(metadata, {
+        publishAsDraft: options?.publishAsDraft,
+      });
 
-      // Build product input
-      const input: ShopifyProductInput = {
-        title,
-        descriptionHtml: description,
-        vendor: brand,
-        productType: category,
-        tags,
-        status: options?.publishAsDraft !== false ? 'DRAFT' : 'ACTIVE',
-      };
+      logger.debug({ shop, title: input.title }, 'Creating Shopify product via productSet');
 
-      logger.debug({ shop, title: input.title }, 'Creating Shopify product');
-
-      const mutation = `
-        mutation productCreate($input: ProductInput!) {
-          productCreate(input: $input) {
-            product {
-              id
-              handle
-              onlineStoreUrl
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `;
-
-      const result = await this.graphqlRequest(shop, accessToken, mutation, {
+      const result = await this.graphqlRequest(shop, accessToken, PRODUCT_SET_MUTATION, {
         input,
       }) as {
-        productCreate: {
+        productSet: {
           product?: { id: string; handle: string; onlineStoreUrl?: string };
           userErrors: Array<{ field: string[]; message: string }>;
         };
       };
 
-      if (result.productCreate.userErrors.length > 0) {
-        const errors = result.productCreate.userErrors
+      if (result.productSet.userErrors.length > 0) {
+        const errors = result.productSet.userErrors
           .map((e) => e.message)
           .join(', ');
         return { success: false, error: errors };
       }
 
-      if (!result.productCreate.product) {
+      if (!result.productSet.product) {
         return { success: false, error: 'No product returned from Shopify' };
       }
 
-      const productId = result.productCreate.product.id;
+      const productId = result.productSet.product.id;
       const shopDomain = shop.includes('.myshopify.com') ? shop : `${shop}.myshopify.com`;
-      const productUrl = result.productCreate.product.onlineStoreUrl ||
+      const productUrl = result.productSet.product.onlineStoreUrl ||
         `https://${shopDomain}/admin/products/${productId.split('/').pop()}`;
 
       logger.info({ shop, productId }, 'Shopify product created');
@@ -152,7 +259,7 @@ class ShopifyProvider implements EcommerceProvider {
   }
 
   /**
-   * Update an existing product
+   * Update an existing product using productSet mutation
    */
   async updateProduct(
     accessToken: string,
@@ -166,58 +273,21 @@ class ShopifyProvider implements EcommerceProvider {
     }
 
     try {
-      // Extract fields from metadata with type safety
-      const title = metadata.title as string | undefined;
-      const description = metadata.description as string | undefined;
-      const brand = metadata.brand as string | undefined;
-      const category = metadata.category as string | undefined;
-      const tags = metadata.tags as string[] | undefined;
+      const input = this.buildProductSetInput(metadata, { productId });
 
-      const input: ShopifyProductInput & { id: string } = {
-        id: productId,
-        title: title!,
-        descriptionHtml: description,
-        vendor: brand,
-        productType: category,
-        tags,
-      };
+      logger.debug({ shop, productId }, 'Updating Shopify product via productSet');
 
-      // Remove undefined fields
-      Object.keys(input).forEach((key) => {
-        if (input[key as keyof typeof input] === undefined) {
-          delete input[key as keyof typeof input];
-        }
-      });
-
-      logger.debug({ shop, productId }, 'Updating Shopify product');
-
-      const mutation = `
-        mutation productUpdate($input: ProductInput!) {
-          productUpdate(input: $input) {
-            product {
-              id
-              handle
-              onlineStoreUrl
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `;
-
-      const result = await this.graphqlRequest(shop, accessToken, mutation, {
+      const result = await this.graphqlRequest(shop, accessToken, PRODUCT_SET_MUTATION, {
         input,
       }) as {
-        productUpdate: {
+        productSet: {
           product?: { id: string; handle: string; onlineStoreUrl?: string };
           userErrors: Array<{ field: string[]; message: string }>;
         };
       };
 
-      if (result.productUpdate.userErrors.length > 0) {
-        const errors = result.productUpdate.userErrors
+      if (result.productSet.userErrors.length > 0) {
+        const errors = result.productSet.userErrors
           .map((e) => e.message)
           .join(', ');
         return { success: false, error: errors };
@@ -228,7 +298,7 @@ class ShopifyProvider implements EcommerceProvider {
       return {
         success: true,
         productId,
-        productUrl: result.productUpdate.product?.onlineStoreUrl,
+        productUrl: result.productSet.product?.onlineStoreUrl,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';

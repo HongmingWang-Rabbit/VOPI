@@ -34,6 +34,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   const app = Fastify({
     logger: false, // We use our own Pino logger
+    trustProxy: true, // Trust X-Forwarded-Proto from reverse proxy
     requestIdHeader: 'x-request-id',
     requestIdLogLabel: 'requestId',
   });

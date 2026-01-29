@@ -82,7 +82,6 @@ class ShopifyOAuthService {
       scope: scopes,
       redirect_uri: redirectUri,
       state,
-      'grant_options[]': 'offline', // Request offline access token
     });
 
     return `https://${shopDomain}/admin/oauth/authorize?${params.toString()}`;
@@ -176,7 +175,7 @@ class ShopifyOAuthService {
 
     logger.debug({ shop: shopDomain }, 'Fetching Shopify shop info');
 
-    const response = await fetch(`https://${shopDomain}/admin/api/2024-01/shop.json`, {
+    const response = await fetch(`https://${shopDomain}/admin/api/2026-01/shop.json`, {
       headers: {
         'X-Shopify-Access-Token': accessToken,
       },
@@ -204,7 +203,7 @@ class ShopifyOAuthService {
     const shopDomain = shop.includes('.myshopify.com') ? shop : `${shop}.myshopify.com`;
 
     try {
-      const response = await fetch(`https://${shopDomain}/admin/api/2024-01/shop.json`, {
+      const response = await fetch(`https://${shopDomain}/admin/api/2026-01/shop.json`, {
         headers: {
           'X-Shopify-Access-Token': accessToken,
         },

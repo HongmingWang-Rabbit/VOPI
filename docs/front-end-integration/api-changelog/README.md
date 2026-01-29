@@ -6,6 +6,7 @@ This folder contains documentation for API updates that affect front-end/mobile 
 
 | Date | Version | Title | Breaking |
 |------|---------|-------|----------|
+| [2026-01-28](./2026-01-28-shopify-integration-enhancement.md) | 2.1.1 | Shopify Integration Enhancement | No |
 | [2026-01-28](./2026-01-28-product-metadata-fields.md) | 2.1.0 | Extended Product Metadata Fields | No |
 | [2026-01-23](./2026-01-23-credit-system-oauth.md) | 2.0.0 | Credit System & OAuth Authentication | No |
 | [2025-01-23](./2025-01-23-gemini-image-generation.md) | 1.2.0 | Gemini Image Generation & Product Metadata | No |
