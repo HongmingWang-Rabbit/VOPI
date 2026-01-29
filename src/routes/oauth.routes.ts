@@ -160,6 +160,7 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
         querystring: {
           type: 'object',
           required: ['code', 'shop', 'state', 'hmac', 'timestamp'],
+          additionalProperties: true, // Shopify may send extra params (e.g., host) needed for HMAC
           properties: {
             code: { type: 'string' },
             shop: { type: 'string' },
@@ -173,16 +174,10 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const query = shopifyCallbackQuerySchema.parse(request.query);
 
-      // Verify HMAC - convert Zod-parsed query to Record<string, string> for HMAC verification
-      // This is safe because shopifyCallbackQuerySchema ensures all values are strings
-      const hmacParams: Record<string, string> = {
-        code: query.code,
-        shop: query.shop,
-        state: query.state,
-        hmac: query.hmac,
-        timestamp: query.timestamp,
-      };
-      if (!shopifyOAuthService.verifyHmac(hmacParams)) {
+      // Verify HMAC using ALL raw query params (not just Zod-parsed ones).
+      // Shopify may send extra params (e.g., host) that are included in the HMAC calculation.
+      const rawQuery = request.query as Record<string, string>;
+      if (!shopifyOAuthService.verifyHmac(rawQuery)) {
         return reply.status(400).send({
           error: 'INVALID_HMAC',
           message: 'Invalid HMAC signature',
