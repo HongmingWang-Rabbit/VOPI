@@ -85,6 +85,7 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
       schema: {
         description: 'Start Shopify OAuth flow',
         tags: ['Platform OAuth'],
+        // Note: This schema must stay in sync with shopifyAuthorizeQuerySchema in auth.types.ts
         querystring: {
           type: 'object',
           required: ['shop'],
@@ -92,12 +93,14 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
             shop: { type: 'string', pattern: '^[a-zA-Z0-9-]+\\.myshopify\\.com$' },
             redirectUri: { type: 'string', format: 'uri' },
             response_type: { type: 'string', enum: ['json'] },
+            successRedirect: { type: 'string', description: 'URL to redirect to after successful OAuth (e.g., deep link)' },
           },
         },
         response: {
           200: {
             type: 'object',
             description: 'JSON response with auth URL (when response_type=json)',
+            required: ['authUrl'],
             properties: {
               authUrl: { type: 'string' },
             },
@@ -114,7 +117,7 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      const { shop, redirectUri, response_type } = shopifyAuthorizeQuerySchema.parse(request.query);
+      const { shop, redirectUri, response_type, successRedirect } = shopifyAuthorizeQuerySchema.parse(request.query);
       const state = randomBytes(32).toString('hex');
 
       // Use default redirect URI if not provided
@@ -126,6 +129,7 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
         redirectUri: callbackUri,
         userId: request.user!.id,
         shop,
+        successRedirect,
         expiresAt: Date.now() + 10 * 60 * 1000,
       };
       await stateStoreService.set(state, stateData);
@@ -255,9 +259,10 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
           });
         }
 
-        // Redirect to success page (configurable via OAUTH_SUCCESS_REDIRECT_URL)
-        const config = getConfig();
-        return reply.redirect(config.oauthSuccessRedirectUrl);
+        // Redirect to success page: use successRedirect from state (mobile deep link),
+        // fall back to OAUTH_SUCCESS_REDIRECT_URL env var
+        const successUrl = storedState.successRedirect || getConfig().oauthSuccessRedirectUrl;
+        return reply.redirect(successUrl);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         return reply.status(400).send({

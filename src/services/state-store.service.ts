@@ -14,6 +14,7 @@ export interface OAuthStateData {
   userId?: string;
   shop?: string;
   platform?: 'ios' | 'android' | 'web'; // Client platform for OAuth client selection
+  successRedirect?: string; // URL to redirect to after successful OAuth (e.g., deep link)
   expiresAt: number;
 }
 

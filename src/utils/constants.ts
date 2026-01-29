@@ -32,6 +32,8 @@ export const PIPELINE_VERSION = APP_VERSION;
 
 /**
  * Shopify Admin API version
- * Used by both the ecommerce provider and OAuth service
+ * Used by:
+ *   - src/providers/ecommerce/shopify.provider.ts (GraphQL Admin API endpoint)
+ *   - src/services/oauth/shopify-oauth.service.ts (REST Admin API for shop info & token verification)
  */
 export const SHOPIFY_API_VERSION = '2026-01';
