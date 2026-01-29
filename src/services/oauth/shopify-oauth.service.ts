@@ -1,7 +1,8 @@
-import { createHmac, randomBytes } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { getConfig } from '../../config/index.js';
 import { getLogger } from '../../utils/logger.js';
 import { encryptionService } from '../encryption.service.js';
+import { SHOPIFY_API_VERSION } from '../../utils/constants.js';
 import type { ShopifyConnectionMetadata } from '../../types/auth.types.js';
 
 const logger = getLogger().child({ service: 'shopify-oauth' });
@@ -62,13 +63,6 @@ class ShopifyOAuthService {
   }
 
   /**
-   * Generate a random nonce for CSRF protection
-   */
-  generateNonce(): string {
-    return randomBytes(16).toString('hex');
-  }
-
-  /**
    * Generate OAuth authorization URL for a shop
    */
   getAuthorizationUrl(shop: string, redirectUri: string, state: string): string {
@@ -112,17 +106,12 @@ class ShopifyOAuthService {
       .update(message)
       .digest('hex');
 
-    // Timing-safe comparison
+    // Timing-safe comparison using Node.js stdlib
     if (hmac.length !== calculatedHmac.length) {
       return false;
     }
 
-    let mismatch = 0;
-    for (let i = 0; i < hmac.length; i++) {
-      mismatch |= hmac.charCodeAt(i) ^ calculatedHmac.charCodeAt(i);
-    }
-
-    return mismatch === 0;
+    return timingSafeEqual(Buffer.from(hmac), Buffer.from(calculatedHmac));
   }
 
   /**
@@ -175,7 +164,7 @@ class ShopifyOAuthService {
 
     logger.debug({ shop: shopDomain }, 'Fetching Shopify shop info');
 
-    const response = await fetch(`https://${shopDomain}/admin/api/2026-01/shop.json`, {
+    const response = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
       headers: {
         'X-Shopify-Access-Token': accessToken,
       },
@@ -203,7 +192,7 @@ class ShopifyOAuthService {
     const shopDomain = shop.includes('.myshopify.com') ? shop : `${shop}.myshopify.com`;
 
     try {
-      const response = await fetch(`https://${shopDomain}/admin/api/2026-01/shop.json`, {
+      const response = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
         headers: {
           'X-Shopify-Access-Token': accessToken,
         },

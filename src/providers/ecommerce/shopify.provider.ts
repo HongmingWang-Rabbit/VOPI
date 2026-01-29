@@ -5,14 +5,20 @@ import type {
   ImageUploadResult,
 } from '../../types/auth.types.js';
 import { mapWeightUnitToShopify } from '../../types/product-metadata.types.js';
+import { SHOPIFY_API_VERSION } from '../../utils/constants.js';
 
 const logger = getLogger().child({ provider: 'shopify-ecommerce' });
-
-const SHOPIFY_API_VERSION = '2026-01';
 
 interface ShopifyMediaInput {
   originalSource: string;
   mediaContentType: 'IMAGE';
+}
+
+interface ProductSetResponse {
+  productSet: {
+    product?: { id: string; handle: string; onlineStoreUrl?: string };
+    userErrors: Array<{ field: string[]; message: string }>;
+  };
 }
 
 const PRODUCT_SET_MUTATION = `
@@ -221,12 +227,7 @@ class ShopifyProvider implements EcommerceProvider {
 
       const result = await this.graphqlRequest(shop, accessToken, PRODUCT_SET_MUTATION, {
         input,
-      }) as {
-        productSet: {
-          product?: { id: string; handle: string; onlineStoreUrl?: string };
-          userErrors: Array<{ field: string[]; message: string }>;
-        };
-      };
+      }) as ProductSetResponse;
 
       if (result.productSet.userErrors.length > 0) {
         const errors = result.productSet.userErrors
@@ -279,12 +280,7 @@ class ShopifyProvider implements EcommerceProvider {
 
       const result = await this.graphqlRequest(shop, accessToken, PRODUCT_SET_MUTATION, {
         input,
-      }) as {
-        productSet: {
-          product?: { id: string; handle: string; onlineStoreUrl?: string };
-          userErrors: Array<{ field: string[]; message: string }>;
-        };
-      };
+      }) as ProductSetResponse;
 
       if (result.productSet.userErrors.length > 0) {
         const errors = result.productSet.userErrors

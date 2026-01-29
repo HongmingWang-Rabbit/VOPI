@@ -254,6 +254,7 @@ export type LogoutRequest = z.infer<typeof logoutRequestSchema>;
 export const shopifyAuthorizeQuerySchema = z.object({
   shop: z.string().regex(/^[a-zA-Z0-9-]+\.myshopify\.com$/),
   redirectUri: z.string().url().optional(),
+  response_type: z.enum(['json']).optional(),
 });
 
 export type ShopifyAuthorizeQuery = z.infer<typeof shopifyAuthorizeQuerySchema>;

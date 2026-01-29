@@ -29,3 +29,9 @@ export const APP_NAME = pkg.name;
  * This is tied to the app version and included in exported metadata
  */
 export const PIPELINE_VERSION = APP_VERSION;
+
+/**
+ * Shopify Admin API version
+ * Used by both the ecommerce provider and OAuth service
+ */
+export const SHOPIFY_API_VERSION = '2026-01';

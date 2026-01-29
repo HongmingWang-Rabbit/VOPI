@@ -91,10 +91,18 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
           properties: {
             shop: { type: 'string', pattern: '^[a-zA-Z0-9-]+\\.myshopify\\.com$' },
             redirectUri: { type: 'string', format: 'uri' },
+            response_type: { type: 'string', enum: ['json'] },
           },
         },
         response: {
-          302: { type: 'null', description: 'Redirect to Shopify authorization' },
+          200: {
+            type: 'object',
+            description: 'JSON response with auth URL (when response_type=json)',
+            properties: {
+              authUrl: { type: 'string' },
+            },
+          },
+          302: { type: 'null', description: 'Redirect to Shopify authorization (default)' },
         },
       },
     },
@@ -106,7 +114,7 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      const { shop, redirectUri } = shopifyAuthorizeQuerySchema.parse(request.query);
+      const { shop, redirectUri, response_type } = shopifyAuthorizeQuerySchema.parse(request.query);
       const state = randomBytes(32).toString('hex');
 
       // Use default redirect URI if not provided
@@ -123,6 +131,12 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
       await stateStoreService.set(state, stateData);
 
       const authUrl = shopifyOAuthService.getAuthorizationUrl(shop, callbackUri, state);
+
+      // Return JSON for mobile clients that can't follow 302 redirects
+      if (response_type === 'json') {
+        return reply.send({ authUrl });
+      }
+
       return reply.redirect(authUrl);
     }
   );
