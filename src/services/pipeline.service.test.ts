@@ -55,6 +55,7 @@ vi.mock('./storage.service.js', () => ({
       key: 'jobs/job-123/frames/frame.png',
     }),
     deleteFile: vi.fn().mockResolvedValue(undefined),
+    deleteUploadedVideo: vi.fn().mockResolvedValue(true),
   },
 }));
 
@@ -398,7 +399,7 @@ describe('PipelineService', () => {
 
       await service.runPipeline(jobWithS3Url);
 
-      expect(storageService.deleteFile).toHaveBeenCalledWith('uploads/video.mp4');
+      expect(storageService.deleteUploadedVideo).toHaveBeenCalledWith('https://s3.example.com/uploads/video.mp4');
     });
 
     it('should not cleanup non-upload S3 URLs', async () => {
@@ -409,7 +410,7 @@ describe('PipelineService', () => {
 
       await service.runPipeline(jobWithNonUploadUrl);
 
-      expect(storageService.deleteFile).not.toHaveBeenCalled();
+      expect(storageService.deleteUploadedVideo).toHaveBeenCalledWith('https://example.com/video.mp4');
     });
   });
 });
