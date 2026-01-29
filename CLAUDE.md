@@ -126,7 +126,9 @@ See `src/processors/` for implementation details.
 - `src/processors/` - Composable processor stack architecture (registry, runner, implementations)
 - `src/services/` - Core business logic (one service per domain: video, scoring, gemini, photoroom, storage)
 - `src/providers/` - External service integrations (Gemini video/image, Stability AI, Claid.ai)
+- `src/providers/ecommerce/` - E-commerce platform providers (Shopify `productSet`, Amazon SP-API, eBay Inventory API)
 - `src/providers/utils/` - Shared provider utilities (Stability API, Gemini utils)
+- `src/services/oauth/` - Platform OAuth services (Shopify, Amazon, eBay)
 - `src/routes/` + `src/controllers/` - HTTP layer
 - `src/workers/` - BullMQ job processors
 - `src/db/schema.ts` - Drizzle ORM schema (api_keys, jobs, videos, frames, commercialImages, globalConfig)
@@ -197,6 +199,8 @@ Security features:
 - CORS domain whitelist via `CORS_ALLOWED_DOMAINS`
 - Callback URL SSRF protection via `CALLBACK_ALLOWED_DOMAINS`
 - Admin API keys for config management via `ADMIN_API_KEYS`
+- OAuth open redirect prevention via `OAUTH_ALLOWED_REDIRECT_SCHEMES`
+- `trustProxy: 1` for correct protocol detection behind reverse proxy
 
 ## Global Configuration
 
@@ -247,6 +251,7 @@ All configuration is via environment variables with sensible defaults. Key categ
 - **Transcoding**: HEVC→H.264 conversion settings (`VOPI_TRANSCODE_*`, `VOPI_FFPROBE_*`)
 - **Concurrency**: Processor parallelism (`VOPI_CONCURRENCY_*`)
 - **Security**: CORS, auth skip paths, callback domains
+- **OAuth**: Platform connection settings (`OAUTH_SUCCESS_REDIRECT_URL`, `OAUTH_ALLOWED_REDIRECT_SCHEMES`, `SHOPIFY_*`, `AMAZON_*`, `EBAY_*`)
 
 ### Transcoding Configuration
 

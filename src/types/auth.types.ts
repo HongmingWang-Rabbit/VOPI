@@ -335,25 +335,31 @@ export interface EcommerceProvider {
   createProduct(
     accessToken: string,
     metadata: Record<string, unknown>,
-    options?: { publishAsDraft?: boolean }
+    options?: Record<string, unknown>
   ): Promise<ProductCreationResult>;
 
   updateProduct(
     accessToken: string,
     productId: string,
-    metadata: Record<string, unknown>
+    metadata: Record<string, unknown>,
+    options?: Record<string, unknown>
   ): Promise<ProductCreationResult>;
 
   uploadImages(
     accessToken: string,
     productId: string,
-    imageUrls: string[]
+    imageUrls: string[],
+    options?: Record<string, unknown>
   ): Promise<ImageUploadResult[]>;
 
   deleteProduct(
     accessToken: string,
-    productId: string
+    productId: string,
+    options?: Record<string, unknown>
   ): Promise<{ success: boolean; error?: string }>;
 
-  verifyToken(accessToken: string): Promise<boolean>;
+  verifyToken(
+    accessToken: string,
+    options?: Record<string, unknown>
+  ): Promise<boolean>;
 }

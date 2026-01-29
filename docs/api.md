@@ -2137,6 +2137,292 @@ curl -X PUT http://localhost:3000/api/v1/config \
 
 ---
 
+## Listings Endpoints
+
+Endpoints for pushing product listings to e-commerce platforms with automatic image uploads.
+
+### POST /api/v1/listings/push
+
+Push a processed job's product and images to an e-commerce platform.
+
+**Authentication**: Required (JWT)
+
+**Request Body**
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "connectionId": "660e8400-e29b-41d4-a716-446655440001",
+  "options": {
+    "publishAsDraft": true,
+    "skipImages": false,
+    "overrideMetadata": {}
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `jobId` | string (UUID) | Yes | Job ID with completed processing and images |
+| `connectionId` | string (UUID) | Yes | Platform connection ID (must belong to user) |
+| `options.publishAsDraft` | boolean | No | Create product as draft (default: true) |
+| `options.skipImages` | boolean | No | Skip image upload, product metadata only (default: false) |
+| `options.overrideMetadata` | object | No | Override specific metadata fields |
+
+**Response** `201 Created`
+```json
+{
+  "id": "770e8400-e29b-41d4-a716-446655440002",
+  "status": "completed",
+  "platformProductId": "gid://shopify/Product/123456789",
+  "message": "Product pushed successfully"
+}
+```
+
+**Process Flow** (Shopify example):
+1. Create product via `productSet` GraphQL mutation with metadata (title, description, price, SKU, metafields, etc.)
+2. Select images for upload (prioritizes commercial images over raw frames):
+   - **Commercial images** (preferred): AI-processed product photos from `final/` S3 prefix with backgrounds removed, styled backgrounds, and lifestyle shots
+   - **Raw frames** (fallback): Original extracted video frames used only if no commercial images exist
+   - Selects up to 10 images from the chosen source
+3. Generate presigned URLs for private S3 bucket access (1 hour expiry)
+4. Upload images via Shopify's staged upload flow:
+   - Call `stagedUploadsCreate` to reserve upload slots
+   - Download each image from presigned URL (server-side)
+   - Upload to Shopify staging target (parallel for performance)
+   - Attach via `productCreateMedia` mutation
+5. Update listing record with product ID and status
+
+**Image Selection Priority**:
+- **Commercial images** are preferred because they are AI-processed with:
+  - Background removal and replacement
+  - Lighting adjustments
+  - Lifestyle scene generation
+  - Consistent product framing and centering
+- Falls back to raw video frames only if commercial images are unavailable
+
+**Image Upload Flow (Shopify Staged Uploads)**:
+```
+┌──────────────────────────────────────┐
+│  S3 Private Bucket                   │
+│  (S3 URLs via presigned access)      │
+└──────────────────┬───────────────────┘
+                   │
+                   ▼
+        ┌──────────────────────┐
+        │ Server: Generate     │
+        │ Presigned URLs       │
+        │ (1 hour expiry)      │
+        └──────────┬───────────┘
+                   │
+        ┌──────────▼───────────┐
+        │ Shopify:             │
+        │ stagedUploadsCreate  │
+        │ (get upload targets) │
+        └──────────┬───────────┘
+                   │
+        ┌──────────▼──────────────────────┐
+        │ Server (Parallel):              │
+        │ 1. Download from presigned URL  │
+        │ 2. Build multipart form data    │
+        │ 3. POST to upload target        │
+        └──────────┬───────────────────────┘
+                   │
+        ┌──────────▼───────────┐
+        │ Shopify:             │
+        │ productCreateMedia   │
+        │ (attach images)      │
+        └──────────────────────┘
+```
+
+**Error Responses**:
+
+`404 Not Found` - Connection not found or doesn't belong to user
+```json
+{
+  "error": "NOT_FOUND",
+  "message": "Connection not found"
+}
+```
+
+`400 Bad Request` - Connection not active
+```json
+{
+  "error": "CONNECTION_INACTIVE",
+  "message": "Connection is disconnected"
+}
+```
+
+---
+
+## Platform OAuth Endpoints
+
+Platform OAuth endpoints connect e-commerce platforms (Shopify, Amazon, eBay) to a user's account.
+
+### GET /api/v1/platforms/available
+
+Check which OAuth platforms are configured and available.
+
+**Authentication**: Required (JWT)
+
+**Response** `200 OK`
+```json
+{
+  "platforms": [
+    { "platform": "shopify", "configured": true, "name": "Shopify" },
+    { "platform": "amazon", "configured": false, "name": "Amazon" },
+    { "platform": "ebay", "configured": true, "name": "eBay" }
+  ]
+}
+```
+
+---
+
+### GET /api/v1/oauth/shopify/authorize
+
+Start Shopify OAuth flow. Redirects to Shopify authorization page (or returns JSON with `response_type=json`).
+
+**Authentication**: Required (JWT)
+
+**Query Parameters**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `shop` | string | Yes | Shopify store domain (e.g., `mystore.myshopify.com`) |
+| `redirectUri` | string (URL) | No | Custom callback URI (defaults to server callback) |
+| `response_type` | string | No | Set to `json` for JSON response instead of 302 redirect |
+| `successRedirect` | string | No | URL to redirect after success (e.g., mobile deep link) |
+
+**Response** `302 Found` (default) - Redirects to Shopify OAuth
+
+**Response** `200 OK` (when `response_type=json`)
+```json
+{
+  "authUrl": "https://mystore.myshopify.com/admin/oauth/authorize?..."
+}
+```
+
+---
+
+### GET /api/v1/oauth/shopify/callback
+
+Shopify OAuth callback. Exchanges authorization code for access token and stores the connection. Redirects to the OAuth success page.
+
+**Authentication**: None (callback from Shopify)
+
+---
+
+### GET /api/v1/oauth/amazon/authorize
+
+Start Amazon OAuth flow. Redirects to Amazon authorization page.
+
+**Authentication**: Required (JWT)
+
+---
+
+### GET /api/v1/oauth/amazon/callback
+
+Amazon OAuth callback. Exchanges code for tokens and stores the connection.
+
+**Authentication**: None (callback from Amazon)
+
+---
+
+### GET /api/v1/oauth/ebay/authorize
+
+Start eBay OAuth flow. Redirects to eBay authorization page.
+
+**Authentication**: Required (JWT)
+
+---
+
+### GET /api/v1/oauth/ebay/callback
+
+eBay OAuth callback. Exchanges code for tokens and stores the connection.
+
+**Authentication**: None (callback from eBay)
+
+---
+
+### GET /api/v1/oauth/success
+
+Simple HTML success page shown after OAuth callback redirect. Displays a confirmation message with the connected platform name.
+
+**Authentication**: None required (this is the redirect target after platform OAuth completes)
+
+**Query Parameters**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `platform` | string | No | Platform name (`shopify`, `amazon`, `ebay`) - uses whitelist lookup to prevent XSS |
+
+**Response** `200 OK` - HTML page with success message
+
+---
+
+### GET /api/v1/connections
+
+List user's platform connections.
+
+**Authentication**: Required (JWT)
+
+**Response** `200 OK`
+```json
+{
+  "connections": [
+    {
+      "id": "550e8400-...",
+      "platform": "shopify",
+      "platformAccountId": "shop-id",
+      "status": "active",
+      "metadata": { "shop": "mystore.myshopify.com", "shopName": "My Store" },
+      "lastError": null,
+      "lastUsedAt": "2026-01-28T10:00:00.000Z",
+      "createdAt": "2026-01-28T09:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/v1/connections/:id
+
+Get connection details.
+
+**Authentication**: Required (JWT)
+
+---
+
+### DELETE /api/v1/connections/:id
+
+Disconnect a platform.
+
+**Authentication**: Required (JWT)
+
+**Response** `200 OK`
+```json
+{
+  "success": true,
+  "message": "Connection deleted"
+}
+```
+
+---
+
+### POST /api/v1/connections/:id/test
+
+Test a platform connection by verifying the stored access token.
+
+**Authentication**: Required (JWT)
+
+**Response** `200 OK`
+```json
+{
+  "success": true,
+  "message": "Connection is valid"
+}
+```
+
+---
+
 ## CLI Commands
 
 VOPI includes CLI commands for managing API keys.

@@ -1,0 +1,40 @@
+diff --git a/lib/typings/operations/catalogItems.ts b/lib/typings/operations/catalogItems.ts
+index ab37c7e69cdd12dea8cfc371f9ec3ef522cfa847..4f9a50df25d93034c7b2bcddf494aef9ae5e2ad9 100644
+--- a/lib/typings/operations/catalogItems.ts
++++ b/lib/typings/operations/catalogItems.ts
+@@ -41,7 +41,7 @@ interface SellerSKUIdentifier {
+   SellerSKU: string;
+ }
+ 
+-interface IdentifierType {
++export interface IdentifierType {
+   MarketplaceASIN?: ASINIdentifier;
+   SKUIdentifier?: SellerSKUIdentifier;
+ }
+@@ -80,7 +80,7 @@ interface Image {
+   Width?: DecimalWithUnits;
+ }
+ 
+-interface AttributeSet {
++export interface AttributeSet {
+   Actor?: string[];
+   Artist?: string[];
+   AspectRatio?: string;
+@@ -179,7 +179,7 @@ interface AttributeSet {
+   WeeeTaxValue?: Price;
+ }
+ 
+-interface Relationship {
++export interface Relationship {
+   Color?: string;
+   Edition?: string;
+   Flavor?: string;
+@@ -204,7 +204,7 @@ interface Relationship {
+   ItemDimensions?: DimensionType;
+ }
+ 
+-interface SalesRank {
++export interface SalesRank {
+   ProductCategoryId?: string;
+   Rank?: number;
+ }

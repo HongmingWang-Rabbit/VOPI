@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  amazon-sp-api@1.2.0:
+    hash: 1f6e60d35ab51a54d07ac0fec2599df48bf54034de0aa547137c0ccf21583b46
+    path: patches/amazon-sp-api@1.2.0.patch
+
 importers:
 
   .:
@@ -41,6 +46,9 @@ importers:
       '@smithy/node-http-handler':
         specifier: ^4.4.8
         version: 4.4.8
+      amazon-sp-api:
+        specifier: ^1.2.0
+        version: 1.2.0(patch_hash=1f6e60d35ab51a54d07ac0fec2599df48bf54034de0aa547137c0ccf21583b46)
       bullmq:
         specifier: ^5.1.0
         version: 5.66.5
@@ -1681,6 +1689,9 @@ packages:
   ajv@8.17.1:
     resolution: {integrity: sha512-B/gBuNg5SiMTrPkC+A2+cW0RszwxYmn6VYxB/inlBStS5nx6xHIt/ehKRhIMhqusl7a8LjQoZnjCs5vhwxOQ1g==}
 
+  amazon-sp-api@1.2.0:
+    resolution: {integrity: sha512-oWm9fvs4psXqkaNcJX5vAvw6oQFGkHHX6lyDJJHqX1PRnF4kN8LyQu97laBRsnjQTnL/FUCDLZ+GYAuZTl/gNQ==}
+
   ansi-regex@6.2.2:
     resolution: {integrity: sha512-Bq3SmSpyFHaWjPk8If9yc6svM8c56dB5BAtW4Qbw5jHTwwXXcTLoRMkpDJp6VL0XzlWaCHTXrkFURMYmD0sLqg==}
     engines: {node: '>=12'}
@@ -1833,6 +1844,11 @@ packages:
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
+
+  csvtojson@2.0.14:
+    resolution: {integrity: sha512-F7NNvhhDyob7OsuEGRsH0FM1aqLs/WYITyza3l+hTEEmOK9sGPBlYQZwlVG0ezCojXYpE17lhS5qL6BCOZSPyA==}
+    engines: {node: '>=8.0.0'}
+    hasBin: true
 
   d@1.0.2:
     resolution: {integrity: sha512-MOqHvMWF9/9MX6nza0KgvFH4HpMU0EF5uUDXqX/BtxtU8NfB0QzRtJ8Oe/6SuS4kbhyzVJwjd97EA4PKrzJ8bw==}
@@ -2134,6 +2150,10 @@ packages:
 
   fast-xml-parser@5.2.5:
     resolution: {integrity: sha512-pfX9uG9Ki0yekDHx2SiuRIyFdyAr1kMIMitPvb0YBo8SUfKvia7w7FIyd/l6av85pFYRhZscS75MwMnbvY+hcQ==}
+    hasBin: true
+
+  fast-xml-parser@5.3.3:
+    resolution: {integrity: sha512-2O3dkPAAC6JavuMm8+4+pgTk+5hoAs+CjZ+sWcQLkX9+/tHRuTkQh/Oaifr8qDmZ8iEHb771Ea6G8CdwkrgvYA==}
     hasBin: true
 
   fastify-plugin@4.5.1:
@@ -2442,6 +2462,9 @@ packages:
 
   lodash.throttle@4.1.1:
     resolution: {integrity: sha512-wIkUCfVKpVsWo3JSZlc+8MB5it+2AN5W8J7YVMST30UrvcQNZ1Okbj+rbVniijTWE6FGYy4XJq/rHkas8qJMLQ==}
+
+  lodash@4.17.23:
+    resolution: {integrity: sha512-LgVTMpQtIopCi79SJeDiP0TfWi5CNEc/L/aRdTh3yIvmZXTnheWpKjSZhnvMl8iXbC1tFg9gdHHDMLoV7CnG+w==}
 
   lru-queue@0.1.0:
     resolution: {integrity: sha512-BpdYkt9EvGl8OfWHDQPISVpcl5xZthb+XPsbELj5AQXxIC8IriDZIQYjBJPEm5rS420sjZ0TLEzRcq5KdBhYrQ==}
@@ -4839,6 +4862,13 @@ snapshots:
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
+  amazon-sp-api@1.2.0(patch_hash=1f6e60d35ab51a54d07ac0fec2599df48bf54034de0aa547137c0ccf21583b46):
+    dependencies:
+      csvtojson: 2.0.14
+      fast-xml-parser: 5.3.3
+      iconv-lite: 0.7.2
+      qs: 6.14.1
+
   ansi-regex@6.2.2: {}
 
   ansi-styles@4.3.0:
@@ -4992,6 +5022,10 @@ snapshots:
       path-key: 3.1.1
       shebang-command: 2.0.0
       which: 2.0.2
+
+  csvtojson@2.0.14:
+    dependencies:
+      lodash: 4.17.23
 
   d@1.0.2:
     dependencies:
@@ -5322,6 +5356,10 @@ snapshots:
   fast-uri@3.1.0: {}
 
   fast-xml-parser@5.2.5:
+    dependencies:
+      strnum: 2.1.2
+
+  fast-xml-parser@5.3.3:
     dependencies:
       strnum: 2.1.2
 
@@ -5661,6 +5699,8 @@ snapshots:
   lodash.once@4.1.1: {}
 
   lodash.throttle@4.1.1: {}
+
+  lodash@4.17.23: {}
 
   lru-queue@0.1.0:
     dependencies:

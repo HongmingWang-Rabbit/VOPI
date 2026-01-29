@@ -642,7 +642,7 @@ VOPI includes an optional audio analysis pipeline that extracts audio from produ
 │     └─ Calculate confidence scores for each field                       │
 │                                                                          │
 │  4. FORMAT FOR PLATFORMS                                                 │
-│     ├─ Shopify: GraphQL productCreate mutation format                   │
+│     ├─ Shopify: GraphQL productSet mutation format (API 2026-01)        │
 │     ├─ Amazon: SP-API Listings Items format (item_name, bullet_point)   │
 │     └─ eBay: Inventory API format (title max 80 chars, aspects)         │
 │                                                                          │

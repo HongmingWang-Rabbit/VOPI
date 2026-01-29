@@ -173,6 +173,25 @@ Both servers support hot reload via tsx.
 | `CALLBACK_ALLOWED_DOMAINS` | `` | Allowed callback domains (SSRF protection) |
 | `ADMIN_API_KEYS` | `` | Comma-separated admin API keys (for config management) |
 
+### OAuth & Platform Connection Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OAUTH_SUCCESS_REDIRECT_URL` | `/api/v1/oauth/success` | Redirect URL after successful platform OAuth callback |
+| `OAUTH_ALLOWED_REDIRECT_SCHEMES` | `` | Comma-separated allowed custom URL schemes for OAuth `successRedirect` param (e.g., `myapp,vopi`). Prevents open redirects; `https://` is never permitted |
+| `SHOPIFY_API_KEY` | - | Shopify app API key |
+| `SHOPIFY_API_SECRET` | - | Shopify app API secret (used for HMAC verification) |
+| `SHOPIFY_SCOPES` | `write_products,read_products` | Shopify OAuth scopes |
+| `AMAZON_CLIENT_ID` | - | Amazon SP-API client ID |
+| `AMAZON_CLIENT_SECRET` | - | Amazon SP-API client secret |
+| `EBAY_CLIENT_ID` | - | eBay API client ID |
+| `EBAY_CLIENT_SECRET` | - | eBay API client secret |
+| `EBAY_REDIRECT_URI` | - | eBay OAuth redirect URI |
+| `EBAY_ENVIRONMENT` | `production` | eBay environment (`sandbox` or `production`) |
+| `TOKEN_ENCRYPTION_KEY` | - | 32+ character key for encrypting stored OAuth tokens |
+| `TOKEN_REFRESH_INTERVAL_MS` | `300000` | Background token refresh check interval (5 min) |
+| `TOKEN_REFRESH_THRESHOLD_MS` | `900000` | Refresh tokens expiring within this window (15 min) |
+
 ### Runtime Configuration
 
 | Variable | Default | Description |
@@ -333,6 +352,9 @@ The API provides health check endpoints:
 7. **CORS**: Configure `CORS_ALLOWED_DOMAINS` to restrict origins
 8. **Callback SSRF Protection**: Set `CALLBACK_ALLOWED_DOMAINS` to whitelist webhook destinations
 9. **Timing-Safe Auth**: API key validation uses constant-time comparison to prevent timing attacks
+10. **Trust Proxy**: Fastify is configured with `trustProxy: 1` for correct `request.protocol` detection behind reverse proxy. Adjust this value if you have multiple proxy layers
+11. **OAuth Open Redirect Prevention**: The `OAUTH_ALLOWED_REDIRECT_SCHEMES` env var controls which custom URL schemes are permitted in the `successRedirect` parameter. HTTPS is never allowed to prevent open redirects to arbitrary domains
+12. **OAuth XSS Prevention**: The OAuth success page uses a whitelist lookup for platform names rather than rendering user-supplied query parameters
 
 ### Logging
 

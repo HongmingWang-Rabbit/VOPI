@@ -29,6 +29,35 @@ import type { ShopifyConnectionMetadata, AmazonConnectionMetadata, EbayConnectio
 export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
   const logger = getLogger().child({ route: 'oauth' });
 
+  /**
+   * Build the post-OAuth success redirect URL for a given platform.
+   * Uses successRedirect from state if provided (with open redirect validation),
+   * otherwise falls back to the default OAUTH_SUCCESS_REDIRECT_URL with platform param.
+   */
+  function buildSuccessRedirectUrl(platform: string, storedState?: OAuthStateData): string {
+    const config = getConfig();
+    const defaultRedirect = config.oauthSuccessRedirectUrl;
+    let url = defaultRedirect.startsWith('/')
+      ? `${defaultRedirect}${defaultRedirect.includes('?') ? '&' : '?'}platform=${platform}`
+      : defaultRedirect;
+
+    if (storedState?.successRedirect) {
+      const redirect = storedState.successRedirect;
+      const isRelativePath = redirect.startsWith('/');
+      const allowedSchemes = config.oauthAllowedRedirectSchemes;
+      const hasAllowedScheme = allowedSchemes.length > 0 &&
+        allowedSchemes.some((scheme) => redirect.startsWith(`${scheme}://`));
+
+      if (isRelativePath || hasAllowedScheme) {
+        url = redirect;
+      } else {
+        logger.warn({ redirect }, 'Blocked disallowed successRedirect scheme');
+      }
+    }
+
+    return url;
+  }
+
   // =========================================================================
   // Platform Availability
   // =========================================================================
@@ -257,31 +286,7 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
           });
         }
 
-        // Redirect to success page: use successRedirect from state (mobile deep link),
-        // fall back to OAUTH_SUCCESS_REDIRECT_URL env var.
-        // Validate successRedirect to prevent open redirect attacks.
-        const config = getConfig();
-        const defaultRedirect = config.oauthSuccessRedirectUrl;
-        // Append platform query param to default redirect if it's a relative path
-        let successUrl = defaultRedirect.startsWith('/')
-          ? `${defaultRedirect}${defaultRedirect.includes('?') ? '&' : '?'}platform=shopify`
-          : defaultRedirect;
-
-        if (storedState.successRedirect) {
-          const redirect = storedState.successRedirect;
-          const isRelativePath = redirect.startsWith('/');
-          const allowedSchemes = config.oauthAllowedRedirectSchemes;
-          const hasAllowedScheme = allowedSchemes.length > 0 &&
-            allowedSchemes.some((scheme) => redirect.startsWith(`${scheme}://`));
-
-          if (isRelativePath || hasAllowedScheme) {
-            successUrl = redirect;
-          } else {
-            logger.warn({ redirect }, 'Blocked disallowed successRedirect scheme');
-          }
-        }
-
-        return reply.redirect(successUrl);
+        return reply.redirect(buildSuccessRedirectUrl('shopify', storedState));
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         return reply.status(400).send({
@@ -453,7 +458,7 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
           });
         }
 
-        return reply.redirect('/api/v1/connections?success=amazon');
+        return reply.redirect(buildSuccessRedirectUrl('amazon', storedState));
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         return reply.status(400).send({
@@ -607,7 +612,7 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
           });
         }
 
-        return reply.redirect('/api/v1/connections?success=ebay');
+        return reply.redirect(buildSuccessRedirectUrl('ebay', storedState));
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         return reply.status(400).send({
@@ -845,9 +850,13 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
             isValid = await shopifyOAuthService.verifyToken(shopMetadata.shop, accessToken);
             break;
           }
-          case PlatformType.AMAZON:
-            isValid = await amazonOAuthService.verifyToken(accessToken);
+          case PlatformType.AMAZON: {
+            const amazonRefreshToken = connection.refreshToken
+              ? encryptionService.decrypt(connection.refreshToken)
+              : undefined;
+            isValid = await amazonOAuthService.verifyToken(accessToken, amazonRefreshToken);
             break;
+          }
           case PlatformType.EBAY:
             isValid = await ebayOAuthService.verifyToken(accessToken);
             break;
@@ -897,7 +906,13 @@ export async function oauthRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { platform } = request.query as { platform?: string };
-      const platformName = platform ? platform.charAt(0).toUpperCase() + platform.slice(1) : 'Platform';
+      // Whitelist platform names to prevent XSS
+      const platformNames: Record<string, string> = {
+        shopify: 'Shopify',
+        amazon: 'Amazon',
+        ebay: 'eBay',
+      };
+      const platformName = (platform && platformNames[platform.toLowerCase()]) || 'Platform';
 
       return reply
         .type('text/html')

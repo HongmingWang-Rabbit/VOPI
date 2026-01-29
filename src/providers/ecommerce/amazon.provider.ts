@@ -1,3 +1,6 @@
+import { randomBytes } from 'crypto';
+import { SellingPartner } from 'amazon-sp-api';
+import { getConfig } from '../../config/index.js';
 import { getLogger } from '../../utils/logger.js';
 import type {
   EcommerceProvider,
@@ -8,147 +11,183 @@ import type {
 
 const logger = getLogger().child({ provider: 'amazon-ecommerce' });
 
-// Note: In production, use the amazon-sp-api library for proper AWS Signature v4 signing
-// This is a simplified implementation showing the structure
+/** Maximum number of images Amazon allows per listing (1 main + 8 others). */
+const MAX_AMAZON_IMAGES = 9;
 
-interface AmazonListingInput {
-  productType: string;
-  requirements?: string;
-  attributes: {
-    condition_type?: Array<{ value: string }>;
-    item_name?: Array<{ value: string }>;
-    brand?: Array<{ value: string }>;
-    bullet_point?: Array<{ value: string }>;
-    product_description?: Array<{ value: string }>;
-    manufacturer?: Array<{ value: string }>;
-    part_number?: Array<{ value: string }>;
-    item_type_keyword?: Array<{ value: string }>;
+/** Valid SP-API regions. */
+const VALID_REGIONS = new Set(['na', 'eu', 'fe']);
+
+/**
+ * Create a SellingPartner client with LWA credentials.
+ * The SDK handles AWS Signature v4 and token refresh automatically.
+ */
+export function createSPClient(refreshToken: string, region: string = 'na'): SellingPartner {
+  const config = getConfig();
+
+  if (!config.amazon.clientId || !config.amazon.clientSecret) {
+    throw new Error('Amazon SP-API credentials not configured');
+  }
+
+  const validRegion = VALID_REGIONS.has(region) ? (region as 'na' | 'eu' | 'fe') : 'na';
+
+  return new SellingPartner({
+    region: validRegion,
+    refresh_token: refreshToken,
+    credentials: {
+      SELLING_PARTNER_APP_CLIENT_ID: config.amazon.clientId,
+      SELLING_PARTNER_APP_CLIENT_SECRET: config.amazon.clientSecret,
+    },
+    options: {
+      auto_request_tokens: true,
+      auto_request_throttled: true,
+    },
+  });
+}
+
+/**
+ * Build marketplace-scoped attribute value for SP-API listings.
+ */
+function attr(value: string, marketplaceId: string): Array<{ value: string; marketplace_id: string }> {
+  return [{ value, marketplace_id: marketplaceId }];
+}
+
+interface AmazonProviderOptions {
+  publishAsDraft?: boolean;
+  sellerId?: string;
+  marketplaceId?: string;
+  refreshToken?: string;
+  region?: string;
+}
+
+/**
+ * Extract common metadata fields from the generic metadata record.
+ */
+function extractMetadataFields(metadata: Record<string, unknown>) {
+  return {
+    title: metadata.title as string | undefined,
+    description: metadata.description as string | undefined,
+    brand: metadata.brand as string | undefined,
+    category: metadata.category as string | undefined,
+    condition: metadata.condition as string | undefined,
+    bulletPoints: metadata.bulletPoints as string[] | undefined,
+    price: metadata.price as number | undefined,
+    currency: (metadata.currency as string) || 'USD',
+    imageUrls: metadata.imageUrls as string[] | undefined,
+    sku: (metadata.sku as string) || `VOPI-${Date.now()}-${randomBytes(4).toString('hex')}`,
   };
 }
 
 /**
+ * Build image attribute patches for SP-API listings.
+ */
+function buildImagePatches(
+  imageUrls: string[],
+  marketplaceId: string,
+  op: 'replace' | 'add' = 'replace'
+): Array<{ op: string; path: string; value: unknown }> {
+  const patches: Array<{ op: string; path: string; value: unknown }> = [];
+
+  if (imageUrls.length > 0) {
+    patches.push({
+      op,
+      path: '/attributes/main_offer_image_locator',
+      value: [{ media_location: imageUrls[0], marketplace_id: marketplaceId }],
+    });
+  }
+
+  for (let i = 1; i < Math.min(imageUrls.length, MAX_AMAZON_IMAGES); i++) {
+    patches.push({
+      op,
+      path: `/attributes/other_offer_image_locator_${i}`,
+      value: [{ media_location: imageUrls[i], marketplace_id: marketplaceId }],
+    });
+  }
+
+  return patches;
+}
+
+/**
  * Amazon SP-API E-Commerce Provider
- * Uses Listings API for product management
- *
- * Note: This requires the `amazon-sp-api` npm package for proper implementation
- * as it handles AWS Signature v4 signing automatically
+ * Uses the amazon-sp-api SDK for proper AWS Signature v4 signing and token management.
  */
 class AmazonProvider implements EcommerceProvider {
-  /**
-   * Make an API request to Amazon SP-API
-   * In production, this should use the amazon-sp-api library
-   */
-  private async makeRequest(
-    accessToken: string,
-    endpoint: string,
-    method: string = 'GET',
-    body?: unknown,
-    metadata?: AmazonConnectionMetadata
-  ): Promise<unknown> {
-    const region = metadata?.region || 'na';
-    const baseUrl = this.getBaseUrl(region);
-
-    // Note: This is simplified - actual implementation needs AWS Signature v4
-    const response = await fetch(`${baseUrl}${endpoint}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-amz-access-token': accessToken,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Amazon API request failed: ${error}`);
-    }
-
-    return response.json();
-  }
-
-  /**
-   * Get base URL for region
-   */
-  private getBaseUrl(region: string): string {
-    switch (region) {
-      case 'eu':
-        return 'https://sellingpartnerapi-eu.amazon.com';
-      case 'fe':
-        return 'https://sellingpartnerapi-fe.amazon.com';
-      case 'na':
-      default:
-        return 'https://sellingpartnerapi-na.amazon.com';
-    }
-  }
-
-  /**
-   * Create a product listing in Amazon
-   */
   async createProduct(
-    accessToken: string,
+    _accessToken: string,
     metadata: Record<string, unknown>,
-    options?: { publishAsDraft?: boolean; sellerId?: string; marketplaceId?: string }
+    options?: AmazonProviderOptions
   ): Promise<ProductCreationResult> {
     const sellerId = options?.sellerId;
-    const marketplaceId = options?.marketplaceId || 'ATVPDKIKX0DER'; // US marketplace
+    const marketplaceId = options?.marketplaceId || 'ATVPDKIKX0DER';
+    const refreshToken = options?.refreshToken;
+    const region = options?.region || 'na';
 
     if (!sellerId) {
       return { success: false, error: 'Seller ID is required' };
     }
+    if (!refreshToken) {
+      return { success: false, error: 'Refresh token is required for Amazon SP-API' };
+    }
 
     try {
-      // Extract fields from metadata with type safety
-      const title = metadata.title as string | undefined;
-      const description = metadata.description as string | undefined;
-      const brand = metadata.brand as string | undefined;
-      const category = metadata.category as string | undefined;
-      const condition = metadata.condition as string | undefined;
-      const bulletPoints = metadata.bulletPoints as string[] | undefined;
-      const sku = (metadata.sku as string) || `VOPI-${Date.now()}`;
+      const fields = extractMetadataFields(metadata);
 
       // Build listing attributes
-      const attributes: AmazonListingInput['attributes'] = {
-        condition_type: [{ value: condition || 'new_new' }],
-        item_name: title ? [{ value: title }] : undefined,
-        brand: brand ? [{ value: brand }] : undefined,
-        bullet_point: bulletPoints?.map((bp) => ({ value: bp })),
-        product_description: description ? [{ value: description }] : undefined,
+      const attributes: Record<string, unknown> = {
+        condition_type: attr(fields.condition || 'new_new', marketplaceId),
       };
 
-      // Remove undefined attributes
-      Object.keys(attributes).forEach((key) => {
-        if (attributes[key as keyof typeof attributes] === undefined) {
-          delete attributes[key as keyof typeof attributes];
+      if (fields.title) attributes.item_name = attr(fields.title, marketplaceId);
+      if (fields.brand) attributes.brand = attr(fields.brand, marketplaceId);
+      if (fields.description) attributes.product_description = attr(fields.description, marketplaceId);
+      if (fields.bulletPoints?.length) {
+        attributes.bullet_point = fields.bulletPoints.map((bp) => ({
+          value: bp,
+          marketplace_id: marketplaceId,
+        }));
+      }
+      if (fields.price != null) {
+        attributes.purchasable_offer = [
+          {
+            marketplace_id: marketplaceId,
+            currency: fields.currency,
+            our_price: [{ schedule: [{ value_with_tax: fields.price }] }],
+          },
+        ];
+      }
+
+      // Attach image URLs directly in listing attributes
+      if (fields.imageUrls?.length) {
+        attributes.main_offer_image_locator = [
+          { media_location: fields.imageUrls[0], marketplace_id: marketplaceId },
+        ];
+        for (let i = 1; i < Math.min(fields.imageUrls.length, MAX_AMAZON_IMAGES); i++) {
+          attributes[`other_offer_image_locator_${i}`] = [
+            { media_location: fields.imageUrls[i], marketplace_id: marketplaceId },
+          ];
         }
+      }
+
+      const productType = fields.category || 'PRODUCT';
+
+      logger.debug({ sellerId, sku: fields.sku }, 'Creating Amazon listing via SP-API');
+
+      const sp = createSPClient(refreshToken, region);
+
+      await sp.callAPI({
+        operation: 'listingsItems.putListingsItem',
+        path: { sellerId, sku: fields.sku },
+        query: { marketplaceIds: [marketplaceId] },
+        body: {
+          productType,
+          attributes,
+        },
       });
 
-      logger.debug({ sellerId, sku }, 'Creating Amazon listing');
-
-      const listingInput: AmazonListingInput = {
-        productType: category || 'PRODUCT',
-        attributes,
-      };
-
-      // Use Listings API to create/update listing
-      const endpoint = `/listings/2021-08-01/items/${sellerId}/${encodeURIComponent(sku)}`;
-
-      await this.makeRequest(
-        accessToken,
-        `${endpoint}?marketplaceIds=${marketplaceId}`,
-        'PUT',
-        listingInput,
-        { sellerId, marketplaceIds: [marketplaceId] }
-      );
-
-      logger.info({ sellerId, sku }, 'Amazon listing created');
-
-      // Amazon doesn't return a direct product URL in the API response
-      const productUrl = `https://www.amazon.com/dp/${sku}`;
+      logger.info({ sellerId, sku: fields.sku }, 'Amazon listing created');
 
       return {
         success: true,
-        productId: sku,
-        productUrl,
+        productId: fields.sku,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -157,110 +196,168 @@ class AmazonProvider implements EcommerceProvider {
     }
   }
 
-  /**
-   * Update an existing listing
-   */
   async updateProduct(
-    accessToken: string,
+    _accessToken: string,
     productId: string,
     metadata: Record<string, unknown>,
-    options?: { sellerId?: string; marketplaceId?: string }
+    options?: AmazonProviderOptions
   ): Promise<ProductCreationResult> {
-    // Amazon uses the same endpoint for create and update (PUT)
-    return this.createProduct(accessToken, { ...metadata, sku: productId }, options);
+    const sellerId = options?.sellerId;
+    const marketplaceId = options?.marketplaceId || 'ATVPDKIKX0DER';
+    const refreshToken = options?.refreshToken;
+    const region = options?.region || 'na';
+
+    if (!sellerId) {
+      return { success: false, error: 'Seller ID is required' };
+    }
+    if (!refreshToken) {
+      return { success: false, error: 'Refresh token is required for Amazon SP-API' };
+    }
+
+    try {
+      const fields = extractMetadataFields(metadata);
+
+      const patches: Array<{ op: string; path: string; value: unknown }> = [];
+
+      if (fields.title) {
+        patches.push({ op: 'replace', path: '/attributes/item_name', value: attr(fields.title, marketplaceId) });
+      }
+      if (fields.description) {
+        patches.push({ op: 'replace', path: '/attributes/product_description', value: attr(fields.description, marketplaceId) });
+      }
+      if (fields.brand) {
+        patches.push({ op: 'replace', path: '/attributes/brand', value: attr(fields.brand, marketplaceId) });
+      }
+      if (fields.bulletPoints?.length) {
+        patches.push({
+          op: 'replace',
+          path: '/attributes/bullet_point',
+          value: fields.bulletPoints.map((bp) => ({ value: bp, marketplace_id: marketplaceId })),
+        });
+      }
+      if (fields.price != null) {
+        patches.push({
+          op: 'replace',
+          path: '/attributes/purchasable_offer',
+          value: [
+            {
+              marketplace_id: marketplaceId,
+              currency: fields.currency,
+              our_price: [{ schedule: [{ value_with_tax: fields.price }] }],
+            },
+          ],
+        });
+      }
+
+      if (patches.length === 0) {
+        return { success: true, productId };
+      }
+
+      const productType = fields.category || 'PRODUCT';
+
+      logger.debug({ sellerId, sku: productId, patchCount: patches.length }, 'Updating Amazon listing via SP-API');
+
+      const sp = createSPClient(refreshToken, region);
+
+      await sp.callAPI({
+        operation: 'listingsItems.patchListingsItem',
+        path: { sellerId, sku: productId },
+        query: { marketplaceIds: [marketplaceId] },
+        body: {
+          productType,
+          patches,
+        },
+      });
+
+      logger.info({ sellerId, sku: productId }, 'Amazon listing updated');
+
+      return { success: true, productId };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error({ sellerId, productId, error: message }, 'Failed to update Amazon listing');
+      return { success: false, error: message };
+    }
   }
 
-  /**
-   * Upload images to a listing
-   * Note: Amazon uses a different process for images - they need to be uploaded to a staging area first
-   */
   async uploadImages(
     _accessToken: string,
     productId: string,
     imageUrls: string[],
-    options?: { sellerId?: string; marketplaceId?: string }
+    options?: AmazonProviderOptions & { productType?: string }
   ): Promise<ImageUploadResult[]> {
     const sellerId = options?.sellerId;
+    const marketplaceId = options?.marketplaceId || 'ATVPDKIKX0DER';
+    const refreshToken = options?.refreshToken;
+    const region = options?.region || 'na';
 
     if (!sellerId) {
       return imageUrls.map(() => ({ success: false, error: 'Seller ID is required' }));
+    }
+    if (!refreshToken) {
+      return imageUrls.map(() => ({ success: false, error: 'Refresh token is required' }));
     }
 
     try {
       logger.debug(
         { sellerId, productId, imageCount: imageUrls.length },
-        'Uploading images to Amazon listing'
+        'Uploading images to Amazon listing via SP-API'
       );
 
-      // Amazon requires images to be uploaded through a specific workflow:
-      // 1. Request upload destination from Uploads API
-      // 2. Upload image to S3 presigned URL
-      // 3. Add image reference to listing
-      // This is a simplified version
+      const patches = buildImagePatches(imageUrls, marketplaceId);
 
-      const results: ImageUploadResult[] = [];
+      const sp = createSPClient(refreshToken, region);
 
-      for (let i = 0; i < imageUrls.length; i++) {
-        try {
-          // In a full implementation, you would:
-          // 1. Call createUploadDestinationForResource
-          // 2. Upload the image bytes to the returned URL
-          // 3. Update the listing with the image reference
+      await sp.callAPI({
+        operation: 'listingsItems.patchListingsItem',
+        path: { sellerId, sku: productId },
+        query: { marketplaceIds: [marketplaceId] },
+        body: {
+          productType: options?.productType || 'PRODUCT',
+          patches,
+        },
+      });
 
-          logger.debug(
-            { sellerId, productId, imageIndex: i },
-            'Image upload placeholder - requires full SP-API implementation'
-          );
+      logger.info({ sellerId, productId, imageCount: imageUrls.length }, 'Images added to Amazon listing');
 
-          results.push({
-            success: true,
-            imageId: `image-${i}`,
-            imageUrl: imageUrls[i],
-          });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          results.push({ success: false, error: message });
-        }
-      }
-
-      return results;
+      return imageUrls.map((url, i) => ({
+        success: true,
+        imageId: `image-${i}`,
+        imageUrl: url,
+      }));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(
-        { sellerId, productId, error: message },
-        'Failed to upload images to Amazon'
-      );
+      logger.error({ sellerId, productId, error: message }, 'Failed to upload images to Amazon');
       return imageUrls.map(() => ({ success: false, error: message }));
     }
   }
 
-  /**
-   * Delete a listing
-   */
   async deleteProduct(
-    accessToken: string,
+    _accessToken: string,
     productId: string,
-    options?: { sellerId?: string; marketplaceId?: string }
+    options?: AmazonProviderOptions
   ): Promise<{ success: boolean; error?: string }> {
     const sellerId = options?.sellerId;
     const marketplaceId = options?.marketplaceId || 'ATVPDKIKX0DER';
+    const refreshToken = options?.refreshToken;
+    const region = options?.region || 'na';
 
     if (!sellerId) {
       return { success: false, error: 'Seller ID is required' };
     }
+    if (!refreshToken) {
+      return { success: false, error: 'Refresh token is required' };
+    }
 
     try {
-      logger.debug({ sellerId, productId }, 'Deleting Amazon listing');
+      logger.debug({ sellerId, productId }, 'Deleting Amazon listing via SP-API');
 
-      const endpoint = `/listings/2021-08-01/items/${sellerId}/${encodeURIComponent(productId)}`;
+      const sp = createSPClient(refreshToken, region);
 
-      await this.makeRequest(
-        accessToken,
-        `${endpoint}?marketplaceIds=${marketplaceId}`,
-        'DELETE',
-        undefined,
-        { sellerId, marketplaceIds: [marketplaceId] }
-      );
+      await sp.callAPI({
+        operation: 'listingsItems.deleteListingsItem',
+        path: { sellerId, sku: productId },
+        query: { marketplaceIds: [marketplaceId] },
+      });
 
       logger.info({ sellerId, productId }, 'Amazon listing deleted');
 
@@ -272,22 +369,96 @@ class AmazonProvider implements EcommerceProvider {
     }
   }
 
-  /**
-   * Verify token is still valid
-   */
-  async verifyToken(accessToken: string): Promise<boolean> {
+  async verifyToken(
+    _accessToken: string,
+    options?: { refreshToken?: string; region?: string }
+  ): Promise<boolean> {
+    const refreshToken = options?.refreshToken;
+    const region = options?.region || 'na';
+
+    if (!refreshToken) {
+      return false;
+    }
+
     try {
-      // Make a simple API call to verify token
-      await this.makeRequest(
-        accessToken,
-        '/sellers/v1/marketplaceParticipations',
-        'GET'
-      );
+      const sp = createSPClient(refreshToken, region);
+      await sp.callAPI({
+        operation: 'sellers.getMarketplaceParticipations',
+      });
       return true;
     } catch {
       return false;
     }
   }
+}
+
+/**
+ * Get seller info (seller ID, marketplace IDs) using a refresh token.
+ * Used during OAuth callback to populate connection metadata.
+ *
+ * Tries `getAccount` first for seller ID. If unavailable, falls back to
+ * extracting the selling partner ID from `getMarketplaceParticipations`
+ * payload (the `sellerId` field in newer API versions).
+ */
+export async function getSellerInfoFromSPAPI(
+  refreshToken: string,
+  region: string = 'na'
+): Promise<AmazonConnectionMetadata> {
+  const sp = createSPClient(refreshToken, region);
+
+  const res = await sp.callAPI({
+    operation: 'sellers.getMarketplaceParticipations',
+  });
+
+  // Response is an array of { marketplace, participation } objects
+  const participations = res as Array<{
+    marketplace: { id: string; countryCode: string; name: string };
+    participation: { isParticipating: boolean; hasSuspendedListings: boolean; sellerId?: string };
+  }>;
+
+  if (!participations?.length) {
+    throw new Error('No marketplace participations found for this seller');
+  }
+
+  const marketplaceIds = participations
+    .filter((p) => p.participation.isParticipating)
+    .map((p) => p.marketplace.id);
+
+  // Try multiple methods to retrieve seller ID
+  let sellerId: string | undefined;
+
+  // Method 1: Try getAccount endpoint (sellers v1)
+  try {
+    const accountRes = await sp.callAPI({
+      operation: 'sellers.getAccount',
+    });
+    sellerId = (accountRes as { sellerId?: string })?.sellerId;
+  } catch {
+    logger.debug('getAccount not available, trying fallback methods');
+  }
+
+  // Method 2: Some SP-API responses include sellerId in participation data
+  if (!sellerId) {
+    for (const p of participations) {
+      if (p.participation.sellerId) {
+        sellerId = p.participation.sellerId;
+        break;
+      }
+    }
+  }
+
+  if (!sellerId) {
+    throw new Error(
+      'Could not determine seller ID. Ensure the SP-API app has seller authorization (not just LWA profile scope). ' +
+      'Use the Seller Central authorization URL (sellercentral.amazon.com/apps/authorize/consent) instead of LWA.'
+    );
+  }
+
+  return {
+    sellerId,
+    marketplaceIds: marketplaceIds.length > 0 ? marketplaceIds : ['ATVPDKIKX0DER'],
+    region,
+  };
 }
 
 export const amazonProvider = new AmazonProvider();

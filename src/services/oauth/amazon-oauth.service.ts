@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import { getConfig } from '../../config/index.js';
 import { getLogger } from '../../utils/logger.js';
 import { encryptionService } from '../encryption.service.js';
+import { getSellerInfoFromSPAPI, createSPClient } from '../../providers/ecommerce/amazon.provider.js';
 import type { AmazonConnectionMetadata } from '../../types/auth.types.js';
 
 const logger = getLogger().child({ service: 'amazon-oauth' });
@@ -165,41 +166,41 @@ class AmazonOAuthService {
   }
 
   /**
-   * Get seller info using the SP-API
-   * This requires the amazon-sp-api library for proper AWS signature
+   * Get seller info using the SP-API via amazon-sp-api SDK.
+   * Uses the refresh token to authenticate and retrieve seller ID + marketplace participations.
    */
   async getSellerInfo(
     _accessToken: string,
-    _refreshToken: string
+    refreshToken: string
   ): Promise<AmazonConnectionMetadata> {
-    // Note: In production, use amazon-sp-api library for proper API calls
-    // This is a simplified version - actual implementation would use the SP-API SDK
+    logger.debug('Retrieving Amazon seller info via SP-API');
 
-    // For now, we'll create a basic metadata object
-    // The actual seller ID would be obtained during the SP-API authorization flow
-    logger.debug('Creating Amazon connection metadata');
-
-    return {
-      sellerId: 'pending', // Will be populated from SP-API authorization
-      marketplaceIds: ['ATVPDKIKX0DER'], // Default to US marketplace
-      region: 'na', // North America
-    };
+    return getSellerInfoFromSPAPI(refreshToken, 'na');
   }
 
   /**
-   * Verify token is still valid
+   * Verify token is still valid using SP-API.
+   * Requires the refresh token to create a proper SP-API client.
    */
-  async verifyToken(accessToken: string): Promise<boolean> {
-    // Make a simple request to verify token
-    // In production, this would use the SP-API
-    try {
-      const response = await fetch('https://api.amazon.com/user/profile', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+  async verifyToken(accessToken: string, refreshToken?: string): Promise<boolean> {
+    if (!refreshToken) {
+      // Fall back to LWA profile check if no refresh token available
+      try {
+        const response = await fetch('https://api.amazon.com/user/profile', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    }
 
-      return response.ok;
+    try {
+      const sp = createSPClient(refreshToken, 'na');
+      await sp.callAPI({
+        operation: 'sellers.getMarketplaceParticipations',
+      });
+      return true;
     } catch {
       return false;
     }

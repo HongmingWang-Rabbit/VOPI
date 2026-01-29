@@ -21,6 +21,9 @@ The `/src/services/` directory contains the core business logic modules. Each se
 | **Global Config** | `global-config.service.ts` | Runtime configuration with caching |
 | **Stripe** | `stripe.service.ts` | Payment processing and checkout sessions |
 | **State Store** | `state-store.service.ts` | OAuth state storage (Redis/memory) |
+| **Shopify** | `providers/ecommerce/shopify.provider.ts` | Shopify product creation/updates via GraphQL Admin API (`productSet`) |
+| **Amazon** | `providers/ecommerce/amazon.provider.ts` | Amazon SP-API product listing via `amazon-sp-api` SDK |
+| **eBay** | `providers/ecommerce/ebay.provider.ts` | eBay Inventory API product listing |
 
 ---
 
@@ -495,7 +498,7 @@ The provider includes helper functions to format metadata for specific platforms
 
 | Function | Output Format | Key Mappings |
 |----------|---------------|--------------|
-| `formatForShopify()` | Shopify GraphQL `productCreate` format | Adds `metafields` for materials, care instructions, gender |
+| `formatForShopify()` | Shopify GraphQL `productSet` format | Adds `metafields` for materials, care instructions, gender |
 | `formatForAmazon()` | SP-API Listings Items JSON | Maps `gender` → `department`, `targetAudience` → `target_audience_keyword`, `price` → `standard_price` |
 | `formatForEbay()` | eBay Inventory API format | Adds `Gender`, `Style`, `Age Group`, `Pattern` aspects; maps `price` → `pricingSummary` |
 
@@ -1804,3 +1807,175 @@ Get the quality score for a frame, handling missing scores.
 #### `groupFramesByAngle(frames): Map<string, FrameMetadata[]>`
 
 Group frames by their angle estimate for analysis.
+
+---
+
+## Shopify E-Commerce Provider
+
+**File**: `src/providers/ecommerce/shopify.provider.ts`
+
+Manages Shopify product creation, updates, and image uploads via the GraphQL Admin API.
+
+### API Version
+
+Uses Shopify GraphQL Admin API version `2026-01`.
+
+### Key Implementation Details
+
+- **`productSet` mutation**: Both product creation and updates use the unified `productSet` GraphQL mutation (replaced separate `productCreate`/`productUpdate` in January 2026). This enables richer metadata mapping including price, SKU, barcode, weight, SEO fields, and metafields in a single operation.
+- **Metafields**: Automatically creates custom metafields for `materials` (list), `color`, `gender`, and `style` (single-line text fields).
+- **Staged image uploads**: Uses a 3-step flow (`stagedUploadsCreate` → download + upload → `productCreateMedia`) to handle private S3 bucket access and improve reliability.
+- **Weight mapping**: Maps product weight with unit conversion via `mapWeightUnitToShopify()`.
+
+### Methods
+
+#### `createProduct(accessToken, shop, metadata, options)`
+
+Create a product using `productSet` mutation with full metadata mapping.
+
+#### `updateProduct(accessToken, shop, productId, metadata)`
+
+Update an existing product using `productSet` mutation (passes existing `productId` in input).
+
+#### `uploadImages(accessToken, productId, imageUrls, options)`
+
+Upload images to a product using Shopify's staged upload flow. This is a 3-step process that handles private S3 bucket access via presigned URLs and provides better reliability than direct URL passing.
+
+**Process**:
+1. **Stage**: Call `stagedUploadsCreate` GraphQL mutation to get upload targets with presigned upload endpoints
+2. **Download & Upload**: Download each image from source URL, build multipart form data, upload to Shopify staging target (done in parallel for performance)
+3. **Attach**: Call `productCreateMedia` mutation to attach staged images to product
+
+**Returns**:
+```typescript
+ImageUploadResult[] {
+  success: boolean;
+  imageId?: string;      // Shopify media ID
+  imageUrl?: string;     // Shopify image URL
+  error?: string;        // Error message if failed
+}
+```
+
+**Design benefits**:
+- Handles private S3 buckets: Server generates presigned URLs (1 hour expiry) for temporary public access
+- Parallel uploads: Multiple images downloaded and uploaded to staging targets simultaneously
+- Reliable: Shopify's staging system handles transient failures better than direct URL access
+- Separation of concerns: Staging guarantees images are ready before attaching to product
+- Compatibility: Works with any image source (S3, external URLs, etc.)
+
+#### `createStagedUploads(shop, accessToken, imageUrls)` (private)
+
+Call Shopify's `stagedUploadsCreate` GraphQL mutation to reserve upload slots.
+
+**GraphQL Mutation**:
+```graphql
+mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
+  stagedUploadsCreate(input: $input) {
+    stagedTargets { resourceUrl uploadUrl parameters { key value } }
+    userErrors { field message }
+  }
+}
+```
+
+**Returns**: Array of staging targets with:
+- `resourceUrl`: Final URL after upload completes (used in `productCreateMedia`)
+- `uploadUrl`: Presigned upload endpoint (target for multipart POST)
+- `parameters`: Array of `{ key, value }` form data fields required by Shopify
+
+#### `uploadToStagedTarget(sourceUrl, target)` (private)
+
+Download image from source and upload to Shopify staging target.
+
+**Process**:
+1. Download image from source URL (supports S3 presigned URLs and HTTP/HTTPS)
+2. Build multipart/form-data with Shopify parameters + image file
+3. POST to Shopify upload endpoint (`target.uploadUrl`)
+4. Verify successful upload status (201 Created expected)
+5. Log result and handle errors gracefully
+
+**Parameters**:
+- `sourceUrl`: Public/presigned URL pointing to image source
+- `target`: Staging target from `createStagedUploads()` containing `uploadUrl` and `parameters`
+
+### OAuth Flow
+
+Platform OAuth is handled by `src/services/oauth/shopify-oauth.service.ts`:
+- HMAC verification uses all raw query parameters (Shopify may include extra params like `host`)
+- Token exchange via Shopify's OAuth endpoint
+- Shop info retrieval for connection metadata
+
+---
+
+## Amazon SP-API E-Commerce Provider
+
+**File**: `src/providers/ecommerce/amazon.provider.ts`
+
+Manages Amazon product listings via the SP-API using the `amazon-sp-api` npm package. The SDK handles AWS Signature v4 signing and LWA token refresh automatically — no IAM credentials are needed.
+
+### Dependencies
+
+- **`amazon-sp-api`** npm package (v1.2.0+)
+- LWA credentials: `AMAZON_CLIENT_ID` and `AMAZON_CLIENT_SECRET`
+- Seller's refresh token (obtained during OAuth and stored encrypted)
+
+### Key Implementation Details
+
+- **`amazon-sp-api` SDK**: All API calls go through the `SellingPartner` class with `auto_request_tokens: true` for automatic token refresh and `auto_request_throttled: true` for rate limit retry.
+- **Listings Items API**: Uses `putListingsItem` (create), `patchListingsItem` (update/images), and `deleteListingsItem` (delete).
+- **Marketplace-scoped attributes**: All listing attributes use the format `[{value, marketplace_id}]`.
+- **Image URLs in attributes**: Amazon doesn't use binary image upload — images are publicly accessible URLs set as listing attributes (`main_offer_image_locator` + `other_offer_image_locator_1..8`, max 9 images).
+- **Refresh token plumbing**: The encrypted refresh token is stored in the `platform_connections` table and decrypted at call time in `listings.routes.ts` before being passed to the provider.
+
+### SP-API Attribute Mapping
+
+| ProductMetadata Field | SP-API Attribute | Format |
+|---|---|---|
+| title | `item_name` | `[{value, marketplace_id}]` |
+| description | `product_description` | `[{value, marketplace_id}]` |
+| brand | `brand` | `[{value, marketplace_id}]` |
+| bulletPoints | `bullet_point` | `[{value, marketplace_id}]` per bullet |
+| price | `purchasable_offer` | `[{marketplace_id, currency, our_price: [{schedule: [{value_with_tax}]}]}]` |
+| condition | `condition_type` | `[{value: 'new_new', marketplace_id}]` |
+| images (1st) | `main_offer_image_locator` | `[{media_location, marketplace_id}]` |
+| images (2-9) | `other_offer_image_locator_N` | `[{media_location, marketplace_id}]` |
+
+### Methods
+
+#### `createProduct(accessToken, metadata, options)`
+
+Create a listing using `putListingsItem` with full attribute mapping. Generates a SKU from timestamp if not provided.
+
+#### `updateProduct(accessToken, productId, metadata, options)`
+
+Partial update via `patchListingsItem` with JSON Patch operations. Only changed fields are sent.
+
+#### `uploadImages(accessToken, productId, imageUrls, options)`
+
+Add image URLs to an existing listing via `patchListingsItem`. Images must be publicly accessible (presigned S3 URLs work).
+
+#### `deleteProduct(accessToken, productId, options)`
+
+Delete a listing via `deleteListingsItem`.
+
+#### `verifyToken(accessToken, options)`
+
+Verify token validity by calling `getMarketplaceParticipations`. Requires the refresh token in options.
+
+### Seller Info Retrieval
+
+**Function**: `getSellerInfoFromSPAPI(refreshToken, region)`
+
+Called during OAuth callback to populate connection metadata. Retrieves the seller ID and marketplace IDs using multiple fallback methods:
+
+1. **`getAccount`** endpoint (sellers v1) — primary method
+2. **`participation.sellerId`** field from `getMarketplaceParticipations` response — fallback
+
+Returns `AmazonConnectionMetadata` with `sellerId`, `marketplaceIds`, and `region`.
+
+### OAuth Flow
+
+Platform OAuth is handled by `src/services/oauth/amazon-oauth.service.ts`:
+- Uses Login with Amazon (LWA) OAuth flow via Seller Central authorization URL
+- Token exchange and refresh via Amazon's LWA token endpoint
+- Seller info retrieval via SP-API during callback (populates seller ID and marketplace IDs)
+- Token verification supports both SP-API (with refresh token) and LWA profile check (fallback)

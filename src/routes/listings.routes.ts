@@ -18,6 +18,7 @@ import type {
 } from '../types/auth.types.js';
 import { z } from 'zod';
 import { storageService } from '../services/storage.service.js';
+import { encryptionService } from '../services/encryption.service.js';
 import { extractS3KeyFromUrl } from '../utils/s3-url.js';
 import { getConfig } from '../config/index.js';
 import { getLogger } from '../utils/logger.js';
@@ -46,6 +47,7 @@ async function executePush(params: {
     platform: string;
     metadata: unknown;
     userId: string;
+    refreshToken: string | null;
   };
   job: {
     productMetadata: { product?: Record<string, unknown> } | null;
@@ -76,6 +78,11 @@ async function executePush(params: {
 
     const publishAsDraft = options?.publishAsDraft !== false;
 
+    // Decrypt Amazon refresh token once for use in both create and image upload
+    const amazonRefreshToken = connection.platform === PlatformType.AMAZON && connection.refreshToken
+      ? encryptionService.decrypt(connection.refreshToken)
+      : undefined;
+
     let result;
 
     // Push to platform
@@ -95,6 +102,8 @@ async function executePush(params: {
           publishAsDraft,
           sellerId: amazonMetadata.sellerId,
           marketplaceId: amazonMetadata.marketplaceIds?.[0],
+          refreshToken: amazonRefreshToken,
+          region: amazonMetadata.region,
         });
         break;
       }
@@ -174,12 +183,17 @@ async function executePush(params: {
           break;
         }
         case PlatformType.AMAZON: {
-          const amazonMetadata = connection.metadata as AmazonConnectionMetadata;
+          const amazonMeta = connection.metadata as AmazonConnectionMetadata;
           await amazonProvider.uploadImages(
             accessToken,
             result.productId!,
             imageUrls,
-            { sellerId: amazonMetadata.sellerId }
+            {
+              sellerId: amazonMeta.sellerId,
+              marketplaceId: amazonMeta.marketplaceIds?.[0],
+              refreshToken: amazonRefreshToken,
+              region: amazonMeta.region,
+            }
           );
           break;
         }
@@ -361,6 +375,7 @@ export async function listingsRoutes(fastify: FastifyInstance): Promise<void> {
           platform: connection.platform,
           metadata: connection.metadata,
           userId: request.user!.id,
+          refreshToken: connection.refreshToken,
         },
         job: {
           productMetadata,
@@ -695,6 +710,7 @@ export async function listingsRoutes(fastify: FastifyInstance): Promise<void> {
           platform: connection.platform,
           metadata: connection.metadata,
           userId: request.user!.id,
+          refreshToken: connection.refreshToken,
         },
         job: {
           productMetadata,
