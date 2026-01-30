@@ -250,7 +250,8 @@ describe('geminiAudioAnalysisProcessor', () => {
           model: 'gemini-2.0-flash-lite',
           maxBulletPoints: 3,
           focusAreas: ['price', 'materials'],
-        })
+        }),
+        undefined // tokenUsage tracker
       );
     });
 

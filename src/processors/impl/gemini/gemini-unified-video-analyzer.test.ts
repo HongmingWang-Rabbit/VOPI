@@ -291,7 +291,8 @@ describe('geminiUnifiedVideoAnalyzerProcessor', () => {
           maxBulletPoints: 3,
           skipAudioAnalysis: true,
           model: 'gemini-custom-model',
-        })
+        }),
+        undefined // tokenUsage tracker
       );
     });
 
