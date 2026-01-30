@@ -60,6 +60,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Security plugins
   await app.register(helmet, {
     contentSecurityPolicy: false, // Disable for API
+    // Allow Shopify admin to embed this app in an iframe
+    frameguard: false,
   });
 
   await app.register(cors, {
