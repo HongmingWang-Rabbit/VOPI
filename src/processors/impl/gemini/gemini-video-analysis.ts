@@ -73,7 +73,7 @@ export const geminiVideoAnalysisProcessor: Processor = {
         maxFrames,
         temperature: effectiveConfig.temperature,
         topP: effectiveConfig.topP,
-      }),
+      }, context.tokenUsage),
       { videoPath, maxFrames }
     );
 

@@ -10,6 +10,7 @@ import { GoogleGenerativeAI, type GenerativeModel } from '@google/generative-ai'
 import { GoogleAIFileManager, FileState, type FileMetadataResponse } from '@google/generative-ai/server';
 import { createChildLogger } from '../../utils/logger.js';
 import { ExternalApiError } from '../../utils/errors.js';
+import type { TokenUsageTracker } from '../../utils/token-usage.js';
 import { getConfig } from '../../config/index.js';
 import { getAudioMimeType } from '../../utils/mime-types.js';
 import type {
@@ -199,7 +200,8 @@ export class GeminiAudioAnalysisProvider implements AudioAnalysisProvider {
    */
   async analyzeAudio(
     audioPath: string,
-    options: AudioAnalysisOptions = {}
+    options: AudioAnalysisOptions = {},
+    tokenUsage?: TokenUsageTracker
   ): Promise<AudioAnalysisResult> {
     const config = getConfig();
     const {
@@ -242,6 +244,15 @@ export class GeminiAudioAnalysisProvider implements AudioAnalysisProvider {
           const result = await geminiModel.generateContent(content);
           const response = await result.response;
           const text = response.text();
+
+          if (tokenUsage && response.usageMetadata) {
+            tokenUsage.record(
+              model,
+              'gemini-audio-analysis',
+              response.usageMetadata.promptTokenCount ?? 0,
+              response.usageMetadata.candidatesTokenCount ?? 0,
+            );
+          }
 
           const parsed = this.parseResponse(text);
           return this.convertToResult(parsed);

@@ -5,6 +5,7 @@
  */
 
 import type { GeminiAudioAnalysisResponse, ProductMetadata, MetadataConfidence } from '../../types/product-metadata.types.js';
+import type { TokenUsageTracker } from '../../utils/token-usage.js';
 
 /**
  * Options for audio analysis
@@ -65,7 +66,7 @@ export interface AudioAnalysisProvider {
    * @param options - Analysis options
    * @returns Analysis result with transcript and metadata
    */
-  analyzeAudio(audioPath: string, options?: AudioAnalysisOptions): Promise<AudioAnalysisResult>;
+  analyzeAudio(audioPath: string, options?: AudioAnalysisOptions, tokenUsage?: TokenUsageTracker): Promise<AudioAnalysisResult>;
 
   /**
    * Upload audio file to provider (if needed for processing)

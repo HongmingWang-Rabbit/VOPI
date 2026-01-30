@@ -14,6 +14,7 @@ import { GoogleGenerativeAI, type GenerativeModel } from '@google/generative-ai'
 import { GoogleAIFileManager, FileState } from '@google/generative-ai/server';
 import { createChildLogger } from '../../utils/logger.js';
 import { ExternalApiError } from '../../utils/errors.js';
+import type { TokenUsageTracker } from '../../utils/token-usage.js';
 import { getConfig } from '../../config/index.js';
 import type {
   VideoAnalysisProvider,
@@ -316,7 +317,8 @@ export class GeminiVideoAnalysisProvider implements VideoAnalysisProvider {
    */
   async analyzeVideo(
     videoPath: string,
-    options: VideoAnalysisOptions = {}
+    options: VideoAnalysisOptions = {},
+    tokenUsage?: TokenUsageTracker
   ): Promise<VideoAnalysisResult> {
     const config = getConfig();
     const {
@@ -367,6 +369,15 @@ export class GeminiVideoAnalysisProvider implements VideoAnalysisProvider {
           const result = await geminiModel.generateContent(content);
           const response = await result.response;
           const text = response.text();
+
+          if (tokenUsage && response.usageMetadata) {
+            tokenUsage.record(
+              model,
+              'gemini-video-analysis',
+              response.usageMetadata.promptTokenCount ?? 0,
+              response.usageMetadata.candidatesTokenCount ?? 0,
+            );
+          }
 
           const parsed = this.parseResponse(text);
 

@@ -2,6 +2,7 @@ import type {
   FrameObstructions,
   BackgroundRecommendations,
 } from '../../types/job.types.js';
+import type { TokenUsageTracker } from '../../utils/token-usage.js';
 
 /**
  * Frame selection from video analysis
@@ -89,7 +90,8 @@ export interface VideoAnalysisProvider {
    */
   analyzeVideo(
     videoPath: string,
-    options?: VideoAnalysisOptions
+    options?: VideoAnalysisOptions,
+    tokenUsage?: TokenUsageTracker
   ): Promise<VideoAnalysisResult>;
 
   /**

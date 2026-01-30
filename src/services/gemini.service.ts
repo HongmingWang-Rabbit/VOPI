@@ -3,6 +3,7 @@ import { readFile } from 'fs/promises';
 
 import { createChildLogger } from '../utils/logger.js';
 import { ExternalApiError } from '../utils/errors.js';
+import type { TokenUsageTracker } from '../utils/token-usage.js';
 import { getConfig } from '../config/index.js';
 import { GEMINI_SYSTEM_PROMPT } from '../templates/gemini-system-prompt.js';
 import { GEMINI_OUTPUT_SCHEMA } from '../templates/gemini-output-schema.js';
@@ -296,7 +297,8 @@ Return ONLY the JSON object. No additional text.`;
     }>,
     videoMetadata: VideoMetadata,
     options: { model?: string; maxRetries?: number; retryDelay?: number } = {},
-    transcriptContext?: TranscriptContext
+    transcriptContext?: TranscriptContext,
+    tokenUsage?: TokenUsageTracker
   ): Promise<GeminiResponse> {
     const config = getConfig();
     const {
@@ -334,6 +336,15 @@ Return ONLY the JSON object. No additional text.`;
         const result = await geminiModel.generateContent(content);
         const response = await result.response;
         const text = response.text();
+
+        if (tokenUsage && response.usageMetadata) {
+          tokenUsage.record(
+            model,
+            'gemini-classify',
+            response.usageMetadata.promptTokenCount ?? 0,
+            response.usageMetadata.candidatesTokenCount ?? 0,
+          );
+        }
 
         return this.parseResponse(text);
       } catch (e) {

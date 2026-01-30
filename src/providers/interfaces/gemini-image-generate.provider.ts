@@ -5,6 +5,8 @@
  * This provider generates variants (white studio, lifestyle) from raw video frames.
  */
 
+import type { TokenUsageTracker } from '../../utils/token-usage.js';
+
 /**
  * Variant types for Gemini image generation
  */
@@ -93,7 +95,8 @@ export interface GeminiImageGenerateProvider {
   generateVariant(
     imagePath: string,
     outputPath: string,
-    options: GeminiImageGenerateOptions
+    options: GeminiImageGenerateOptions,
+    tokenUsage?: TokenUsageTracker
   ): Promise<GeminiImageGenerateResult>;
 
   /**
@@ -107,7 +110,8 @@ export interface GeminiImageGenerateProvider {
     imagePath: string,
     outputDir: string,
     frameId: string,
-    options?: GeminiImageGenerateAllOptions
+    options?: GeminiImageGenerateAllOptions,
+    tokenUsage?: TokenUsageTracker
   ): Promise<GeminiImageGenerateAllResult>;
 
   /**

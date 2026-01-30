@@ -15,6 +15,7 @@ import path from 'path';
 import { GoogleGenerativeAI, type GenerativeModel, type Part } from '@google/generative-ai';
 
 import { createChildLogger } from '../../utils/logger.js';
+import type { TokenUsageTracker } from '../../utils/token-usage.js';
 import { getConfig } from '../../config/index.js';
 import { DEFAULT_GEMINI_IMAGE_MODEL } from '../../types/config.types.js';
 import { getImageMimeType, limitReferenceFrames, MAX_REFERENCE_FRAMES } from '../../utils/image-utils.js';
@@ -82,7 +83,8 @@ export class GeminiImageGenerateProviderImpl implements GeminiImageGenerateProvi
   async generateVariant(
     imagePath: string,
     outputPath: string,
-    options: GeminiImageGenerateOptions
+    options: GeminiImageGenerateOptions,
+    tokenUsage?: TokenUsageTracker
   ): Promise<GeminiImageGenerateResult> {
     try {
       // Limit reference frames to avoid API limits
@@ -181,6 +183,16 @@ export class GeminiImageGenerateProviderImpl implements GeminiImageGenerateProvi
       });
 
       const response = result.response;
+
+      if (tokenUsage && response.usageMetadata) {
+        tokenUsage.record(
+          DEFAULT_GEMINI_IMAGE_MODEL,
+          'gemini-image-generate',
+          response.usageMetadata.promptTokenCount ?? 0,
+          response.usageMetadata.candidatesTokenCount ?? 0,
+        );
+      }
+
       const candidates = response.candidates;
 
       if (!candidates || candidates.length === 0) {
@@ -270,7 +282,8 @@ export class GeminiImageGenerateProviderImpl implements GeminiImageGenerateProvi
     imagePath: string,
     outputDir: string,
     frameId: string,
-    options?: GeminiImageGenerateAllOptions
+    options?: GeminiImageGenerateAllOptions,
+    tokenUsage?: TokenUsageTracker
   ): Promise<GeminiImageGenerateAllResult> {
     const variants: GeminiImageVariant[] = options?.variants ?? ['white-studio', 'lifestyle'];
     const results: Record<GeminiImageVariant, GeminiImageGenerateResult> = {} as Record<GeminiImageVariant, GeminiImageGenerateResult>;
@@ -287,7 +300,7 @@ export class GeminiImageGenerateProviderImpl implements GeminiImageGenerateProvi
         productDescription: options?.productDescription,
         productCategory: options?.productCategory,
         referenceFramePaths: options?.referenceFramePaths,
-      });
+      }, tokenUsage);
 
       results[variant] = result;
 

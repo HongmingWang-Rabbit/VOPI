@@ -156,7 +156,7 @@ export const geminiQualityFilterProcessor: Processor = {
         minQualityScore: opts.minQualityScore,
         allowHands: opts.allowHands,
         referenceImages,  // Pass original frames for comparison
-      }),
+      }, context.tokenUsage),
       { imageCount: imagesToFilter.length, referenceCount: referenceImages.length }
     );
 

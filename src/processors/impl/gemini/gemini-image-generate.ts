@@ -32,6 +32,7 @@ import { getDatabase, schema } from '../../../db/index.js';
 import type { NewCommercialImage } from '../../../db/schema.js';
 import { JobStatus } from '../../../types/job.types.js';
 import { createChildLogger } from '../../../utils/logger.js';
+import type { TokenUsageTracker } from '../../../utils/token-usage.js';
 import { selectBestAngles } from '../../../utils/frame-selection.js';
 import { PROGRESS, calculateProgress } from '../../constants.js';
 import { parallelMap, isParallelError } from '../../../utils/parallel.js';
@@ -118,7 +119,8 @@ async function processFrame(
     description?: string;
     category?: string;
   },
-  referenceFramePaths: string[]
+  referenceFramePaths: string[],
+  tokenUsage?: TokenUsageTracker
 ): Promise<FrameGenerationResult> {
   const recommendedType = frame.recommendedType || frame.frameId;
   const commercialImages: CommercialImageData[] = [];
@@ -137,7 +139,7 @@ async function processFrame(
           productDescription: productContext.description,
           productCategory: productContext.category,
           referenceFramePaths,
-        }),
+        }, tokenUsage),
         { frameId: frame.frameId, variant }
       );
 
@@ -294,7 +296,8 @@ export const geminiImageGenerateProcessor: Processor = {
             variants,
             frameDbId,
             productContext,
-            referenceFramePaths
+            referenceFramePaths,
+            context.tokenUsage
           );
 
           // Update progress

@@ -166,7 +166,7 @@ export const geminiUnifiedVideoAnalyzerProcessor: Processor = {
         skipAudioAnalysis,
         temperature: effectiveConfig.temperature,
         topP: effectiveConfig.topP,
-      }),
+      }, context.tokenUsage),
       { videoPath, maxFrames, skipAudioAnalysis }
     );
 

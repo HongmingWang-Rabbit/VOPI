@@ -485,6 +485,28 @@ VOPI_CONCURRENCY_GEMINI_IMAGE_GENERATE=3
 VOPI_CONCURRENCY_GEMINI_QUALITY_FILTER=3
 ```
 
+### Token Usage Tracking
+
+The stack runner automatically tracks Gemini API token usage across all processors in a pipeline run. A `TokenUsageTracker` is created at the start of each `execute()` call and attached to `ProcessorContext`. Each Gemini provider captures `response.usageMetadata` (promptTokenCount, candidatesTokenCount) after every `generateContent()` call and records it via the tracker.
+
+At the end of stack execution, a summary is logged with per-processor+model breakdowns and totals:
+
+```
+Token Usage Summary:
+  Processor                      | Model             | Calls | Prompt | Candidates | Total
+  gemini-unified-video-analyzer  | gemini-2.0-flash  |     1 |  12543 |       1832 | 14375
+  gemini-image-generate          | gemini-2.5-flash  |     8 |   8201 |       4521 | 12722
+  TOTAL                          |                   |     9 |  20744 |       6353 | 27097
+```
+
+Tracked call sites:
+- `gemini.service.ts` — frame classification
+- `gemini-audio-analysis.provider.ts` — audio transcription
+- `gemini-video-analysis.provider.ts` — video analysis
+- `gemini-unified-video-analyzer.provider.ts` — combined audio+video analysis
+- `gemini-image-generate.provider.ts` — native image generation
+- `gemini-quality-filter.provider.ts` — quality filtering
+
 ### Key Files
 
 | File | Purpose |
@@ -495,6 +517,7 @@ VOPI_CONCURRENCY_GEMINI_QUALITY_FILTER=3
 | `src/processors/concurrency.ts` | Centralized concurrency configuration |
 | `src/processors/templates/index.ts` | Pre-defined stack templates |
 | `src/processors/impl/` | Individual processor implementations |
+| `src/utils/token-usage.ts` | Gemini token usage tracking utility |
 
 ## Directory Structure
 

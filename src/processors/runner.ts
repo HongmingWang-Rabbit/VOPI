@@ -17,6 +17,7 @@ import type {
 import { validateDataRequirements } from './types.js';
 import { processorRegistry } from './registry.js';
 import { createChildLogger } from '../utils/logger.js';
+import { TokenUsageTracker } from '../utils/token-usage.js';
 
 const logger = createChildLogger({ service: 'stack-runner' });
 
@@ -219,6 +220,10 @@ export class StackRunner {
       throw new Error(`Invalid stack: ${validation.error}`);
     }
 
+    // Initialize token usage tracker (reuse existing if present)
+    const tokenUsage = context.tokenUsage ?? new TokenUsageTracker();
+    context.tokenUsage = tokenUsage;
+
     // Initialize pipeline data with empty metadata if not provided
     let data: PipelineData = initialData || { metadata: {} };
 
@@ -320,6 +325,8 @@ export class StackRunner {
       stackId: stack.id,
       jobId: context.jobId,
     }, 'Stack execution completed');
+
+    tokenUsage.logSummary(context.jobId);
 
     return data;
   }

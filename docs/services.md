@@ -358,7 +358,7 @@ interface BackgroundRecommendations {
 
 ### Methods
 
-#### `classifyFrames(frames, metadata, videoMetadata, options): Promise<GeminiResponse>`
+#### `classifyFrames(frames, metadata, videoMetadata, options, tokenUsage?): Promise<GeminiResponse>`
 
 Send batch of frames to Gemini for classification.
 
@@ -1807,6 +1807,58 @@ Get the quality score for a frame, handling missing scores.
 #### `groupFramesByAngle(frames): Map<string, FrameMetadata[]>`
 
 Group frames by their angle estimate for analysis.
+
+---
+
+## Token Usage Tracker
+
+**File**: `src/utils/token-usage.ts`
+
+Tracks Gemini API token consumption across all providers during a pipeline run.
+
+### Purpose
+
+1. **Cost Monitoring**: See prompt and candidate token counts per processor+model combination
+2. **Per-Job Tracking**: Each pipeline execution gets its own tracker via `ProcessorContext.tokenUsage`
+3. **Automatic Logging**: Summary logged at the end of each stack execution with job ID
+
+### Class: `TokenUsageTracker`
+
+#### `record(model, processor, promptTokens, candidatesTokens): void`
+
+Accumulate token usage for a processor+model combination. Multiple calls with the same key are summed.
+
+#### `getSummary(): TokenUsageSummary`
+
+Returns all entries and computed totals.
+
+```typescript
+interface TokenUsageSummary {
+  entries: TokenUsage[];
+  totals: TokenUsageTotals;
+}
+
+interface TokenUsage {
+  model: string;
+  processor: string;
+  promptTokens: number;
+  candidatesTokens: number;
+  totalTokens: number;
+  callCount: number;
+}
+```
+
+#### `logSummary(jobId?): void`
+
+Log a structured summary table via pino logger. No-op if no entries recorded.
+
+#### `reset(): void`
+
+Clear all accumulated entries.
+
+### Integration
+
+The tracker is created in `StackRunner.execute()` and attached to `ProcessorContext.tokenUsage`. Each Gemini provider accepts an optional `tokenUsage?: TokenUsageTracker` parameter and records usage after `generateContent()` calls. Processors pass `context.tokenUsage` to their providers.
 
 ---
 

@@ -85,7 +85,7 @@ export const geminiAudioAnalysisProcessor: Processor = {
           focusAreas,
           temperature: effectiveConfig.temperature,
           topP: effectiveConfig.topP,
-        }),
+        }, context.tokenUsage),
         { audioPath, model }
       );
 

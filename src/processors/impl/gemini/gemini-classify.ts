@@ -143,7 +143,8 @@ export const geminiClassifyProcessor: Processor = {
               batchMetadata,
               videoMetadata,
               { model: (options?.model as string) ?? config.geminiModel },
-              transcriptContext
+              transcriptContext,
+              context.tokenUsage
             ),
             { batchIdx, batchSize: batch.length, hasAudioContext }
           );

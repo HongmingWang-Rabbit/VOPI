@@ -10,6 +10,7 @@ import path from 'path';
 import { GoogleGenerativeAI, type GenerativeModel, type Part } from '@google/generative-ai';
 
 import { createChildLogger } from '../../utils/logger.js';
+import type { TokenUsageTracker } from '../../utils/token-usage.js';
 import { getConfig } from '../../config/index.js';
 import { getImageMimeType, limitReferenceFrames, MAX_REFERENCE_FRAMES } from '../../utils/image-utils.js';
 import { parseJsonResponse } from '../utils/gemini-utils.js';
@@ -150,7 +151,8 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
    */
   async filterImages(
     images: Array<{ id: string; path: string; variant: string }>,
-    options?: QualityFilterOptions
+    options?: QualityFilterOptions,
+    tokenUsage?: TokenUsageTracker
   ): Promise<QualityFilterResult> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
 
@@ -261,6 +263,15 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
 
       const response = result.response;
       const text = response.text();
+
+      if (tokenUsage && response.usageMetadata) {
+        tokenUsage.record(
+          DEFAULT_MODEL,
+          'gemini-quality-filter',
+          response.usageMetadata.promptTokenCount ?? 0,
+          response.usageMetadata.candidatesTokenCount ?? 0,
+        );
+      }
 
       logger.debug(`[QF] Raw response length=${text.length} preview=${text.substring(0, 300)}`);
 

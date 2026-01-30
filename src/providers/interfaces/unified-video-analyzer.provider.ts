@@ -10,6 +10,7 @@ import type {
   BackgroundRecommendations,
 } from '../../types/job.types.js';
 import type { ProductMetadata } from '../../types/product-metadata.types.js';
+import type { TokenUsageTracker } from '../../utils/token-usage.js';
 
 /**
  * Frame selection from unified video analysis
@@ -134,7 +135,8 @@ export interface UnifiedVideoAnalyzerProvider {
    */
   analyzeVideo(
     videoPath: string,
-    options?: UnifiedVideoAnalysisOptions
+    options?: UnifiedVideoAnalysisOptions,
+    tokenUsage?: TokenUsageTracker
   ): Promise<UnifiedVideoAnalysisResult>;
 
   /**

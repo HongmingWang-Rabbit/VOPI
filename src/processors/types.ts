@@ -18,6 +18,7 @@ import type { JobConfig, JobStatus, FrameScores, FrameObstructions, BackgroundRe
 import type { VideoMetadata } from '../types/job.types.js';
 import type { EffectiveConfig } from '../types/config.types.js';
 import type { PipelineTimer } from '../utils/timer.js';
+import type { TokenUsageTracker } from '../utils/token-usage.js';
 
 /**
  * Data path identifiers for processor requirements and outputs
@@ -558,6 +559,8 @@ export interface ProcessorContext {
   timer: PipelineTimer;
   /** Effective global config */
   effectiveConfig: EffectiveConfig;
+  /** Gemini token usage tracker */
+  tokenUsage?: TokenUsageTracker;
 }
 
 /**

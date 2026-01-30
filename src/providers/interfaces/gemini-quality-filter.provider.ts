@@ -5,6 +5,8 @@
  * and filter out unprofessional or duplicate images.
  */
 
+import type { TokenUsageTracker } from '../../utils/token-usage.js';
+
 /**
  * Quality evaluation result for a single image
  */
@@ -117,7 +119,8 @@ export interface GeminiQualityFilterProvider {
    */
   filterImages(
     images: Array<{ id: string; path: string; variant: string }>,
-    options?: QualityFilterOptions
+    options?: QualityFilterOptions,
+    tokenUsage?: TokenUsageTracker
   ): Promise<QualityFilterResult>;
 
   /**
