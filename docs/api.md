@@ -2407,6 +2407,56 @@ Disconnect a platform.
 
 ---
 
+## Shopify Compliance Webhooks
+
+Mandatory GDPR/compliance endpoints required by Shopify. These are **not authenticated via API key** — instead, each request is verified using the `X-Shopify-Hmac-Sha256` header (HMAC-SHA256 of the raw body, signed with `SHOPIFY_API_SECRET`).
+
+Since VOPI does not store customer data, all three return an acknowledgment.
+
+### POST /api/v1/webhooks/shopify/customers/data_request
+
+Called when a customer requests their data. Returns acknowledgment (no customer data stored).
+
+**Authentication**: Shopify HMAC signature
+
+**Response** `200 OK`
+```json
+{ "received": true }
+```
+
+**Response** `401 Unauthorized` (invalid or missing HMAC)
+```json
+{ "error": "Invalid HMAC signature" }
+```
+
+---
+
+### POST /api/v1/webhooks/shopify/customers/redact
+
+Called when a customer requests data erasure. Returns acknowledgment (no customer data stored).
+
+**Authentication**: Shopify HMAC signature
+
+**Response** `200 OK`
+```json
+{ "received": true }
+```
+
+---
+
+### POST /api/v1/webhooks/shopify/shop/redact
+
+Called when a shop uninstalls the app and requests data erasure. Returns acknowledgment.
+
+**Authentication**: Shopify HMAC signature
+
+**Response** `200 OK`
+```json
+{ "received": true }
+```
+
+---
+
 ### POST /api/v1/connections/:id/test
 
 Test a platform connection by verifying the stored access token.

@@ -16,6 +16,7 @@ import { authRoutes } from './routes/auth.routes.js';
 import { oauthRoutes } from './routes/oauth.routes.js';
 import { listingsRoutes } from './routes/listings.routes.js';
 import { creditsRoutes } from './routes/credits.routes.js';
+import { webhooksRoutes } from './routes/webhooks.routes.js';
 import { setupDefaultProviders } from './providers/setup.js';
 import { stateStoreService } from './services/state-store.service.js';
 
@@ -182,6 +183,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(jobsRoutes, { prefix: '/api/v1' });
   await app.register(framesRoutes, { prefix: '/api/v1' });
   await app.register(configRoutes, { prefix: '/api/v1' });
+  await app.register(webhooksRoutes, { prefix: '/api/v1' });
 
   return app;
 }

@@ -219,6 +219,23 @@ class ShopifyOAuthService {
   }
 
   /**
+   * Verify HMAC signature from Shopify webhook request body
+   */
+  verifyWebhookHmac(rawBody: Buffer, hmacHeader: string): boolean {
+    const { apiSecret } = this.getConfig();
+
+    const calculatedHmac = createHmac('sha256', apiSecret)
+      .update(rawBody)
+      .digest('base64');
+
+    if (hmacHeader.length !== calculatedHmac.length) {
+      return false;
+    }
+
+    return timingSafeEqual(Buffer.from(hmacHeader), Buffer.from(calculatedHmac));
+  }
+
+  /**
    * Check if Shopify OAuth is configured
    */
   isConfigured(): boolean {

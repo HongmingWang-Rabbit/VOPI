@@ -306,6 +306,9 @@ const AUTH_SKIP_PATHS = [
   // Public credit endpoints
   '/api/v1/credits/webhook', // Stripe webhook
   '/api/v1/credits/packs',   // List available credit packs
+
+  // Shopify mandatory compliance webhooks (verified by HMAC)
+  '/api/v1/webhooks/shopify/',
 ] as const;
 
 /**

@@ -129,7 +129,7 @@ See `src/processors/` for implementation details.
 - `src/providers/ecommerce/` - E-commerce platform providers (Shopify `productSet`, Amazon SP-API, eBay Inventory API)
 - `src/providers/utils/` - Shared provider utilities (Stability API, Gemini utils)
 - `src/services/oauth/` - Platform OAuth services (Shopify, Amazon, eBay)
-- `src/routes/` + `src/controllers/` - HTTP layer
+- `src/routes/` + `src/controllers/` - HTTP layer (includes `webhooks.routes.ts` for Shopify GDPR compliance)
 - `src/workers/` - BullMQ job processors
 - `src/db/schema.ts` - Drizzle ORM schema (api_keys, jobs, videos, frames, commercialImages, globalConfig)
 - `src/cli/` - CLI commands (API key management, pipeline testing)
