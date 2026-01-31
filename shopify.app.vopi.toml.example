@@ -1,6 +1,10 @@
-# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+# Shopify App Configuration (Production)
+# Copy this file to shopify.app.vopi.toml and fill in your actual values
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "5e59d1640731a5a170f264496e5724d9"
+# REPLACE WITH YOUR SHOPIFY APP CLIENT ID
+client_id = "your-shopify-client-id-here"
+
 name = "VOPI"
 application_url = "https://api.vopi.24rabbit.com"
 embedded = false

@@ -220,7 +220,10 @@ export class StackRunner {
       throw new Error(`Invalid stack: ${validation.error}`);
     }
 
-    // Initialize token usage tracker (reuse existing if present)
+    // Initialize token usage tracker.
+    // If context already has a tracker (e.g., from a parent stack or previous run),
+    // reuse it to accumulate usage across multiple executions. Otherwise create a new one.
+    // For per-execution tracking, ensure context.tokenUsage is undefined or call reset() beforehand.
     const tokenUsage = context.tokenUsage ?? new TokenUsageTracker();
     context.tokenUsage = tokenUsage;
 

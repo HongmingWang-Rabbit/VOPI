@@ -30,3 +30,7 @@ dist/
 
 # test
 coverage
+
+# Shopify app configuration (contains app-specific client IDs)
+shopify.app.toml
+shopify.app.*.toml
