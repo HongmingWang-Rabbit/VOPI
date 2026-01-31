@@ -41,13 +41,13 @@ describe('TokenUsageTracker - Integration Tests', () => {
       };
 
       // Simulate additional recording in the same context
-      context.tokenUsage.record('gemini-2.0-flash', 'current-run', 200, 80);
+      context.tokenUsage!.record('gemini-2.0-flash', 'current-run', 200, 80);
 
       // Should be the same tracker instance
       expect(context.tokenUsage).toBe(existingTracker);
 
       // Should have both recordings
-      const summary = context.tokenUsage.getSummary();
+      const summary = context.tokenUsage!.getSummary();
       expect(summary.entries).toHaveLength(2);
       expect(summary.entries.some(e => e.processor === 'previous-run')).toBe(true);
       expect(summary.entries.some(e => e.processor === 'current-run')).toBe(true);
@@ -131,6 +131,7 @@ describe('TokenUsageTracker - Integration Tests', () => {
       const tracker = new TokenUsageTracker();
 
       // TypeScript would prevent this, but JavaScript runtime might allow it
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tracker.record(undefined as any, 'test', 100, 50);
 
       const summary = tracker.getSummary();
@@ -141,6 +142,7 @@ describe('TokenUsageTracker - Integration Tests', () => {
     it('should handle recording with undefined/null processor gracefully', () => {
       const tracker = new TokenUsageTracker();
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tracker.record('gemini-2.0-flash', null as any, 100, 50);
 
       const summary = tracker.getSummary();
