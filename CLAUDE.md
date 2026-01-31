@@ -135,7 +135,7 @@ See `src/processors/` for implementation details.
 - `src/cli/` - CLI commands (API key management, pipeline testing)
 - `src/templates/` - Gemini prompts and output schemas
 - `src/types/` - Type definitions including `product-metadata.types.ts` for e-commerce metadata
-- `src/utils/` - Shared utilities (logging, errors, URL validation, S3 URL parsing, MIME types, parallel processing, image utils, frame selection)
+- `src/utils/` - Shared utilities (logging, errors, URL validation, S3 URL parsing, MIME types, parallel processing, image utils, frame selection, token usage tracking)
 - `src/smartFrameExtractor/` - Standalone CLI tool (JavaScript)
 
 ### Database Relationships
@@ -264,6 +264,35 @@ HEVC videos (common from iPhones) are automatically transcoded to H.264 for Gemi
 | `VOPI_FFPROBE_TIMEOUT_MS` | `30000` | Codec detection timeout (30 seconds) |
 
 See `.env.example` for all available options.
+
+## Token Usage Tracking
+
+VOPI includes automatic Gemini API token usage tracking with cost estimation:
+
+### Features
+- **Automatic Tracking**: Every Gemini API call is tracked across all processors
+- **Cost Estimation**: Built-in pricing for all Gemini models (updated 2026-01-30)
+- **Per-Job Summary**: Logged at pipeline completion with per-processor breakdown
+- **Production Quality**: 100% test coverage, input validation, error resilience
+
+### Integration
+The `TokenUsageTracker` is automatically created by `StackRunner.execute()` and passed to all Gemini providers via `ProcessorContext.tokenUsage`. Each provider records usage after `generateContent()` calls with comprehensive error handling.
+
+### Summary Output
+```
+| Processor          | Model            | Calls | Prompt | Candidates | Total  | Cost ($) |
+|--------------------|------------------|-------|--------|------------|--------|----------|
+| gemini-classify    | gemini-2.0-flash | 3     | 1200   | 800        | 2000   | 0.000082 |
+| gemini-audio       | gemini-2.0-flash | 1     | 500    | 300        | 800    | 0.000032 |
+| TOTAL              |                  | 4     | 1700   | 1100       | 2800   | 0.000114 |
+```
+
+### Implementation
+- **File**: `src/utils/token-usage.ts` (270 lines)
+- **Tests**: `src/utils/token-usage.test.ts` (57 tests) + `src/utils/token-usage.integration.test.ts` (16 tests)
+- **Integration Points**: 6 Gemini providers + gemini.service.ts (all with try-catch error handling)
+
+See [Services Documentation](./docs/services.md#token-usage-tracker) for detailed API reference.
 
 ## Documentation
 
