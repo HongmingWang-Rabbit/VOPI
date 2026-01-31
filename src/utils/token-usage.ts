@@ -237,13 +237,13 @@ export class TokenUsageTracker {
         Prompt: e.promptTokens,
         Candidates: e.candidatesTokens,
         Total: e.totalTokens,
-        'Cost ($)': cost !== null ? cost.toFixed(6) : 'N/A',
+        'Cost ($)': cost !== null && cost !== undefined ? cost.toFixed(6) : 'N/A',
       };
     });
 
     const totalCost = entries.reduce((sum, e) => {
       const cost = costsMap.get(e);
-      return cost !== null ? sum + cost : sum;
+      return cost !== null && cost !== undefined ? sum + cost : sum;
     }, 0);
 
     rows.push({
