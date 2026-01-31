@@ -3,12 +3,8 @@
  * Tests end-to-end token tracking through processor pipelines
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { TokenUsageTracker } from './token-usage.js';
-import type { ProcessorContext, PipelineData } from '../processors/types.js';
-import { StackRunner } from '../processors/runner.js';
-import type { PipelineTimer } from './timer.js';
-import type { EffectiveConfig } from '../types/config.types.js';
 
 // Mock logger
 vi.mock('./logger.js', () => ({
@@ -21,72 +17,37 @@ vi.mock('./logger.js', () => ({
 }));
 
 describe('TokenUsageTracker - Integration Tests', () => {
-  let runner: StackRunner;
-  let mockContext: ProcessorContext;
-  let mockTimer: PipelineTimer;
-  let mockConfig: EffectiveConfig;
-
-  beforeEach(() => {
-    runner = new StackRunner();
-
-    mockTimer = {
-      start: vi.fn(),
-      end: vi.fn(),
-      startStep: vi.fn(),
-      endStep: vi.fn(),
-      getSummary: vi.fn(() => ({ steps: [], totalMs: 0 })),
-      reset: vi.fn(),
-    };
-
-    mockConfig = {
-      geminiModel: 'gemini-2.0-flash',
-      geminiVideoModel: 'gemini-2.0-flash',
-      geminiImageModel: 'gemini-2.5-flash-image',
-      scoringMotionAlpha: 0.3,
-      commercialImageCount: 4,
-      commercialImageVariants: ['transparent', 'solid_white'],
-      pipelineStrategy: 'classic',
-    };
-
-    mockContext = {
-      jobId: 'test-job-123',
-      apiKeyId: 'test-key',
-      workDir: '/tmp/test',
-      callbackUrl: undefined,
-      callbackHeaders: undefined,
-      timer: mockTimer,
-      effectiveConfig: mockConfig,
-      // tokenUsage will be initialized by StackRunner
-    };
-  });
-
-  describe('StackRunner integration', () => {
+  describe('Context integration', () => {
     it('should initialize tokenUsage in context if not present', () => {
-      // The StackRunner initializes tokenUsage when executing a valid stack
-      // For this test, we'll just verify the tracker can be initialized
-      expect(mockContext.tokenUsage).toBeUndefined();
+      // Simulate ProcessorContext
+      const context: { tokenUsage?: TokenUsageTracker } = {};
+
+      expect(context.tokenUsage).toBeUndefined();
 
       const tracker = new TokenUsageTracker();
-      mockContext.tokenUsage = tracker;
+      context.tokenUsage = tracker;
 
-      expect(mockContext.tokenUsage).toBeInstanceOf(TokenUsageTracker);
-      expect(mockContext.tokenUsage).toBe(tracker);
+      expect(context.tokenUsage).toBeInstanceOf(TokenUsageTracker);
+      expect(context.tokenUsage).toBe(tracker);
     });
 
     it('should reuse existing tokenUsage in context', () => {
       // When a tracker already exists in context, it should be preserved
       const existingTracker = new TokenUsageTracker();
       existingTracker.record('gemini-2.0-flash', 'previous-run', 100, 50);
-      mockContext.tokenUsage = existingTracker;
+
+      const context: { tokenUsage?: TokenUsageTracker } = {
+        tokenUsage: existingTracker,
+      };
 
       // Simulate additional recording in the same context
-      mockContext.tokenUsage.record('gemini-2.0-flash', 'current-run', 200, 80);
+      context.tokenUsage.record('gemini-2.0-flash', 'current-run', 200, 80);
 
       // Should be the same tracker instance
-      expect(mockContext.tokenUsage).toBe(existingTracker);
+      expect(context.tokenUsage).toBe(existingTracker);
 
       // Should have both recordings
-      const summary = mockContext.tokenUsage.getSummary();
+      const summary = context.tokenUsage.getSummary();
       expect(summary.entries).toHaveLength(2);
       expect(summary.entries.some(e => e.processor === 'previous-run')).toBe(true);
       expect(summary.entries.some(e => e.processor === 'current-run')).toBe(true);
