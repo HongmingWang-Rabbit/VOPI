@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TokenUsageTracker, estimateCost, GEMINI_PRICING } from './token-usage.js';
+import { TokenUsageTracker, estimateCost } from './token-usage.js';
 
 // Mock logger
 vi.mock('./logger.js', () => ({
