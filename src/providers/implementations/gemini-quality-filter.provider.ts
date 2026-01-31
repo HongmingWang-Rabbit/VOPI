@@ -265,15 +265,19 @@ export class GeminiQualityFilterProviderImpl implements GeminiQualityFilterProvi
       const text = response.text();
 
       if (tokenUsage) {
-        if (response.usageMetadata) {
-          tokenUsage.record(
-            DEFAULT_MODEL,
-            'gemini-quality-filter',
-            response.usageMetadata.promptTokenCount ?? 0,
-            response.usageMetadata.candidatesTokenCount ?? 0,
-          );
-        } else {
-          logger.warn({ model: DEFAULT_MODEL }, 'Gemini response missing usageMetadata - token usage not tracked');
+        try {
+          if (response.usageMetadata) {
+            tokenUsage.record(
+              DEFAULT_MODEL,
+              'gemini-quality-filter',
+              response.usageMetadata.promptTokenCount ?? 0,
+              response.usageMetadata.candidatesTokenCount ?? 0,
+            );
+          } else {
+            logger.warn({ model: DEFAULT_MODEL }, 'Gemini response missing usageMetadata - token usage not tracked');
+          }
+        } catch (err) {
+          logger.error({ err, model: DEFAULT_MODEL }, 'Failed to record token usage');
         }
       }
 

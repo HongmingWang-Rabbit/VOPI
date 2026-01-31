@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TokenUsageTracker, estimateCost } from './token-usage.js';
+import { TokenUsageTracker, estimateCost, PRICING_LAST_UPDATED } from './token-usage.js';
 
 // Mock logger
 vi.mock('./logger.js', () => ({
@@ -105,6 +105,18 @@ describe('TokenUsageTracker', () => {
 
     it('should accept optional jobId', () => {
       tracker.record('gemini-2.0-flash', 'gemini-classify', 100, 50);
+      expect(() => tracker.logSummary('job-123')).not.toThrow();
+    });
+
+    it('should accept optional log level', () => {
+      tracker.record('gemini-2.0-flash', 'gemini-classify', 100, 50);
+      expect(() => tracker.logSummary('job-123', 'debug')).not.toThrow();
+      expect(() => tracker.logSummary('job-123', 'info')).not.toThrow();
+    });
+
+    it('should default to info log level', () => {
+      tracker.record('gemini-2.0-flash', 'gemini-classify', 100, 50);
+      // Should not throw when log level is omitted
       expect(() => tracker.logSummary('job-123')).not.toThrow();
     });
   });
@@ -535,5 +547,93 @@ describe('TokenUsageTracker - Edge Cases', () => {
       // Should create separate entries even with confusing naming
       expect(entries).toHaveLength(2);
     });
+  });
+
+  describe('input validation', () => {
+    it('should skip recording for NaN token counts', () => {
+      tracker.record('gemini-2.0-flash', 'test', NaN, 100);
+
+      const { entries } = tracker.getSummary();
+      expect(entries).toHaveLength(0); // Should be skipped
+    });
+
+    it('should skip recording for Infinity token counts', () => {
+      tracker.record('gemini-2.0-flash', 'test', Infinity, 100);
+
+      const { entries } = tracker.getSummary();
+      expect(entries).toHaveLength(0); // Should be skipped
+    });
+
+    it('should record negative token counts with debug log', () => {
+      tracker.record('gemini-2.0-flash', 'test', -100, 200);
+
+      const { entries } = tracker.getSummary();
+      expect(entries).toHaveLength(1);
+      expect(entries[0].promptTokens).toBe(-100);
+      expect(entries[0].totalTokens).toBe(100);
+    });
+  });
+});
+
+describe('estimateCost - edge cases', () => {
+  it('should return null for NaN token counts', () => {
+    const usage: import('./token-usage.js').TokenUsage = {
+      model: 'gemini-2.0-flash',
+      processor: 'test',
+      promptTokens: NaN,
+      candidatesTokens: 100,
+      totalTokens: NaN,
+      callCount: 1,
+    };
+
+    const cost = estimateCost(usage);
+    expect(cost).toBeNull();
+  });
+
+  it('should return null for Infinity token counts', () => {
+    const usage: import('./token-usage.js').TokenUsage = {
+      model: 'gemini-2.0-flash',
+      processor: 'test',
+      promptTokens: Infinity,
+      candidatesTokens: 100,
+      totalTokens: Infinity,
+      callCount: 1,
+    };
+
+    const cost = estimateCost(usage);
+    expect(cost).toBeNull();
+  });
+
+  it('should calculate cost for negative token counts with warning', () => {
+    const usage: import('./token-usage.js').TokenUsage = {
+      model: 'gemini-2.0-flash',
+      processor: 'test',
+      promptTokens: -100,
+      candidatesTokens: 200,
+      totalTokens: 100,
+      callCount: 1,
+    };
+
+    const cost = estimateCost(usage);
+    expect(cost).not.toBeNull();
+    // Should still calculate: (-100/1M * 0.00001875) + (200/1M * 0.000075)
+  });
+});
+
+describe('GEMINI_PRICING staleness check', () => {
+  it('should have been updated within the last 6 months', () => {
+    const lastUpdated = new Date(PRICING_LAST_UPDATED);
+    const now = new Date();
+    const sixMonthsAgo = new Date(now);
+    sixMonthsAgo.setMonth(now.getMonth() - 6);
+
+    expect(lastUpdated.getTime()).toBeGreaterThan(sixMonthsAgo.getTime());
+  });
+
+  it('should have valid date format (YYYY-MM-DD)', () => {
+    expect(PRICING_LAST_UPDATED).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const date = new Date(PRICING_LAST_UPDATED);
+    expect(date.toString()).not.toBe('Invalid Date');
   });
 });

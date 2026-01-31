@@ -45,7 +45,10 @@ export interface TokenUsageSummary {
 /**
  * Gemini pricing per model (USD per 1M tokens)
  * Source: https://ai.google.dev/pricing
- * Updated: 2026-01
+ * Last updated: 2026-01-30
+ *
+ * ⚠️ IMPORTANT: Review pricing quarterly or when Google announces changes.
+ * Pricing updates: https://ai.google.dev/pricing
  */
 export const GEMINI_PRICING: Record<string, { prompt: number; candidates: number }> = {
   'gemini-2.0-flash': { prompt: 0.00001875, candidates: 0.000075 },
@@ -57,6 +60,12 @@ export const GEMINI_PRICING: Record<string, { prompt: number; candidates: number
 };
 
 /**
+ * Date when GEMINI_PRICING was last updated (YYYY-MM-DD)
+ * Used for staleness detection in tests
+ */
+export const PRICING_LAST_UPDATED = '2026-01-30';
+
+/**
  * Calculate estimated cost for token usage
  * @param usage - Token usage entry
  * @returns Estimated cost in USD, or null if model pricing not available
@@ -64,6 +73,16 @@ export const GEMINI_PRICING: Record<string, { prompt: number; candidates: number
 export function estimateCost(usage: TokenUsage): number | null {
   const pricing = GEMINI_PRICING[usage.model];
   if (!pricing) return null;
+
+  // Validate token counts
+  if (!Number.isFinite(usage.promptTokens) || !Number.isFinite(usage.candidatesTokens)) {
+    logger.warn({ usage }, 'Invalid token counts in cost estimation (NaN or Infinity)');
+    return null;
+  }
+
+  if (usage.promptTokens < 0 || usage.candidatesTokens < 0) {
+    logger.warn({ usage }, 'Negative token counts in cost estimation');
+  }
 
   const promptCost = (usage.promptTokens / 1_000_000) * pricing.prompt;
   const candidatesCost = (usage.candidatesTokens / 1_000_000) * pricing.candidates;
@@ -97,7 +116,7 @@ export function estimateCost(usage: TokenUsage): number | null {
  * Call `reset()` to clear accumulated data between runs if needed.
  */
 export class TokenUsageTracker {
-  private entries: Map<string, TokenUsage> = new Map();
+  private readonly entries: Map<string, TokenUsage> = new Map();
 
   /**
    * Record token usage for a processor+model combination.
@@ -124,7 +143,25 @@ export class TokenUsageTracker {
    * ```
    */
   record(model: string, processor: string, promptTokens: number, candidatesTokens: number): void {
-    const key = `${processor}:${model}`;
+    // Validate inputs
+    if (!Number.isFinite(promptTokens) || !Number.isFinite(candidatesTokens)) {
+      logger.warn(
+        { model, processor, promptTokens, candidatesTokens },
+        'Invalid token counts (NaN or Infinity) - skipping record'
+      );
+      return;
+    }
+
+    if (promptTokens < 0 || candidatesTokens < 0) {
+      logger.debug(
+        { model, processor, promptTokens, candidatesTokens },
+        'Negative token counts detected (may be API correction)'
+      );
+    }
+
+    // Use null byte separator to prevent key collision edge cases
+    // (e.g., "proc:test" + "model" vs "proc" + "test:model")
+    const key = `${processor}\x00${model}`;
     const existing = this.entries.get(key);
     if (existing) {
       existing.promptTokens += promptTokens;
@@ -171,6 +208,7 @@ export class TokenUsageTracker {
    * plus estimated costs where pricing is available. No-op if no entries recorded.
    *
    * @param jobId - Optional job ID to include in log context
+   * @param logLevel - Log level to use (default: 'info')
    *
    * @example
    * ```typescript
@@ -183,12 +221,15 @@ export class TokenUsageTracker {
    * // | TOTAL              |                  | 4     | 1700   | 1100       | 2800   | 0.000114 |
    * ```
    */
-  logSummary(jobId?: string): void {
+  logSummary(jobId?: string, logLevel: 'info' | 'debug' = 'info'): void {
     const { entries, totals } = this.getSummary();
     if (entries.length === 0) return;
 
+    // Cache cost calculations for performance
+    const costsMap = new Map(entries.map(e => [e, estimateCost(e)]));
+
     const rows = entries.map((e) => {
-      const cost = estimateCost(e);
+      const cost = costsMap.get(e);
       return {
         Processor: e.processor,
         Model: e.model,
@@ -201,7 +242,7 @@ export class TokenUsageTracker {
     });
 
     const totalCost = entries.reduce((sum, e) => {
-      const cost = estimateCost(e);
+      const cost = costsMap.get(e);
       return cost !== null ? sum + cost : sum;
     }, 0);
 
@@ -215,7 +256,7 @@ export class TokenUsageTracker {
       'Cost ($)': totalCost > 0 ? totalCost.toFixed(6) : 'N/A',
     });
 
-    logger.info({ tokenUsage: rows, ...(jobId ? { jobId } : {}) }, 'Gemini Token Usage Summary');
+    logger[logLevel]({ tokenUsage: rows, ...(jobId ? { jobId } : {}) }, 'Gemini Token Usage Summary');
   }
 
   /**

@@ -185,15 +185,19 @@ export class GeminiImageGenerateProviderImpl implements GeminiImageGenerateProvi
       const response = result.response;
 
       if (tokenUsage) {
-        if (response.usageMetadata) {
-          tokenUsage.record(
-            DEFAULT_GEMINI_IMAGE_MODEL,
-            'gemini-image-generate',
-            response.usageMetadata.promptTokenCount ?? 0,
-            response.usageMetadata.candidatesTokenCount ?? 0,
-          );
-        } else {
-          logger.warn({ model: DEFAULT_GEMINI_IMAGE_MODEL }, 'Gemini response missing usageMetadata - token usage not tracked');
+        try {
+          if (response.usageMetadata) {
+            tokenUsage.record(
+              DEFAULT_GEMINI_IMAGE_MODEL,
+              'gemini-image-generate',
+              response.usageMetadata.promptTokenCount ?? 0,
+              response.usageMetadata.candidatesTokenCount ?? 0,
+            );
+          } else {
+            logger.warn({ model: DEFAULT_GEMINI_IMAGE_MODEL }, 'Gemini response missing usageMetadata - token usage not tracked');
+          }
+        } catch (err) {
+          logger.error({ err, model: DEFAULT_GEMINI_IMAGE_MODEL }, 'Failed to record token usage');
         }
       }
 

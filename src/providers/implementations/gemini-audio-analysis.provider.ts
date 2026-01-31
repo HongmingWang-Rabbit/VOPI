@@ -246,15 +246,19 @@ export class GeminiAudioAnalysisProvider implements AudioAnalysisProvider {
           const text = response.text();
 
           if (tokenUsage) {
-            if (response.usageMetadata) {
-              tokenUsage.record(
-                model,
-                'gemini-audio-analysis',
-                response.usageMetadata.promptTokenCount ?? 0,
-                response.usageMetadata.candidatesTokenCount ?? 0,
-              );
-            } else {
-              logger.warn({ model }, 'Gemini response missing usageMetadata - token usage not tracked');
+            try {
+              if (response.usageMetadata) {
+                tokenUsage.record(
+                  model,
+                  'gemini-audio-analysis',
+                  response.usageMetadata.promptTokenCount ?? 0,
+                  response.usageMetadata.candidatesTokenCount ?? 0,
+                );
+              } else {
+                logger.warn({ model }, 'Gemini response missing usageMetadata - token usage not tracked');
+              }
+            } catch (err) {
+              logger.error({ err, model }, 'Failed to record token usage');
             }
           }
 
